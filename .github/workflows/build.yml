@@ -198,12 +198,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libfontconfig1-dev
 
+      # Its default package list still includes "tools", which the SDK no
+      # longer has. android-36 for the Rust library (as built locally), 35
+      # for Gradle's compileSdk.
       - name: Set up SDK and Install Android Platform
         uses: android-actions/setup-android@v3
-
-      # android-36 for the Rust library (as built locally), 35 for Gradle's compileSdk.
-      - name: Install Android platforms
-        run: sdkmanager "platforms;android-36" "platforms;android-35"
+        with:
+          packages: "platform-tools platforms;android-36 platforms;android-35"
 
       - name: Build Rust library (arm64-v8a release)
         env:
