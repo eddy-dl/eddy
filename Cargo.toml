@@ -69,3 +69,9 @@ opt-level = "z"
 strip = "symbols"
 codegen-units = 1
 panic = "abort"
+
+# Slint 1.18.1's Android backend with the upstream fix that releases the GPU
+# surface when the window goes (see patches/i-slint-backend-android-activity).
+# Drop once a Slint release includes it.
+[patch.crates-io]
+i-slint-backend-android-activity = { path = "patches/i-slint-backend-android-activity" }
