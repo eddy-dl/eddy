@@ -1,0 +1,77 @@
+import { ThemeSettings } from "../themes/theme.slint";
+
+// Scroll-position indicator laid over the right edge of a list. It shows while
+// `shown` is true (fading in and out) and when there's something to scroll.
+// The whole track is draggable: grab the thumb to drag it, or touch elsewhere
+// on the track to jump there. The parent sets x (normally its right edge) and
+// binds `content_y` two-way to the Flickable's content-y.
+export component ScrollHint inherits Rectangle {
+    in-out property <length> content_y; // the Flickable's content-y (0 or negative)
+    in property <length> content_height;
+    in property <length> viewport_height;
+    in property <bool> shown;
+    // Space at the bottom the indicator should stay out of (e.g. a floating bar).
+    in property <length> bottom_inset: 0px;
+    // True while the track is held, so the owner can keep it shown.
+    out property <bool> dragging: drag_area.pressed;
+
+    private property <bool> scrollable: root.content_height > root.viewport_height + 1px;
+    private property <length> max_scroll: Math.max(0px, root.content_height - root.viewport_height);
+    private property <length> thumb_height: Math.max(32px, root.height * Math.min(1, root.viewport_height / Math.max(root.content_height, 1px)));
+    // How far the thumb can travel along the track.
+    private property <length> travel: Math.max(0px, root.height - root.thumb_height);
+    private property <float> scrolled_fraction: root.scrollable ? Math.clamp(-root.content_y / root.max_scroll, 0, 1) : 0;
+    private property <bool> visible_now: (root.shown || root.dragging) && root.scrollable;
+
+    // The track: a fixed strip along the right edge. Wider than the thumb so
+    // it's easy to grab with a finger.
+    y: 8px;
+    width: 24px;
+    height: Math.max(0px, root.viewport_height - root.bottom_inset - 16px);
+
+    thumb := Rectangle {
+        x: parent.width - self.width;
+        y: root.scrolled_fraction * root.travel;
+        width: root.dragging ? 6px : 4px;
+        height: root.thumb_height;
+        border-radius: self.width / 2;
+        background: root.dragging ? ThemeSettings.primary_accent : ThemeSettings.text_color.transparentize(55%);
+        opacity: root.visible_now ? 1 : 0;
+        animate opacity { duration: 300ms; easing: ease-out; }
+        animate width, background { duration: 120ms; }
+    }
+
+    // Covers the fixed track, not the moving thumb, so the finger position is
+    // measured against something that doesn't move while dragging. Only
+    // active while the thumb is showing, so it doesn't steal taps meant for
+    // the cards underneath.
+    drag_area := TouchArea {
+        enabled: root.visible_now;
+        // Where on the thumb the finger grabbed it.
+        property <length> grab_offset;
+
+        function scroll_to_finger() {
+            if (root.travel > 0px) {
+                let fraction = Math.clamp((self.mouse-y - self.grab_offset) / root.travel, 0, 1);
+                root.content_y = -fraction * root.max_scroll;
+            }
+        }
+
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down) {
+                let on_thumb = self.mouse-y >= thumb.y && self.mouse-y <= thumb.y + thumb.height;
+                // On the thumb: keep the grab point under the finger. Elsewhere
+                // on the track: centre the thumb on the finger and jump there.
+                self.grab_offset = on_thumb ? self.mouse-y - thumb.y : root.thumb_height / 2;
+                if (!on_thumb) {
+                    self.scroll_to_finger();
+                }
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                self.scroll_to_finger();
+            }
+        }
+    }
+}

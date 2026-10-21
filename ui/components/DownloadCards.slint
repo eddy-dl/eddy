@@ -1,0 +1,287 @@
+import { ThemeSettings } from "../themes/theme.slint";
+import { FileType, FileTypeIcon } from "FileTypeIcon.slint";
+import { HoldTouchArea } from "HoldHint.slint";
+import { LinkBackend } from "../globals/Links.slint";
+
+export { FileType }
+
+// Active and Queued items belong in the Downloading list (queued ones after
+// the active ones); Paused, Failed and Cancelled in Stopped; Completed in
+// Completed.
+export enum DownloadState { Active, Queued, Paused, Failed, Cancelled, Completed }
+
+// One download as the lists show it. Sizes, speed, time left and date arrive
+// already formatted from the Rust side.
+export struct DownloadItem {
+    id: int,
+    filename: string,
+    file_type: FileType,
+    state: DownloadState,
+    progress: float, // 0..1
+    downloaded: string, // e.g. "512 MB"
+    size: string, // total, e.g. "1.2 GB"
+    speed: string, // e.g. "2.4 MB/s"
+    eta: string, // e.g. "4m 48s"
+    date: string, // added / completed, e.g. "Oct 12"
+    url: string, // where it's downloaded from (a magnet or .torrent path for torrents)
+    backend: LinkBackend, // how it's downloaded
+    folder: string, // where it's saved, as shown to the user
+}
+
+component ProgressBar inherits Rectangle {
+    in property <float> progress;
+    in property <color> fill_color;
+
+    height: 4px;
+    border-radius: 2px;
+    background: ThemeSettings.text_color.transparentize(88%);
+
+    Rectangle {
+        x: 0;
+        width: parent.width * Math.clamp(root.progress, 0, 1);
+        height: parent.height;
+        border-radius: parent.border-radius;
+        background: root.fill_color;
+        animate width { duration: 300ms; easing: ease-out; }
+    }
+}
+
+component CardTitle inherits Text {
+    color: ThemeSettings.text_color;
+    font-size: 15px;
+    font-weight: 600;
+    overflow: elide;
+}
+
+component CardDetail inherits Text {
+    color: ThemeSettings.text_color.transparentize(35%);
+    font-size: 12px;
+    overflow: elide;
+}
+
+// Accent check badge that replaces the file icon while an item is selected.
+component SelectedBadge inherits Rectangle {
+    width: 44px;
+    height: 44px;
+    border-radius: 22px;
+    background: ThemeSettings.primary_accent;
+
+    Path {
+        width: 24px;
+        height: 24px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        stroke: #ffffff;
+        stroke-width: 2.5px;
+        stroke-line-cap: round;
+        stroke-line-join: round;
+        fill: transparent;
+        commands: "M6 12.5l4 4l8 -9";
+    }
+}
+
+// Shared card frame: surface background, file icon (or the check badge when
+// selected) on the left, content on the right. Tap fires `clicked`; a
+// press-and-hold fires `long_pressed` instead.
+component CardFrame inherits Rectangle {
+    in property <FileType> file_type;
+    in property <bool> muted: false;
+    in property <bool> selected: false;
+    callback clicked();
+    callback long_pressed();
+
+    border-radius: 12px;
+    background: root.selected ? ThemeSettings.primary_accent.transparentize(80%)
+        : (ta.pressed ? ThemeSettings.surface.darker(0.08) : ThemeSettings.surface);
+    border-width: root.selected ? 2px : 0px;
+    border-color: ThemeSettings.primary_accent;
+    animate background, border-width { duration: 150ms; }
+
+    ta := HoldTouchArea {
+        tapped => { root.clicked(); }
+        held => { root.long_pressed(); }
+    }
+
+    HorizontalLayout {
+        padding: 12px;
+        spacing: 12px;
+
+        // The icon and the check badge are both always there and crossfade,
+        // so toggling selection never rebuilds anything.
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 44px;
+                height: 44px;
+
+                FileTypeIcon {
+                    file_type: root.file_type;
+                    muted: root.muted;
+                    opacity: root.selected ? 0 : (root.muted ? 0.55 : 1.0);
+                    animate opacity { duration: 150ms; }
+                }
+                SelectedBadge {
+                    opacity: root.selected ? 1 : 0;
+                    transform-scale: root.selected ? 1.0 : 0.6;
+                    animate opacity, transform-scale { duration: 150ms; easing: ease-out-quad; }
+                }
+            }
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 6px;
+            @children
+        }
+    }
+}
+
+// Label above the first item of a group in a list (Queued in Downloading;
+// Paused / Failed / Cancelled in Stopped).
+export component ListHeader inherits Text {
+    font-size: 13px;
+    font-weight: 700;
+    color: ThemeSettings.primary_accent;
+    vertical-alignment: center;
+}
+
+// Active download: name and percentage, then amount / speed / time left, then progress.
+export component DownloadingCard inherits Rectangle {
+    in property <DownloadItem> item;
+    in property <bool> selected;
+    callback clicked();
+    callback long_pressed();
+
+    height: 84px;
+
+    CardFrame {
+        file_type: root.item.file_type;
+        selected: root.selected;
+        clicked => { root.clicked(); }
+        long_pressed => { root.long_pressed(); }
+
+        HorizontalLayout {
+            spacing: 8px;
+            CardTitle {
+                text: root.item.filename;
+                horizontal-stretch: 1;
+            }
+            Text {
+                text: Math.round(root.item.progress * 100) + "%";
+                color: ThemeSettings.primary_accent;
+                font-size: 13px;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            CardDetail {
+                text: @tr("{} of {}", root.item.downloaded, root.item.size);
+                horizontal-stretch: 1;
+            }
+            CardDetail {
+                text: root.item.speed + " · " + @tr("{} left", root.item.eta);
+                horizontal-alignment: right;
+            }
+        }
+
+        ProgressBar {
+            progress: root.item.progress;
+            fill_color: ThemeSettings.primary_accent;
+        }
+    }
+}
+
+// Waiting its turn in the Downloading list: name, then size and when it was added.
+export component QueuedCard inherits Rectangle {
+    in property <DownloadItem> item;
+    in property <bool> selected;
+    callback clicked();
+    callback long_pressed();
+
+    height: 68px;
+
+    CardFrame {
+        file_type: root.item.file_type;
+        selected: root.selected;
+        clicked => { root.clicked(); }
+        long_pressed => { root.long_pressed(); }
+
+        CardTitle {
+            text: root.item.filename;
+        }
+
+        CardDetail {
+            text: root.item.size + " · " + @tr("Added {}", root.item.date);
+        }
+    }
+}
+
+// Paused / failed / cancelled download: name, how far it got, and a progress
+// bar in the state's colour.
+export component StoppedCard inherits Rectangle {
+    in property <DownloadItem> item;
+    in property <bool> selected;
+    callback clicked();
+    callback long_pressed();
+
+    // Failed gets a red bar; the neutral states a grey one, fainter when cancelled.
+    private property <color> bar_color:
+        root.item.state == DownloadState.Failed ? #E5534B
+        : ThemeSettings.text_color.transparentize(root.item.state == DownloadState.Cancelled ? 70% : 45%);
+
+    height: 84px;
+
+    CardFrame {
+        file_type: root.item.file_type;
+        selected: root.selected;
+        // Paused can resume where it left off; failed/cancelled look inactive.
+        muted: root.item.state != DownloadState.Paused;
+        clicked => { root.clicked(); }
+        long_pressed => { root.long_pressed(); }
+
+        CardTitle {
+            text: root.item.filename;
+        }
+
+        // The state itself is shown by the list's group header.
+        CardDetail {
+            text: Math.round(root.item.progress * 100) + "% · " + @tr("{} of {}", root.item.downloaded, root.item.size);
+        }
+
+        ProgressBar {
+            progress: root.item.progress;
+            fill_color: root.bar_color;
+        }
+    }
+}
+
+// Finished download: name, then size and date.
+export component CompletedCard inherits Rectangle {
+    in property <DownloadItem> item;
+    in property <bool> selected;
+    callback clicked();
+    callback long_pressed();
+
+    height: 68px;
+
+    CardFrame {
+        file_type: root.item.file_type;
+        selected: root.selected;
+        clicked => { root.clicked(); }
+        long_pressed => { root.long_pressed(); }
+
+        CardTitle {
+            text: root.item.filename;
+        }
+
+        CardDetail {
+            text: root.item.size + " · " + root.item.date;
+        }
+    }
+}

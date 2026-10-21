@@ -1,0 +1,269 @@
+import { LineEdit } from "std-widgets.slint";
+import { ThemeSettings } from "../themes/theme.slint";
+import { ActionButton } from "Buttons.slint";
+import { SectionLabel } from "Chips.slint";
+import { FileTypeIcon } from "FileTypeIcon.slint";
+import { DownloadItem, DownloadState } from "DownloadCards.slint";
+import { LinkBackend } from "../globals/Links.slint";
+
+// Things that can be done to one download. `Rename` and `RefreshLink` come
+// with the new name or link.
+export enum ItemAction { Pause, Resume, Cancel, Delete, Rename, ChangeFolder, RefreshLink, Open }
+
+// One option: icon, label, and a detail line (the current value).
+component OptionRow inherits Rectangle {
+    in property <string> label;
+    in property <string> detail;
+    in property <string> commands; // 24-unit stroked path, like the nav icons
+    in property <bool> danger: false;
+    callback clicked();
+
+    height: root.detail.is-empty ? 48px : 56px;
+    border-radius: 8px;
+    background: ta.pressed ? ThemeSettings.text_color.transparentize(92%) : transparent;
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 16px;
+
+        VerticalLayout {
+            alignment: center;
+            Path {
+                width: 22px;
+                height: 22px;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                stroke: root.danger ? #E5534B : ThemeSettings.text_color.transparentize(20%);
+                stroke-width: 2px;
+                stroke-line-cap: round;
+                stroke-line-join: round;
+                fill: transparent;
+                commands: root.commands;
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            horizontal-stretch: 1;
+            Text {
+                text: root.label;
+                font-size: 14px;
+                font-weight: 600;
+                color: root.danger ? #E5534B : ThemeSettings.text_color;
+            }
+            if !root.detail.is-empty: Text {
+                text: root.detail;
+                font-size: 12px;
+                color: ThemeSettings.text_color.transparentize(35%);
+                overflow: elide;
+            }
+        }
+    }
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// Options for a download that isn't finished, shown when its card is tapped:
+// pause / resume, rename, move, refresh an expired link, copy the link,
+// cancel or delete. Rename and Refresh link edit in place.
+export component DownloadOptionsSheet inherits Rectangle {
+    in property <DownloadItem> item;
+    // Space the sheet may take; past this its contents scroll.
+    in property <length> available_height: 10000px;
+
+    // Delete is asked about first (the owner shows the confirmation).
+    callback action(ItemAction, string);
+    callback delete_requested();
+
+    // Called by the owner when the sheet opens, so it starts on the options.
+    public function reset() {
+        root.editing = 0;
+        root.copied = false;
+    }
+
+    // 0 = the options; 1 = renaming; 2 = pasting a new link.
+    private property <int> editing: 0;
+    private property <string> edit_text;
+    private property <bool> copied: false;
+
+    private property <bool> running: root.item.state == DownloadState.Active || root.item.state == DownloadState.Queued;
+    private property <bool> paused: root.item.state == DownloadState.Paused;
+    private property <bool> ended: root.item.state == DownloadState.Failed || root.item.state == DownloadState.Cancelled;
+    // aria2's plain HTTP/FTP downloads can carry on from a new link to the
+    // same file; torrents and yt-dlp can't.
+    private property <bool> can_refresh: root.item.backend == LinkBackend.Direct;
+
+    height: Math.min(layout.preferred-height, root.available_height);
+    background: ThemeSettings.surface;
+    border-radius: 16px;
+    clip: true;
+    drop-shadow-blur: 12px;
+    drop-shadow-color: #00000020;
+
+    // Keeps taps on the sheet's gaps from reaching the backdrop behind it.
+    TouchArea { }
+
+    // Copies the link: TextInput is the one thing with clipboard access.
+    link_copy := TextInput {
+        text: root.item.url;
+        width: 0px;
+        height: 0px;
+        visible: false;
+    }
+
+    Flickable {
+        content-height: layout.preferred-height;
+        interactive: layout.preferred-height > root.height;
+
+        layout := VerticalLayout {
+            padding: 16px;
+            spacing: 6px;
+
+            // What it is and how far it got.
+            HorizontalLayout {
+                spacing: 12px;
+                padding-bottom: 6px;
+
+                VerticalLayout {
+                    alignment: center;
+                    FileTypeIcon {
+                        file_type: root.item.file_type;
+                    }
+                }
+
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 4px;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: root.item.filename;
+                        font-size: 15px;
+                        font-weight: 600;
+                        color: ThemeSettings.text_color;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: (root.item.state == DownloadState.Active ? @tr("Downloading")
+                            : root.item.state == DownloadState.Queued ? @tr("Queued")
+                            : root.item.state == DownloadState.Paused ? @tr("Paused")
+                            : root.item.state == DownloadState.Failed ? @tr("Failed")
+                            : @tr("Cancelled"))
+                            + " · " + Math.round(root.item.progress * 100) + "% · "
+                            + @tr("{} of {}", root.item.downloaded, root.item.size);
+                        font-size: 12px;
+                        color: root.item.state == DownloadState.Failed ? #E5534B : ThemeSettings.text_color.transparentize(35%);
+                        overflow: elide;
+                    }
+                }
+            }
+
+            if root.editing == 0: ActionButton {
+                text: root.running ? @tr("Pause") : root.paused ? @tr("Resume") : @tr("Retry");
+                primary: true;
+                height: 48px;
+                clicked => { root.action(root.running ? ItemAction.Pause : ItemAction.Resume, ""); }
+            }
+
+            if root.editing == 0: VerticalLayout {
+                padding-top: 6px;
+
+                OptionRow {
+                    label: @tr("Rename");
+                    detail: root.item.filename;
+                    commands: "M4 20h4l10.5 -10.5a2.83 2.83 0 0 0 -4 -4L4 16v4M13.5 6.5l4 4";
+                    clicked => {
+                        root.edit_text = root.item.filename;
+                        root.editing = 1;
+                    }
+                }
+                OptionRow {
+                    label: @tr("Change folder");
+                    detail: root.item.folder;
+                    commands: "M3 7a2 2 0 0 1 2 -2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2H5a2 2 0 0 1 -2 -2z";
+                    clicked => { root.action(ItemAction.ChangeFolder, ""); }
+                }
+                if root.can_refresh: OptionRow {
+                    label: @tr("Refresh link");
+                    detail: @tr("Paste a new link if this one expired");
+                    commands: "M20 11a8 8 0 1 0 -2.3 5.7M20 5v6h-6";
+                    clicked => {
+                        root.edit_text = "";
+                        root.editing = 2;
+                    }
+                }
+                OptionRow {
+                    label: root.copied ? @tr("Link copied") : @tr("Copy link");
+                    detail: root.item.url;
+                    commands: "M10 13a5 5 0 0 0 7.54 .54l3 -3a5 5 0 0 0 -7.07 -7.07l-1.72 1.71M14 11a5 5 0 0 0 -7.54 -.54l-3 3a5 5 0 0 0 7.07 7.07l1.71 -1.71";
+                    clicked => {
+                        link_copy.select-all();
+                        link_copy.copy();
+                        root.copied = true;
+                    }
+                }
+                if root.running || root.paused: OptionRow {
+                    label: @tr("Cancel");
+                    danger: true;
+                    commands: "M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0M9 9l6 6M15 9l-6 6";
+                    clicked => { root.action(ItemAction.Cancel, ""); }
+                }
+                if root.paused || root.ended: OptionRow {
+                    label: @tr("Delete");
+                    danger: true;
+                    commands: "M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2 -2l1 -12M9 7V4h6v3";
+                    clicked => { root.delete_requested(); }
+                }
+            }
+
+            // Renaming, or pasting a new link.
+            if root.editing != 0: VerticalLayout {
+                spacing: 10px;
+                padding-top: 4px;
+
+                SectionLabel {
+                    text: root.editing == 1 ? @tr("File name") : @tr("New link");
+                }
+                if root.editing == 2: Text {
+                    text: @tr("A new link to the same file, e.g. after it expired. The download carries on from where it got to.");
+                    font-size: 12px;
+                    color: ThemeSettings.text_color.transparentize(35%);
+                    wrap: word-wrap;
+                }
+                edit := LineEdit {
+                    text <=> root.edit_text;
+                    font-size: 14px;
+                    input-method-hints: { capitalization: CapitalizationMode.none, auto-correct: false, auto-complete: false };
+                    placeholder-text: root.editing == 2 ? "https://" : "";
+                    init => { self.focus(); }
+                }
+                HorizontalLayout {
+                    padding-top: 4px;
+                    spacing: 12px;
+                    ActionButton {
+                        text: @tr("Back");
+                        horizontal-stretch: 1;
+                        height: 48px;
+                        clicked => { root.editing = 0; }
+                    }
+                    ActionButton {
+                        text: @tr("Save");
+                        primary: true;
+                        horizontal-stretch: 1;
+                        height: 48px;
+                        opacity: root.edit_text.is-empty ? 0.4 : 1.0;
+                        clicked => {
+                            if (!root.edit_text.is-empty) {
+                                root.action(root.editing == 1 ? ItemAction.Rename : ItemAction.RefreshLink, root.edit_text);
+                                root.editing = 0;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

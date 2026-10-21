@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="108" height="108">
+  <defs>
+    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4F8DF7" />
+      <stop offset="100%" stop-color="#2447C9" />
+    </linearGradient>
+  </defs>
+
+  <rect width="108" height="108" rx="24" fill="url(#bg-grad)" />
+
+  <!-- A download arrow dropping into an eddy -->
+  <g fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M54 24 V54 M43 43 L54 54 L65 43" stroke-width="6" />
+    <path d="M28 68 C36 62 44 74 54 68 C64 62 72 74 80 68" stroke-width="5.5" />
+    <path d="M37 80 C43 76 48 84 54 80 C60 76 65 84 71 80" stroke-width="5" opacity="0.55" />
+  </g>
+</svg>

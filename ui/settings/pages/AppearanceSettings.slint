@@ -1,0 +1,578 @@
+import {
+    ActionButton,
+    ColorCircle,
+    ModernSwitch,
+} from "../../components/Buttons.slint";
+import {
+    ThemeSettings,
+    ThemeMode,
+    AccentColor,
+} from "../../themes/theme.slint";
+import { AppSettings } from "../../globals/AppSettings.slint";
+import { StandardListView } from "std-widgets.slint";
+import { AnimatedPopup } from "../../components/AnimatedPopup.slint";
+import { RadioRow } from "../../components/RadioRow.slint";
+
+// Helper component for Vertical Accent Selection Rows
+component AccentRow inherits Rectangle {
+    in property <string> text;
+    in property <color> fill_color;
+    in property <bool> is_active;
+    in property <color> text_color;
+    callback clicked;
+
+    height: 56px;
+    border-radius: 8px;
+    background: ta.has-hover ? ThemeSettings.hover_color : transparent;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 16px;
+        alignment: start;
+        cross-axis-alignment: center;
+
+        ColorCircle {
+            fill_color: root.fill_color;
+            is_active: root.is_active;
+            clicked => { root.clicked(); }
+        }
+
+        Text {
+            text: root.text;
+            color: root.text_color;
+            font-size: 16px;
+            vertical-alignment: center;
+        }
+    }
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// Small accent label that groups the rows below it. Indented to line up
+// with the row titles, with extra room above to separate the groups.
+component SectionHeader inherits VerticalLayout {
+    in property <string> text;
+
+    padding-left: 8px;
+    padding-top: 24px;
+
+    Text {
+        text: root.text;
+        font-size: 13px;
+        font-weight: 700;
+        color: ThemeSettings.primary_accent;
+        animate color {
+            duration: 300ms;
+            easing: ease-in-out;
+        }
+    }
+}
+
+export component AppearanceSettings inherits Rectangle {
+    in property <color> text_color: #FFFFFF;
+
+    // Size of the whole window, so the popups' dimming covers all of it rather
+    // than only this page.
+    in property <length> window_width;
+    in property <length> window_height;
+
+    // True while one of this page's popups is showing.
+    out property <bool> popup_open: false;
+    private property <int> dismiss_requests: 0;
+
+    // Back/Escape pressed inside one of this page's popups.
+    callback popup_back_pressed();
+
+    // Animates out whichever popup is open (for Back/Escape).
+    public function dismiss_popup() {
+        root.dismiss_requests += 1;
+    }
+    // True once the content has scrolled away from the top; tints the settings header.
+    out property <bool> scrolled: scroller.content-y < 0;
+
+
+    // Prevents clicks from passing through to background elements
+    TouchArea { }
+
+    theme_popup := PopupWindow {
+        // Spans the whole window (popup coordinates are relative to this page).
+        x: -root.absolute-position.x;
+        y: -root.absolute-position.y;
+        width: root.window_width;
+        height: root.window_height;
+        // AnimatedPopup handles outside clicks so it can animate out first.
+        close-policy: PopupClosePolicy.no-auto-close;
+
+        AnimatedPopup {
+            card_width: Math.min(320px, root.width - 40px);
+            card_height: theme_layout.preferred-height;
+            dismiss_requests: root.dismiss_requests;
+            back_pressed => { root.popup_back_pressed(); }
+            closed => {
+                theme_popup.close();
+                root.popup_open = false;
+            }
+
+            theme_layout := VerticalLayout {
+                padding: 20px;
+                spacing: 8px;
+
+                Text {
+                    text: @tr("Theme Mode");
+                    font-size: 18px;
+                    font-weight: 700;
+                    color: root.text_color;
+                    //padding-bottom: 8px;
+                }
+
+                RadioRow {
+                    text: @tr("System Default");
+                    active: ThemeSettings.mode == ThemeMode.System;
+                    text_color: root.text_color;
+                    clicked => {
+                        ThemeSettings.mode = ThemeMode.System;
+                        AppSettings.preferences_changed();
+                        AppSettings.theme_changed();
+                    }
+                }
+
+                RadioRow {
+                    text: @tr("Light Mode");
+                    active: ThemeSettings.mode == ThemeMode.Light;
+                    text_color: root.text_color;
+                    clicked => {
+                        ThemeSettings.mode = ThemeMode.Light;
+                        AppSettings.preferences_changed();
+                        AppSettings.theme_changed();
+                    }
+                }
+
+                RadioRow {
+                    text: @tr("Dark Mode");
+                    active: ThemeSettings.mode == ThemeMode.Dark;
+                    text_color: root.text_color;
+                    clicked => {
+                        ThemeSettings.mode = ThemeMode.Dark;
+                        AppSettings.preferences_changed();
+                        AppSettings.theme_changed();
+                    }
+                }
+            }
+        }
+    }
+
+    accent_popup := PopupWindow {
+        // Spans the whole window (popup coordinates are relative to this page).
+        x: -root.absolute-position.x;
+        y: -root.absolute-position.y;
+        width: root.window_width;
+        height: root.window_height;
+        // AnimatedPopup handles outside clicks so it can animate out first.
+        close-policy: PopupClosePolicy.no-auto-close;
+
+        AnimatedPopup {
+            card_width: Math.min(320px, root.width - 40px);
+            card_height: Math.min(root.height - 80px, accent_layout.preferred-height);
+            dismiss_requests: root.dismiss_requests;
+            back_pressed => { root.popup_back_pressed(); }
+            closed => {
+                accent_popup.close();
+                root.popup_open = false;
+            }
+
+            accent_layout := VerticalLayout {
+                padding: 20px;
+                spacing: 16px;
+
+                Text {
+                    text: @tr("Accent Color");
+                    font-size: 18px;
+                    font-weight: 700;
+                    color: root.text_color;
+                }
+
+                Flickable {
+                    vertical-stretch: 1;
+                    content-height: accent_v_layout.preferred-height;
+
+                    accent_v_layout := VerticalLayout {
+                        spacing: 4px;
+
+                        AccentRow {
+                            text: @tr("Muted Red");
+                            fill_color: #e07a5f;
+                            text_color: root.text_color;
+                            is_active: ThemeSettings.accent == AccentColor.MutedRed;
+                            clicked => { ThemeSettings.accent = AccentColor.MutedRed; AppSettings.preferences_changed(); }
+                        }
+
+                        AccentRow {
+                            text: @tr("Green");
+                            fill_color: #81b29a;
+                            text_color: root.text_color;
+                            is_active: ThemeSettings.accent == AccentColor.Green;
+                            clicked => { ThemeSettings.accent = AccentColor.Green; AppSettings.preferences_changed(); }
+                        }
+
+                        AccentRow {
+                            text: @tr("Pink");
+                            fill_color: #f28482;
+                            text_color: root.text_color;
+                            is_active: ThemeSettings.accent == AccentColor.Pink;
+                            clicked => { ThemeSettings.accent = AccentColor.Pink; AppSettings.preferences_changed(); }
+                        }
+
+                        AccentRow {
+                            text: @tr("Purple");
+                            fill_color: #9c89b8;
+                            text_color: root.text_color;
+                            is_active: ThemeSettings.accent == AccentColor.Purple;
+                            clicked => { ThemeSettings.accent = AccentColor.Purple; AppSettings.preferences_changed(); }
+                        }
+
+                        AccentRow {
+                            text: @tr("Yellow");
+                            fill_color: #f2cc8f;
+                            text_color: root.text_color;
+                            is_active: ThemeSettings.accent == AccentColor.Yellow;
+                            clicked => { ThemeSettings.accent = AccentColor.Yellow; AppSettings.preferences_changed(); }
+                        }
+
+                        AccentRow {
+                            text: @tr("Orange");
+                            fill_color: #f4a261;
+                            text_color: root.text_color;
+                            is_active: ThemeSettings.accent == AccentColor.Orange;
+                            clicked => { ThemeSettings.accent = AccentColor.Orange; AppSettings.preferences_changed(); }
+                        }
+
+                        AccentRow {
+                            text: @tr("Blue");
+                            fill_color: #3d5a80;
+                            text_color: root.text_color;
+                            is_active: ThemeSettings.accent == AccentColor.Blue;
+                            clicked => { ThemeSettings.accent = AccentColor.Blue; AppSettings.preferences_changed(); }
+                        }
+
+                        AccentRow {
+                            text: @tr("Greyscale");
+                            fill_color: #9e9e9e;
+                            text_color: root.text_color;
+                            is_active: ThemeSettings.accent == AccentColor.Greyscale;
+                            clicked => { ThemeSettings.accent = AccentColor.Greyscale; AppSettings.preferences_changed(); }
+                        }
+
+                        Rectangle {
+                            height: 56px;
+                            border-radius: 8px;
+                            background: sys_ta.has-hover ? ThemeSettings.hover_color : transparent;
+
+                            HorizontalLayout {
+                                padding-left: 12px;
+                                padding-right: 12px;
+                                spacing: 16px;
+                                alignment: start;
+                                cross-axis-alignment: center;
+
+                                accent_circle := Rectangle {
+                                    width: 48px;
+                                    height: 48px;
+                                    border-radius: 24px;
+                                    background: ThemeSettings.system_accent;
+                                    border-color: ThemeSettings.text_color;
+
+                                    border-width: 0px;
+
+                                    Text {
+                                        text: "S";
+                                        color: #ffffff;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                Text {
+                                    text: @tr("System Accent");
+                                    color: root.text_color;
+                                    font-size: 16px;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            sys_ta := TouchArea {
+                                clicked => {
+                                    ThemeSettings.accent = AccentColor.System;
+                                    AppSettings.preferences_changed();
+                                }
+                            }
+
+                            states [
+                                pulse-state when sys_ta.pressed: {
+                                    accent_circle.border-width: 6px;
+                                    in {
+                                        animate accent_circle.border-width {
+                                            duration: 100ms;
+                                            easing: ease-out;
+                                        }
+                                    }
+                                    out {
+                                        animate accent_circle.border-width {
+                                            duration: 250ms;
+                                            easing: ease-in-out;
+                                        }
+                                    }
+                                }
+                                active-state when ThemeSettings.accent == AccentColor.System: {
+                                    accent_circle.border-width: 4px;
+                                    in {
+                                        animate accent_circle.border-width {
+                                            duration: 150ms;
+                                            easing: ease-in-out;
+                                        }
+                                    }
+                                    out {
+                                        animate accent_circle.border-width {
+                                            duration: 150ms;
+                                            easing: ease-in-out;
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    scroller := Flickable {
+        width: 100%;
+        height: 100%;
+        content-height: layout.preferred-height;
+
+        layout := VerticalLayout {
+            spacing: 8px;
+            alignment: start;
+            padding-left: 12px;
+            padding-right: 12px;
+            padding-top: 8px;
+
+            SectionHeader { text: @tr("Color"); }
+
+            Rectangle {
+                border-radius: 8px;
+                background: theme_ta.has-hover ? ThemeSettings.hover_color : transparent;
+
+                theme_ta := TouchArea {
+                    clicked => {
+                        root.popup_open = true;
+                        theme_popup.show();
+                    }
+                }
+
+                HorizontalLayout {
+                    padding: 8px;
+                    alignment: space-between;
+                    spacing: 16px;
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        horizontal-stretch: 1;
+
+                        Text {
+                            text: @tr("Theme Mode");
+                            font-size: 18px;
+                            font-weight: 600;
+                            color: root.text_color;
+                            animate color {
+                                duration: 300ms;
+                                easing: ease-in-out;
+                            }
+                        }
+
+                        Text {
+                            text: ThemeSettings.mode == ThemeMode.System ? @tr("System Default") :
+                                (ThemeSettings.mode == ThemeMode.Light ? @tr("Light Mode") : @tr("Dark Mode"));
+                            font-size: 13px;
+                            color: ThemeSettings.primary_accent.transparentize(30%);
+                            overflow: elide;
+                            animate color {
+                                duration: 300ms;
+                                easing: ease-in-out;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if ThemeSettings.is_dark: Rectangle {
+                border-radius: 8px;
+                background: amoled_ta.has-hover ? ThemeSettings.hover_color : transparent;
+
+                amoled_ta := TouchArea {
+                    clicked => {
+                        ThemeSettings.amoled_dark = !ThemeSettings.amoled_dark;
+                        AppSettings.preferences_changed();
+                    }
+                }
+
+                HorizontalLayout {
+                    padding: 8px;
+                    alignment: space-between;
+                    cross-axis-alignment: center;
+                    spacing: 16px;
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        horizontal-stretch: 1;
+
+                        Text {
+                            text: @tr("AMOLED Pure Black");
+                            font-size: 18px;
+                            font-weight: 600;
+                            color: root.text_color;
+                            animate color {
+                                duration: 300ms;
+                                easing: ease-in-out;
+                            }
+                        }
+
+                        Text {
+                            text: @tr("Use true black backgrounds for OLED displays");
+                            font-size: 13px;
+                            color: ThemeSettings.text_color.transparentize(40%);
+                            overflow: elide;
+                            animate color {
+                                duration: 300ms;
+                                easing: ease-in-out;
+                            }
+                        }
+                    }
+
+                    ModernSwitch {
+                        checked <=> ThemeSettings.amoled_dark;
+                        toggled => { AppSettings.preferences_changed(); }
+                    }
+                }
+            }
+
+            Rectangle {
+                border-radius: 8px;
+                background: accent_ta.has-hover ? ThemeSettings.hover_color : transparent;
+
+                accent_ta := TouchArea {
+                    clicked => {
+                        root.popup_open = true;
+                        accent_popup.show();
+                    }
+                }
+
+                HorizontalLayout {
+                    padding: 8px;
+                    alignment: space-between;
+                    cross-axis-alignment: center;
+                    spacing: 16px;
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        horizontal-stretch: 1;
+
+                        Text {
+                            text: @tr("Accent Color");
+                            font-size: 18px;
+                            font-weight: 600;
+                            color: root.text_color;
+                            animate color {
+                                duration: 300ms;
+                                easing: ease-in-out;
+                            }
+                        }
+
+                        Text {
+                            text: @tr("Tap to pick a primary color");
+                            font-size: 13px;
+                            color: ThemeSettings.primary_accent.transparentize(30%);
+                            overflow: elide;
+                            animate color {
+                                duration: 300ms;
+                                easing: ease-in-out;
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        width: 24px;
+                        height: 24px;
+                        border-radius: 12px;
+                        background: ThemeSettings.primary_accent;
+                        animate background {
+                            duration: 300ms;
+                            easing: ease-in-out;
+                        }
+                    }
+                }
+            }
+
+            SectionHeader { text: @tr("Navigation"); }
+
+            Rectangle {
+                border-radius: 8px;
+                background: top_nav_ta.has-hover ? ThemeSettings.hover_color : transparent;
+
+                top_nav_ta := TouchArea {
+                    clicked => {
+                        AppSettings.top_navigation_bar = !AppSettings.top_navigation_bar;
+                        AppSettings.preferences_changed();
+                    }
+                }
+
+                HorizontalLayout {
+                    padding: 8px;
+                    alignment: space-between;
+                    cross-axis-alignment: center;
+                    spacing: 16px;
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        horizontal-stretch: 1;
+
+                        Text {
+                            text: @tr("Top Navigation Bar");
+                            font-size: 18px;
+                            font-weight: 600;
+                            color: root.text_color;
+                            animate color {
+                                duration: 300ms;
+                                easing: ease-in-out;
+                            }
+                        }
+
+                        Text {
+                            text: @tr("Show the tabs under the header instead of at the bottom");
+                            font-size: 13px;
+                            color: ThemeSettings.text_color.transparentize(40%);
+                            wrap: word-wrap;
+                            animate color {
+                                duration: 300ms;
+                                easing: ease-in-out;
+                            }
+                        }
+                    }
+
+                    ModernSwitch {
+                        checked <=> AppSettings.top_navigation_bar;
+                        toggled => { AppSettings.preferences_changed(); }
+                    }
+                }
+            }
+        }
+    }
+}

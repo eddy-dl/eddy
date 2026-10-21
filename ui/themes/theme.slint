@@ -1,0 +1,49 @@
+import { Palette, StyleMetrics } from "std-widgets.slint";
+export enum ThemeMode { System, Light, Dark }
+export enum AccentColor { MutedRed, Green, Pink, Purple, Yellow, Orange, Blue, Greyscale, System }
+
+export global ThemeSettings {
+    in-out property <ThemeMode> mode: ThemeMode.System;
+    in-out property <bool> amoled_dark: false;
+    in-out property <AccentColor> accent: AccentColor.MutedRed;
+
+    in-out property <bool> system_is_dark: false;
+    in-out property <color> system_accent: Palette.accent-background;
+
+    out property <bool> is_dark: mode == ThemeMode.Dark || (mode == ThemeMode.System && system_is_dark);
+
+    property <color> primary_base: 
+        accent == AccentColor.MutedRed ? #e07a5f :
+        accent == AccentColor.Green ? #81b29a :
+        accent == AccentColor.Pink ? #f28482 :
+        accent == AccentColor.Purple ? #9c89b8 :
+        accent == AccentColor.Yellow ? #f2cc8f :
+        accent == AccentColor.Orange ? #f4a261 :
+        accent == AccentColor.Blue ? #3d5a80 :
+        accent == AccentColor.Greyscale ? #9e9e9e :
+        accent == AccentColor.System ? system_accent : #e07a5f;
+
+    // Neutral base palette
+    property <color> neutral_dark_bg: #121214;
+    property <color> neutral_light_bg: #f8f9fa;
+    property <color> neutral_dark_surface: #1e1e21;
+    property <color> neutral_light_surface: #F2F2F2;
+
+    out property <color> background: is_dark ?
+        (amoled_dark ? #000000 : neutral_dark_bg.mix(primary_base, 92%)) :
+        neutral_light_bg.mix(primary_base, 98%);
+
+    out property <color> surface: is_dark ?
+        (amoled_dark ? #111111 : neutral_dark_surface.mix(primary_base, 88%)) :
+        neutral_light_surface.mix(primary_base, 95%);
+
+    out property <color> text_color: is_dark ? #ffffff : #111111;
+
+    out property <color> primary_accent: primary_base;
+
+    out property <color> secondary_muted_bg: is_dark ?
+        (amoled_dark ? #18181a : neutral_dark_surface.mix(primary_base, 90%)) :
+        neutral_light_surface.mix(primary_base, 94%);
+    out property <color> secondary_muted_text: primary_base;
+    out property <color> hover_color: is_dark ? #ffffff14 : #00000014;
+}

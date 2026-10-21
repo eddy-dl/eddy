@@ -1,0 +1,1214 @@
+import {
+    VerticalBox,
+    HorizontalBox,
+    ListView,
+    Palette,
+    ScrollView,
+} from "std-widgets.slint";
+
+import { BottomNavButton, TopNavBar, TabSwipeArea } from "components/NavBar.slint";
+import { SettingsPage } from "settings/SettingsPage.slint";
+import { TapToDismissArea } from "components/AnimatedPopup.slint";
+import { ListOptionsSheet } from "components/ListOptionsSheet.slint";
+import { AddLinksSheet } from "components/AddLinksSheet.slint";
+import { LinkPreviewSheet } from "components/LinkPreviewSheet.slint";
+import { SelectionAction, SelectionActionBar, DeleteConfirmSheet } from "components/SelectionActions.slint";
+import { DownloadOptionsSheet, ItemAction } from "components/DownloadOptionsSheet.slint";
+import { Links, LinkBackend } from "globals/Links.slint";
+import { ScrollHint } from "components/ScrollHint.slint";
+import { TabSwipe } from "globals/TabSwipe.slint";
+import { DownloadItem, DownloadState, FileType, DownloadingCard, QueuedCard, ListHeader, StoppedCard, CompletedCard } from "components/DownloadCards.slint";
+import { ThemeSettings, ThemeMode, AccentColor } from "themes/theme.slint";
+import { AppSettings } from "globals/AppSettings.slint";
+
+export { AccentColor, ThemeMode, ThemeSettings }from "themes/theme.slint";
+export { AppSettings, HelperPackage }from "globals/AppSettings.slint";
+export { ListOptions, SortKey, FileFilter, TabListOptions } from "globals/ListOptions.slint";
+
+export { DownloadItem, DownloadState, FileType } from "components/DownloadCards.slint";
+export { SelectionAction } from "components/SelectionActions.slint";
+export { ItemAction } from "components/DownloadOptionsSheet.slint";
+
+// The Android share popup's window. Exported before DownloaderApp so the
+// viewer (which shows the last component) still opens the main app.
+export { PreviewApp } from "popup.slint";
+export { Links, LinkBackend, LinkFormat, PendingLink, ProbeState, QuickBackend, TorrentFile } from "globals/Links.slint";
+
+export component DownloaderApp inherits Window {
+    title: "Eddy";
+    background: ThemeSettings.background;
+    preferred-width: 420px;
+    preferred-height: 850px;
+
+    in-out property <int> active_tab: 0;
+    in-out property <bool> is_landscape: false;
+    in-out property <bool> is_mobile_landscape: false;
+    in-out property <bool> menu_open: false;
+    in-out property <bool> fab_open: false;
+    // Sort & filter sheet for the active tab, opened by tapping its nav button again.
+    in-out property <bool> options_open: false;
+    // Add links sheet (from the FAB menu). Its text is kept when it's
+    // dismissed, so a stray tap outside doesn't lose a long paste.
+    in-out property <bool> add_links_open: false;
+    property <string> add_links_text;
+    // Preview of the first pending link, from the pending-links button.
+    in-out property <bool> preview_open: false;
+    // The last pending link was dealt with: nothing left to preview.
+    private property <int> pending_count: Links.pending.length;
+    changed pending_count => {
+        if (self.pending_count == 0 && self.preview_open) {
+            root.close_sheets();
+        }
+    }
+    // Closing a sheet with a text field in it would leave focus nowhere,
+    // and Back would then close the app; hand it back to back_scope.
+    function close_sheets() {
+        root.add_links_open = false;
+        root.preview_open = false;
+        back_scope.focus();
+    }
+
+    // PLACEHOLDER: sample items covering every file type so the cards can be
+    // designed before the Rust side fills these lists. Reset each to [] (or
+    // just set them from Rust) once real downloads are wired up.
+    // Downloading holds the active items followed by the queued ones.
+    in property <[DownloadItem]> downloading_items: [
+        { id: 1, filename: "Big.Buck.Bunny.2008.1080p.mkv", file_type: FileType.Video, state: DownloadState.Active, progress: 0.42, downloaded: "512 MB", size: "1.2 GB", speed: "2.4 MB/s", eta: "4m 48s", date: "", url: "https://example.com/files/Big.Buck.Bunny.2008.1080p.mkv", backend: LinkBackend.Direct, folder: "Download/Eddy" },
+        { id: 2, filename: "lofi-beats-vol3.flac", file_type: FileType.Audio, state: DownloadState.Active, progress: 0.78, downloaded: "41 MB", size: "52 MB", speed: "860 KB/s", eta: "13s", date: "", url: "https://example.com/files/lofi-beats-vol3.flac", backend: LinkBackend.Direct, folder: "Download/Eddy" },
+        { id: 3, filename: "IMG_20261012_184522.jpg", file_type: FileType.Image, state: DownloadState.Active, progress: 0.9, downloaded: "4.3 MB", size: "4.8 MB", speed: "1.1 MB/s", eta: "1s", date: "", url: "https://example.com/files/IMG_20261012_184522.jpg", backend: LinkBackend.Direct, folder: "Download/Eddy" },
+        { id: 4, filename: "Annual_Report_2025.pdf", file_type: FileType.Document, state: DownloadState.Active, progress: 0.25, downloaded: "0.9 MB", size: "3.4 MB", speed: "320 KB/s", eta: "8s", date: "", url: "https://example.com/files/Annual_Report_2025.pdf", backend: LinkBackend.Direct, folder: "Download/Eddy" },
+        { id: 5, filename: "wallpapers-pack.zip", file_type: FileType.Archive, state: DownloadState.Active, progress: 0.61, downloaded: "525 MB", size: "860 MB", speed: "5.2 MB/s", eta: "1m 4s", date: "", url: "https://example.com/files/wallpapers-pack.zip", backend: LinkBackend.Direct, folder: "Download/Eddy" },
+        { id: 6, filename: "ubuntu-24.04-desktop-amd64.iso", file_type: FileType.DiskImage, state: DownloadState.Active, progress: 0.15, downloaded: "870 MB", size: "5.8 GB", speed: "6.1 MB/s", eta: "13m 30s", date: "", url: "https://example.com/files/ubuntu-24.04-desktop-amd64.iso", backend: LinkBackend.Direct, folder: "Download/Eddy" },
+        { id: 7, filename: "Sintel (2010) [4K]", file_type: FileType.Torrent, state: DownloadState.Queued, progress: 0.0, downloaded: "0 B", size: "4.2 GB", speed: "", eta: "", date: "Oct 20", url: "magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10&dn=Sintel", backend: LinkBackend.Torrent, folder: "Download/Eddy" },
+        { id: 8, filename: "eddy-setup-0.2.0.exe", file_type: FileType.Program, state: DownloadState.Queued, progress: 0.0, downloaded: "0 B", size: "94 MB", speed: "", eta: "", date: "Oct 20", url: "https://example.com/files/eddy-setup-0.2.0.exe", backend: LinkBackend.Direct, folder: "Download/Eddy" },
+        { id: 9, filename: "firmware-v3.bin", file_type: FileType.Other, state: DownloadState.Queued, progress: 0.0, downloaded: "0 B", size: "16 MB", speed: "", eta: "", date: "Oct 19", url: "https://example.com/files/firmware-v3.bin", backend: LinkBackend.Direct, folder: "Download/Eddy" },
+    ];
+    in property <[DownloadItem]> stopped_items: [
+        { id: 11, filename: "Big.Buck.Bunny.2008.1080p.mkv", file_type: FileType.Video, state: DownloadState.Paused, progress: 0.63, downloaded: "0.8 GB", size: "1.2 GB", speed: "", eta: "", date: "", url: "https://example.com/files/Big.Buck.Bunny.2008.1080p.mkv", backend: LinkBackend.Direct, folder: "Download/Eddy" },
+        { id: 14, filename: "Annual_Report_2025.pdf", file_type: FileType.Document, state: DownloadState.Paused, progress: 0.48, downloaded: "1.6 MB", size: "3.4 MB", speed: "", eta: "", date: "", url: "https://example.com/files/Annual_Report_2025.pdf", backend: LinkBackend.Direct, folder: "Download/Eddy" },
+        { id: 17, filename: "Sintel (2010) [4K]", file_type: FileType.Torrent, state: DownloadState.Paused, progress: 0.33, downloaded: "1.4 GB", size: "4.2 GB", speed: "", eta: "", date: "", url: "magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10&dn=Sintel", backend: LinkBackend.Torrent, folder: "Download/Eddy" },
+        { id: 12, filename: "lofi-beats-vol3.flac", file_type: FileType.Audio, state: DownloadState.Failed, progress: 0.27, downloaded: "14.0 MB", size: "52 MB", speed: "", eta: "", date: "", url: "https://example.com/files/lofi-beats-vol3.flac", backend: LinkBackend.Direct, folder: "Download/Eddy" },
+        { id: 15, filename: "wallpapers-pack.zip", file_type: FileType.Archive, state: DownloadState.Failed, progress: 0.81, downloaded: "696.6 MB", size: "860 MB", speed: "", eta: "", date: "", url: "https://example.com/files/wallpapers-pack.zip", backend: LinkBackend.Direct, folder: "Download/Eddy" },
+        { id: 18, filename: "eddy-setup-0.2.0.exe", file_type: FileType.Program, state: DownloadState.Failed, progress: 0.05, downloaded: "4.7 MB", size: "94 MB", speed: "", eta: "", date: "", url: "https://example.com/files/eddy-setup-0.2.0.exe", backend: LinkBackend.Direct, folder: "Download/Eddy" },
+        { id: 13, filename: "IMG_20261012_184522.jpg", file_type: FileType.Image, state: DownloadState.Cancelled, progress: 0.4, downloaded: "1.9 MB", size: "4.8 MB", speed: "", eta: "", date: "", url: "https://example.com/files/IMG_20261012_184522.jpg", backend: LinkBackend.Direct, folder: "Download/Eddy" },
+        { id: 16, filename: "ubuntu-24.04-desktop-amd64.iso", file_type: FileType.DiskImage, state: DownloadState.Cancelled, progress: 0.12, downloaded: "0.7 GB", size: "5.8 GB", speed: "", eta: "", date: "", url: "https://example.com/files/ubuntu-24.04-desktop-amd64.iso", backend: LinkBackend.Direct, folder: "Download/Eddy" },
+        { id: 19, filename: "firmware-v3.bin", file_type: FileType.Other, state: DownloadState.Cancelled, progress: 0.7, downloaded: "11.2 MB", size: "16 MB", speed: "", eta: "", date: "", url: "https://example.com/files/firmware-v3.bin", backend: LinkBackend.Direct, folder: "Download/Eddy" },
+    ];
+    in property <[DownloadItem]> completed_items: [
+        { id: 21, filename: "Big.Buck.Bunny.2008.1080p.mkv", file_type: FileType.Video, state: DownloadState.Completed, progress: 1.0, downloaded: "1.2 GB", size: "1.2 GB", speed: "", eta: "", date: "Oct 18", url: "https://example.com/files/Big.Buck.Bunny.2008.1080p.mkv", backend: LinkBackend.Direct, folder: "Download/Eddy" },
+        { id: 22, filename: "lofi-beats-vol3.flac", file_type: FileType.Audio, state: DownloadState.Completed, progress: 1.0, downloaded: "52 MB", size: "52 MB", speed: "", eta: "", date: "Oct 17", url: "https://example.com/files/lofi-beats-vol3.flac", backend: LinkBackend.Direct, folder: "Download/Eddy" },
+        { id: 23, filename: "IMG_20261012_184522.jpg", file_type: FileType.Image, state: DownloadState.Completed, progress: 1.0, downloaded: "4.8 MB", size: "4.8 MB", speed: "", eta: "", date: "Oct 15", url: "https://example.com/files/IMG_20261012_184522.jpg", backend: LinkBackend.Direct, folder: "Download/Eddy" },
+        { id: 24, filename: "Annual_Report_2025.pdf", file_type: FileType.Document, state: DownloadState.Completed, progress: 1.0, downloaded: "3.4 MB", size: "3.4 MB", speed: "", eta: "", date: "Oct 12", url: "https://example.com/files/Annual_Report_2025.pdf", backend: LinkBackend.Direct, folder: "Download/Eddy" },
+        { id: 25, filename: "wallpapers-pack.zip", file_type: FileType.Archive, state: DownloadState.Completed, progress: 1.0, downloaded: "860 MB", size: "860 MB", speed: "", eta: "", date: "Oct 9", url: "https://example.com/files/wallpapers-pack.zip", backend: LinkBackend.Direct, folder: "Download/Eddy" },
+        { id: 26, filename: "ubuntu-24.04-desktop-amd64.iso", file_type: FileType.DiskImage, state: DownloadState.Completed, progress: 1.0, downloaded: "5.8 GB", size: "5.8 GB", speed: "", eta: "", date: "Oct 6", url: "https://example.com/files/ubuntu-24.04-desktop-amd64.iso", backend: LinkBackend.Direct, folder: "Download/Eddy" },
+        { id: 27, filename: "Sintel (2010) [4K]", file_type: FileType.Torrent, state: DownloadState.Completed, progress: 1.0, downloaded: "4.2 GB", size: "4.2 GB", speed: "", eta: "", date: "Oct 4", url: "magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10&dn=Sintel", backend: LinkBackend.Torrent, folder: "Download/Eddy" },
+        { id: 28, filename: "eddy-setup-0.2.0.exe", file_type: FileType.Program, state: DownloadState.Completed, progress: 1.0, downloaded: "94 MB", size: "94 MB", speed: "", eta: "", date: "Sep 28", url: "https://example.com/files/eddy-setup-0.2.0.exe", backend: LinkBackend.Direct, folder: "Download/Eddy" },
+        { id: 29, filename: "firmware-v3.bin", file_type: FileType.Other, state: DownloadState.Completed, progress: 1.0, downloaded: "16 MB", size: "16 MB", speed: "", eta: "", date: "Sep 21", url: "https://example.com/files/firmware-v3.bin", backend: LinkBackend.Direct, folder: "Download/Eddy" },
+    ];
+
+    // The first item is enough: queued items always come after the active ones.
+    out property <bool> has_active_downloads: root.downloading_items.length > 0 && root.downloading_items[0].state == DownloadState.Active;
+    out property <ColorScheme> system-theme: Palette.color-scheme;
+    out property <brush> system-accent: Palette.accent-background;
+
+    in-out property <bool> show_appearance: false;
+    in-out property <bool> show_about: false;
+    in-out property <bool> show_settings: false;
+
+    // Space the bottom bar takes (or just the inset when the top bar is used).
+    private property <length> bottom_bar_height: AppSettings.top_navigation_bar ? root.safe-area-insets.bottom : 80px + root.safe-area-insets.bottom;
+
+    // True while a download list is moving; the bottom bar and FAB go see-through
+    // so the cards under them stay visible.
+    private property <bool> list_scrolling: false;
+    // The scrollbar hint shows while scrolling and fades a while after.
+    private property <bool> scrollbar_shown: false;
+    function list_scrolled() {
+        root.list_scrolling = true;
+        root.scrollbar_shown = true;
+        // restart() is a no-op on a stopped timer, so start it first;
+        // restart() then pushes the deadline back while scrolling continues.
+        scroll_idle.start();
+        scroll_idle.restart();
+        scrollbar_idle.start();
+        scrollbar_idle.restart();
+    }
+
+    scrollbar_idle := Timer {
+        interval: 1s;
+        running: false;
+        triggered => {
+            self.stop();
+            root.scrollbar_shown = false;
+        }
+    }
+
+    // --- Selection ---
+    // Long-press a card to start selecting; taps then toggle cards. Each row
+    // keeps its own selection marker (not the item data, so selecting never
+    // rewrites the list): a row is selected when its marker equals
+    // `selection_gen`, so bumping the generation deselects every row at once.
+    // Rust learns about changes through `selection_changed`.
+    out property <bool> selection_mode: false;
+    out property <int> selection_gen: 1;
+    out property <int> selected_count: 0;
+    // How many selected items are in each state, so the header only offers
+    // actions that apply (see SelectionActionBar).
+    private property <int> selected_running: 0; // active or queued
+    private property <int> selected_paused: 0;
+    private property <int> selected_ended: 0; // failed or cancelled
+
+    // (tab, item id, now selected). Tab: 0 = Downloading, 1 = Stopped, 2 = Completed.
+    callback selection_changed(int, int, bool);
+    // Fired when everything is deselected at once (Back, ×, tab switch).
+    callback selection_cleared();
+    // Do something with every selected item in a tab (the ones reported
+    // through selection_changed). `delete_files` only matters for Delete.
+    // Selection is cleared afterwards.
+    callback selection_action(tab: int, action: SelectionAction, delete_files: bool);
+
+    // Delete asks first. For the selection, or (from a download's options)
+    // one item: delete_target is its id, -1 for the selection.
+    in-out property <bool> delete_confirm_open: false;
+    private property <bool> delete_files: false;
+    private property <int> delete_target: -1;
+
+    function run_selection_action(action: SelectionAction) {
+        if (action == SelectionAction.Delete) {
+            root.delete_files = false;
+            root.delete_target = -1;
+            root.delete_confirm_open = true;
+        } else {
+            root.selection_action(root.active_tab, action, false);
+            root.clear_selection();
+        }
+    }
+
+    // Called by a row after it flips its own marker.
+    function selection_updated(tab: int, id: int, state: DownloadState, now_selected: bool) {
+        let step = now_selected ? 1 : -1;
+        root.selected_count += step;
+        if (state == DownloadState.Active || state == DownloadState.Queued) {
+            root.selected_running += step;
+        } else if (state == DownloadState.Paused) {
+            root.selected_paused += step;
+        } else if (state == DownloadState.Failed || state == DownloadState.Cancelled) {
+            root.selected_ended += step;
+        }
+        root.selection_changed(tab, id, now_selected);
+        // Deselecting the last item leaves selection mode.
+        if (root.selected_count <= 0) {
+            root.clear_selection();
+        }
+    }
+    function clear_selection() {
+        if (root.selection_mode) {
+            root.selection_cleared();
+        }
+        root.selection_gen += 1;
+        root.selected_count = 0;
+        root.selected_running = 0;
+        root.selected_paused = 0;
+        root.selected_ended = 0;
+        root.selection_mode = false;
+    }
+
+    // Room below the last card: clear of the bottom bar and the + button.
+    private property <length> list_bottom_padding: root.bottom_bar_height + 64px + 32px;
+
+    changed active_tab => { root.clear_selection(); }
+
+    // Fires once the list has stopped moving for a moment.
+    scroll_idle := Timer {
+        interval: 150ms;
+        running: false;
+        triggered => {
+            self.stop();
+            root.list_scrolling = false;
+        }
+    }
+
+    // Nav buttons: a tap switches tabs; a tap on the tab already shown opens
+    // its sort & filter options instead.
+    function tab_clicked(tab: int) {
+        root.tab_before_tap = root.active_tab;
+        root.options_before_tap = root.options_open;
+        tap_guard.start();
+        tap_guard.restart();
+        if (root.active_tab == tab) {
+            root.options_open = true;
+        } else {
+            root.active_tab = tab;
+        }
+    }
+
+    // Undoing a nav tap made by the Android home gesture. Slint 1.18 turns the
+    // touch cancel the system sends when it takes the gesture over into an
+    // ordinary release, so starting a home swipe on the bottom bar "taps" the
+    // button under the finger. The window loses focus right after, so a tap
+    // followed quickly by losing focus is put back (see back_scope).
+    private property <int> tab_before_tap: 0;
+    private property <bool> options_before_tap: false;
+    tap_guard := Timer {
+        interval: 500ms;
+        running: false;
+        triggered => { self.stop(); }
+    }
+    function window_deactivated() {
+        if (tap_guard.running) {
+            tap_guard.stop();
+            root.active_tab = root.tab_before_tap;
+            root.options_open = root.options_before_tap;
+        }
+    }
+
+    // Height of the tinted upper section (status bar area, header, top tabs).
+    private property <length> upper_section_height: Math.max(24px, root.safe-area-insets.top) + 48px + 48px;
+
+    function preferences_changed() { AppSettings.preferences_changed(); }
+    public function update_orientation() {
+        root.is_landscape = root.width > root.height;
+        if root.is_landscape {
+            root.is_mobile_landscape = root.height < 412px;
+        } else {
+            root.is_mobile_landscape = false;
+        }
+    }
+    function update_system_theme() { ThemeSettings.system_is_dark = Palette.color-scheme == ColorScheme.dark; }
+
+    changed system-theme => { update_system_theme(); AppSettings.theme_changed(); }
+    changed system-accent => { AppSettings.theme_changed(); }
+    changed height => { root.update_orientation(); }
+    changed width => { root.update_orientation(); }
+    changed show_settings => { back_scope.focus(); }
+    init => { update_orientation(); update_system_theme(); back_scope.focus(); }
+
+    callback add_from_txt_clicked();
+    callback open_menu();
+    // Do something to one download (see ItemAction); `value` is the new name
+    // for Rename, the new link for RefreshLink, "files" for a Delete that
+    // also removes the files, otherwise "".
+    callback download_action(id: int, action: ItemAction, value: string);
+
+    // Tapping an unfinished download shows its options.
+    in-out property <bool> item_options_open: false;
+    private property <DownloadItem> options_item;
+    function open_item_options(item: DownloadItem) {
+        root.options_item = item;
+        options_sheet.reset();
+        root.item_options_open = true;
+    }
+    function close_item_options() {
+        root.item_options_open = false;
+        // The rename / link field may have had focus; keep Back working.
+        back_scope.focus();
+    }
+
+    // Single owner of keyboard focus. It wraps the whole UI so it is an
+    // ancestor of anything that grabs focus (e.g. a ListView) and Back still
+    // bubbles up to it, and it is never hidden or clipped, so Slint 1.18+ never
+    // drops its focus. Rejecting Back lets Android close the app.
+    back_scope := FocusScope {
+        focus-lost(reason) => {
+            if (reason == FocusReason.window-activation) {
+                root.window_deactivated();
+            }
+        }
+        // Back in front: pick up links shared to Eddy in the meantime.
+        focus-gained(reason) => {
+            if (reason == FocusReason.window-activation) {
+                Links.sync();
+                AppSettings.storage_access_check();
+            }
+        }
+        key-pressed(event) => {
+            if (event.text == Key.Back || event.text == Key.Escape) {
+                if (root.show_settings) {
+                    st_page.navigate_back();
+                    return accept;
+                }
+                if (root.delete_confirm_open) {
+                    root.delete_confirm_open = false;
+                    return accept;
+                }
+                if (root.item_options_open) {
+                    root.close_item_options();
+                    return accept;
+                }
+                if (root.selection_mode) {
+                    root.clear_selection();
+                    return accept;
+                }
+                if (root.add_links_open || root.preview_open) {
+                    root.close_sheets();
+                    return accept;
+                }
+                if (root.menu_open || root.fab_open || root.options_open) {
+                    root.menu_open = false;
+                    root.fab_open = false;
+                    root.options_open = false;
+                    return accept;
+                }
+            }
+            return reject;
+        }
+        VerticalLayout {
+            // With the top bar, the whole upper section (status bar area, header
+            // and tabs) is tinted like the bottom bar.
+            Rectangle {
+                z: 1;
+                background: AppSettings.top_navigation_bar ? ThemeSettings.surface : transparent;
+
+                VerticalLayout {
+                    padding-top: Math.max(24px, root.safe-area-insets.top);
+
+                    HorizontalLayout {
+                        height: 48px;
+                        padding-left: Math.max(16px, root.safe-area-insets.left);
+                        padding-right: Math.max(16px, root.safe-area-insets.right);
+                        alignment: space-between;
+
+                        HorizontalLayout {
+                            spacing: 4px;
+
+                            // Leaves selection mode (same as Back).
+                            if root.selection_mode: Rectangle {
+                                width: 48px;
+                                height: 48px;
+                                border-radius: 24px;
+                                background: ta_close_selection.pressed ? ThemeSettings.hover_color : transparent;
+
+                                ta_close_selection := TouchArea {
+                                    clicked => { root.clear_selection(); }
+                                }
+
+                                Path {
+                                    width: 24px;
+                                    height: 24px;
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    viewbox-width: 24;
+                                    viewbox-height: 24;
+                                    stroke: ThemeSettings.text_color;
+                                    stroke-width: 2px;
+                                    stroke-line-cap: round;
+                                    commands: "M6 6L18 18M18 6L6 18";
+                                }
+                            }
+
+                            Text {
+                                text: root.selection_mode
+                                    ? @tr("{n} selected" | "{n} selected" % root.selected_count)
+                                    : @tr("Downloads");
+                                font-size: 24px;
+                                font-weight: 700;
+                                color: ThemeSettings.text_color;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        if root.selection_mode: SelectionActionBar {
+                            tab: root.active_tab;
+                            running: root.selected_running;
+                            paused: root.selected_paused;
+                            ended: root.selected_ended;
+                            action(action) => { root.run_selection_action(action); }
+                        }
+
+                        if !root.selection_mode: Rectangle {
+                            width: 48px;
+                            height: 48px;
+                            border-radius: 24px;
+                            background: ta_menu.pressed ? (AppSettings.top_navigation_bar ? ThemeSettings.background : ThemeSettings.surface) : transparent;
+                            animate background { duration: 150ms; }
+
+                            ta_menu := TouchArea {
+                                clicked => { root.menu_open = !root.menu_open; }
+                            }
+
+                            Image {
+                                source: @image-url("icons/menu.svg");
+                                width: 24px;
+                                height: 24px;
+                                colorize: ThemeSettings.text_color;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    if AppSettings.top_navigation_bar: TopNavBar {
+                        active_tab: root.active_tab;
+                        is_downloading: root.has_active_downloads;
+                        tab_selected(tab) => { root.tab_clicked(tab); }
+                    }
+                }
+            }
+
+            // With the top bar, the list sits on a sheet whose rounded top
+            // corners cut into the tinted section above, giving an "n" shape.
+            Rectangle {
+                vertical-stretch: 1;
+                background: AppSettings.top_navigation_bar ? ThemeSettings.surface : transparent;
+
+                Rectangle {
+                    background: ThemeSettings.background;
+                    border-top-left-radius: AppSettings.top_navigation_bar ? 16px : 0px;
+                    border-top-right-radius: AppSettings.top_navigation_bar ? 16px : 0px;
+                    clip: true;
+
+                    // Swiping sideways on a navigation bar switches tabs, with the
+                    // lists following the finger. (Swiping on the lists themselves
+                    // isn't possible in Slint 1.18 without breaking their fling: a
+                    // gesture handler around them delays every press by 100ms.)
+                    swipe := Rectangle {
+                        width: 100%;
+                        height: 100%;
+                        property <bool> following: TabSwipe.active;
+                        // Past the first or last tab the strip only gives a little.
+                        property <length> follow_offset: (TabSwipe.offset > 0 && root.active_tab == 0)
+                            || (TabSwipe.offset < 0 && root.active_tab == 2)
+                            ? TabSwipe.offset / 4 : TabSwipe.offset;
+
+                        // A swipe just ended: past a quarter of the width switches.
+                        property <int> releases: TabSwipe.releases;
+                        changed releases => {
+                            if (TabSwipe.released_offset > self.width / 4 && root.active_tab > 0) {
+                                root.active_tab -= 1;
+                            } else if (TabSwipe.released_offset < -self.width / 4 && root.active_tab < 2) {
+                                root.active_tab += 1;
+                            }
+                        }
+
+                        // The three lists side by side on one strip. It slides to the
+                        // active tab and follows the finger while swiping.
+                        Rectangle {
+                            property <length> position: -root.active_tab * self.width;
+                            animate position {
+                                duration: 300ms;
+                                easing: cubic-bezier(0.2, 0.0, 0, 1.0);
+                            }
+                            property <length> swipe_offset: 0px;
+                            x: self.position + self.swipe_offset;
+                            width: parent.width;
+                            height: parent.height;
+
+                            states [
+                                swiping when swipe.following: {
+                                    swipe_offset: swipe.follow_offset;
+                                    out {
+                                        animate swipe_offset {
+                                            duration: 300ms;
+                                            easing: cubic-bezier(0.2, 0.0, 0, 1.0);
+                                        }
+                                    }
+                                }
+                            ]
+
+                            // Tab 0.
+                            Rectangle {
+                                x: 0 * parent.width;
+                                width: parent.width;
+                                height: parent.height;
+
+                                flick_0 := Flickable {
+                                    width: 100%;
+                                    height: 100%;
+                                    content-height: layout_0.preferred-height;
+                                    changed content-y => { root.list_scrolled(); }
+
+                                    layout_0 := VerticalLayout {
+                                        padding-left: Math.max(16px, root.safe-area-insets.left);
+                                        padding-right: Math.max(16px, root.safe-area-insets.right);
+                                        padding-top: 8px;
+                                        padding-bottom: root.list_bottom_padding;
+                                        spacing: 8px;
+
+                                        for item[i] in root.downloading_items: row_0 := Rectangle {
+                                            // This row's selection marker (see "Selection" above).
+                                            property <int> selected_in: 0;
+                                            property <bool> selected: root.selection_mode && self.selected_in == root.selection_gen;
+                                            // Queued items follow the active ones; the first gets a section label.
+                                            property <bool> queued: item.state == DownloadState.Queued;
+                                            property <bool> first_queued: self.queued && (i == 0 || root.downloading_items[i - 1].state != DownloadState.Queued);
+                                            property <length> label_height: self.first_queued ? 32px : 0px;
+                                            height: self.label_height + (self.queued ? 68px : 84px);
+
+                                            if row_0.first_queued: ListHeader {
+                                                text: @tr("Queued");
+                                                x: 4px;
+                                                y: 4px;
+                                                height: 28px;
+                                            }
+                                            if !row_0.queued: DownloadingCard {
+                                                y: row_0.label_height;
+                                                item: item;
+                                                selected: row_0.selected;
+                                                clicked => {
+                                                    if (root.selection_mode) {
+                                                        row_0.selected_in = row_0.selected ? 0 : root.selection_gen;
+                                                        root.selection_updated(0, item.id, item.state, row_0.selected);
+                                                    } else {
+                                                        root.open_item_options(item);
+                                                    }
+                                                }
+                                                long_pressed => {
+                                                    root.selection_mode = true;
+                                                    row_0.selected_in = row_0.selected ? 0 : root.selection_gen;
+                                                    root.selection_updated(0, item.id, item.state, row_0.selected);
+                                                }
+                                            }
+                                            if row_0.queued: QueuedCard {
+                                                y: row_0.label_height;
+                                                item: item;
+                                                selected: row_0.selected;
+                                                clicked => {
+                                                    if (root.selection_mode) {
+                                                        row_0.selected_in = row_0.selected ? 0 : root.selection_gen;
+                                                        root.selection_updated(0, item.id, item.state, row_0.selected);
+                                                    } else {
+                                                        root.open_item_options(item);
+                                                    }
+                                                }
+                                                long_pressed => {
+                                                    root.selection_mode = true;
+                                                    row_0.selected_in = row_0.selected ? 0 : root.selection_gen;
+                                                    root.selection_updated(0, item.id, item.state, row_0.selected);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                hint_0 := ScrollHint {
+                                    content_y <=> flick_0.content-y;
+                                    content_height: flick_0.content-height;
+                                    viewport_height: flick_0.height;
+                                    shown: root.scrollbar_shown && root.active_tab == 0;
+                                    bottom_inset: root.bottom_bar_height;
+                                    x: parent.width - self.width - 3px;
+                                }
+                            }
+
+                            // Tab 1.
+                            Rectangle {
+                                x: 1 * parent.width;
+                                width: parent.width;
+                                height: parent.height;
+
+                                flick_1 := Flickable {
+                                    width: 100%;
+                                    height: 100%;
+                                    content-height: layout_1.preferred-height;
+                                    changed content-y => { root.list_scrolled(); }
+
+                                    layout_1 := VerticalLayout {
+                                        padding-left: Math.max(16px, root.safe-area-insets.left);
+                                        padding-right: Math.max(16px, root.safe-area-insets.right);
+                                        padding-top: 8px;
+                                        padding-bottom: root.list_bottom_padding;
+                                        spacing: 8px;
+
+                                        for item[i] in root.stopped_items: row_1 := Rectangle {
+                                            // This row's selection marker (see "Selection" above).
+                                            property <int> selected_in: 0;
+                                            property <bool> selected: root.selection_mode && self.selected_in == root.selection_gen;
+                                            // Grouped by state (Paused, Failed, Cancelled); the first of each group gets a label.
+                                            property <bool> first_of_state: i == 0 || root.stopped_items[i - 1].state != item.state;
+                                            property <length> label_height: self.first_of_state ? 32px : 0px;
+                                            height: self.label_height + 84px;
+
+                                            if row_1.first_of_state: ListHeader {
+                                                text: item.state == DownloadState.Failed ? @tr("Failed")
+                                                    : item.state == DownloadState.Cancelled ? @tr("Cancelled")
+                                                    : @tr("Paused");
+                                                x: 4px;
+                                                y: 4px;
+                                                height: 28px;
+                                            }
+                                            StoppedCard {
+                                                y: row_1.label_height;
+                                                item: item;
+                                                selected: row_1.selected;
+                                                clicked => {
+                                                    if (root.selection_mode) {
+                                                        row_1.selected_in = row_1.selected ? 0 : root.selection_gen;
+                                                        root.selection_updated(1, item.id, item.state, row_1.selected);
+                                                    } else {
+                                                        root.open_item_options(item);
+                                                    }
+                                                }
+                                                long_pressed => {
+                                                    root.selection_mode = true;
+                                                    row_1.selected_in = row_1.selected ? 0 : root.selection_gen;
+                                                    root.selection_updated(1, item.id, item.state, row_1.selected);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                hint_1 := ScrollHint {
+                                    content_y <=> flick_1.content-y;
+                                    content_height: flick_1.content-height;
+                                    viewport_height: flick_1.height;
+                                    shown: root.scrollbar_shown && root.active_tab == 1;
+                                    bottom_inset: root.bottom_bar_height;
+                                    x: parent.width - self.width - 3px;
+                                }
+                            }
+
+                            // Tab 2.
+                            Rectangle {
+                                x: 2 * parent.width;
+                                width: parent.width;
+                                height: parent.height;
+
+                                flick_2 := Flickable {
+                                    width: 100%;
+                                    height: 100%;
+                                    content-height: layout_2.preferred-height;
+                                    changed content-y => { root.list_scrolled(); }
+
+                                    layout_2 := VerticalLayout {
+                                        padding-left: Math.max(16px, root.safe-area-insets.left);
+                                        padding-right: Math.max(16px, root.safe-area-insets.right);
+                                        padding-top: 8px;
+                                        padding-bottom: root.list_bottom_padding;
+                                        spacing: 8px;
+
+                                        for item[i] in root.completed_items: row_2 := CompletedCard {
+                                            // This row's selection marker (see "Selection" above).
+                                            property <int> selected_in: 0;
+                                            selected: root.selection_mode && self.selected_in == root.selection_gen;
+                                            item: item;
+                                                clicked => {
+                                                    if (root.selection_mode) {
+                                                        row_2.selected_in = row_2.selected ? 0 : root.selection_gen;
+                                                        root.selection_updated(2, item.id, item.state, row_2.selected);
+                                                    } else {
+                                                        root.download_action(item.id, ItemAction.Open, "");
+                                                    }
+                                                }
+                                                long_pressed => {
+                                                    root.selection_mode = true;
+                                                    row_2.selected_in = row_2.selected ? 0 : root.selection_gen;
+                                                    root.selection_updated(2, item.id, item.state, row_2.selected);
+                                                }
+                                        }
+                                    }
+                                }
+
+                                hint_2 := ScrollHint {
+                                    content_y <=> flick_2.content-y;
+                                    content_height: flick_2.content-height;
+                                    viewport_height: flick_2.height;
+                                    shown: root.scrollbar_shown && root.active_tab == 2;
+                                    bottom_inset: root.bottom_bar_height;
+                                    x: parent.width - self.width - 3px;
+                                }
+                            }
+                        }
+                    }
+
+                    // Pending links: shows how many links are waiting to be looked
+                    // at; tapping it previews the first.
+                    Rectangle {
+                        property <bool> shown: Links.pending.length > 0;
+                        width: 56px;
+                        height: 56px;
+                        border-radius: 18px;
+                        background: ThemeSettings.surface;
+                        drop-shadow-blur: 12px;
+                        drop-shadow-color: #00000030;
+
+                        x: Math.max(16px, root.safe-area-insets.left);
+                        // Lined up with the centre of the main FAB.
+                        y: parent.height - 64px - 16px - root.bottom_bar_height + 4px;
+
+                        visible: self.opacity > 0;
+                        opacity: !self.shown ? 0 : (ta_pending.pressed ? 0.8 : 1.0);
+                        transform-scale: self.shown ? 1.0 : 0.6;
+                        animate opacity, transform-scale { duration: 200ms; easing: ease-out-quad; }
+
+                        states [
+                            scrolling when self.shown && root.list_scrolling && !ta_pending.pressed: {
+                                opacity: 0.4;
+                            }
+                        ]
+
+                        ta_pending := TouchArea {
+                            enabled: parent.shown;
+                            clicked => { root.preview_open = true; }
+                        }
+
+                        // Chain link glyph, in the nav icons' stroked style.
+                        Path {
+                            width: 26px;
+                            height: 26px;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            viewbox-width: 24;
+                            viewbox-height: 24;
+                            stroke: ThemeSettings.primary_accent;
+                            stroke-width: 2px;
+                            stroke-line-cap: round;
+                            stroke-line-join: round;
+                            fill: transparent;
+                            commands: "M10 13a5 5 0 0 0 7.54 .54l3 -3a5 5 0 0 0 -7.07 -7.07l-1.72 1.71 M14 11a5 5 0 0 0 -7.54 -.54l-3 3a5 5 0 0 0 7.07 7.07l1.71 -1.71";
+                        }
+
+                        // Count badge on the top-right corner.
+                        Rectangle {
+                            property <string> label: Links.pending.length > 99 ? "99+" : Links.pending.length;
+                            width: Math.max(22px, badge_text.preferred-width + 12px);
+                            height: 22px;
+                            border-radius: 11px;
+                            x: parent.width - self.width + 6px;
+                            y: -6px;
+                            background: ThemeSettings.primary_accent;
+                            border-width: 2px;
+                            border-color: ThemeSettings.background;
+
+                            badge_text := Text {
+                                text: parent.label;
+                                font-size: 11px;
+                                font-weight: 700;
+                                color: #ffffff;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        width: 64px;
+                        height: 64px;
+                        border-radius: 32px;
+                        background: ThemeSettings.primary_accent;
+                        drop-shadow-blur: 12px;
+                        drop-shadow-color: ThemeSettings.primary_accent.transparentize(60%);
+
+                        x: parent.width - self.width - Math.max(16px, root.safe-area-insets.right);
+                        y: parent.height - self.height - 16px - root.bottom_bar_height;
+
+                        ta_fab := TouchArea {
+                            clicked => { root.fab_open = !root.fab_open; }
+                        }
+
+                        opacity: ta_fab.pressed ? 0.8 : 1.0;
+                        drop-shadow-offset-y: ta_fab.pressed ? 2px : 4px;
+                        animate opacity, drop-shadow-offset-y { duration: 150ms; }
+
+                        states [
+                            scrolling when root.list_scrolling && !ta_fab.pressed: {
+                                opacity: 0.4;
+                            }
+                        ]
+
+                        Image {
+                            source: @image-url("icons/plus.svg");
+                            width: 32px;
+                            height: 32px;
+                            colorize: #ffffff;
+
+                            // Centers the SVG perfectly in the 64px FAB
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+
+                            transform-rotation: root.fab_open ? 135deg : 0deg;
+                            animate transform-rotation {
+                                duration: 350ms;
+                                easing: ease-in-out;
+                            }
+                        }
+                    }
+                }
+            }
+
+        }
+
+        // Floats over the bottom of the list so cards can show through it.
+        if !AppSettings.top_navigation_bar: Rectangle {
+            x: 0px;
+            y: root.height - self.height;
+            width: root.width;
+            height: 80px + root.safe-area-insets.bottom;
+            background: ThemeSettings.surface;
+            drop-shadow-blur: 8px;
+            drop-shadow-color: #00000010;
+            drop-shadow-offset-y: -2px;
+
+            // Semi-transparent while the list moves, solid again the moment it
+            // stops (no animation on the way back).
+            states [
+                scrolling when root.list_scrolling: {
+                    background: ThemeSettings.surface.transparentize(65%);
+                    drop-shadow-color: transparent;
+                    in {
+                        animate background, drop-shadow-color { duration: 150ms; }
+                    }
+                }
+            ]
+
+            TabSwipeArea {
+                HorizontalLayout {
+                    padding-bottom: root.safe-area-insets.bottom;
+                    alignment: stretch;
+
+                    BottomNavButton {
+                        text: @tr("Downloading");
+                        icon_type: 0;
+                        is_active: root.active_tab == 0;
+                        is_downloading: root.has_active_downloads;
+                        clicked => { root.tab_clicked(0); }
+                    }
+
+                    BottomNavButton {
+                        text: @tr("Stopped");
+                        icon_type: 1;
+                        is_active: root.active_tab == 1;
+                        clicked => { root.tab_clicked(1); }
+                    }
+
+                    BottomNavButton {
+                        text: @tr("Completed");
+                        icon_type: 2;
+                        is_active: root.active_tab == 2;
+                        clicked => { root.tab_clicked(2); }
+                    }
+                }
+            }
+        }
+
+        // --- ANIMATED OVERLAYS ---
+
+        // Sort & filter sheet. It floats just above the bottom bar, or just
+        // below the top section when the top bar is used, and slides in from
+        // the bar it was opened from.
+        Rectangle {
+            z: 90;
+            width: 100%;
+            height: 100%;
+            background: #00000060;
+            opacity: root.options_open ? 1.0 : 0.0;
+            visible: self.opacity > 0;
+            animate opacity { duration: 250ms; }
+
+            TapToDismissArea {
+                tapped => { root.options_open = false; }
+            }
+
+            ListOptionsSheet {
+                tab: root.active_tab;
+                // Leaves the status bar area and a margin clear on the far side.
+                available_height: AppSettings.top_navigation_bar
+                    ? root.height - root.upper_section_height - 8px - Math.max(12px, root.safe-area-insets.bottom)
+                    : root.height - root.bottom_bar_height - 12px - Math.max(24px, root.safe-area-insets.top) - 12px;
+                width: Math.min(480px, parent.width - 2 * Math.max(12px, root.safe-area-insets.left, root.safe-area-insets.right));
+                x: (parent.width - self.width) / 2;
+
+                property <length> open_y: AppSettings.top_navigation_bar
+                    ? root.upper_section_height + 8px
+                    : root.height - root.bottom_bar_height - self.height - 12px;
+                property <length> slide: AppSettings.top_navigation_bar ? -24px : 24px;
+                y: root.options_open ? self.open_y : self.open_y + self.slide;
+                animate y {
+                    duration: 250ms;
+                    easing: ease-out-quad;
+                }
+            }
+        }
+
+        Rectangle {
+            z: 90;
+            width: 100%;
+            height: 100%;
+            background: #00000060;
+            opacity: root.menu_open ? 1.0 : 0.0;
+            visible: self.opacity > 0;
+            animate opacity { duration: 250ms; }
+
+            TouchArea {
+                clicked => { root.menu_open = false; }
+            }
+
+            Rectangle {
+                width: 180px;
+                height: menu_layout.preferred-height;
+
+                x: parent.width - self.width - Math.max(16px, root.safe-area-insets.right);
+                y: root.menu_open ? Math.max(64px, root.safe-area-insets.top + 48px) : Math.max(48px, root.safe-area-insets.top + 32px);
+                animate y {
+                    duration: 250ms;
+                    easing: ease-out-quad;
+                }
+
+                background: ThemeSettings.surface;
+                border-radius: 16px;
+                drop-shadow-blur: 12px;
+                drop-shadow-color: #00000020;
+
+                menu_layout := VerticalLayout {
+                    padding: 8px;
+
+                    Rectangle {
+                        height: 48px;
+                        border-radius: 8px;
+                        background: ta_settings.has-hover ? ThemeSettings.background : transparent;
+                        ta_settings := TouchArea {
+                            clicked => {
+                                root.menu_open = false;
+                                root.show_settings = true;
+                            }
+                        }
+
+                        Text {
+                            text: @tr("Settings");
+                            color: ThemeSettings.text_color;
+                            x: 16px;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            z: 90;
+            width: 100%;
+            height: 100%;
+            background: #00000060;
+            opacity: root.fab_open ? 1.0 : 0.0;
+            visible: self.opacity > 0;
+            animate opacity { duration: 250ms; }
+
+            TapToDismissArea {
+                tapped => { root.fab_open = false; }
+            }
+
+            Rectangle {
+                width: 200px;
+                height: fab_layout.preferred-height;
+
+                x: parent.width - self.width - Math.max(16px, root.safe-area-insets.right);
+                y: root.fab_open ? root.height - self.height - root.bottom_bar_height - 80px : root.height - self.height - root.bottom_bar_height - 40px;
+                animate y {
+                    duration: 250ms;
+                    easing: ease-out-quad;
+                }
+
+                background: ThemeSettings.surface;
+                border-radius: 16px;
+                drop-shadow-blur: 12px;
+                drop-shadow-color: #00000020;
+
+                fab_layout := VerticalLayout {
+                    padding: 8px;
+                    Rectangle {
+                        height: 48px;
+                        border-radius: 8px;
+                        background: ta_add_link.has-hover ? ThemeSettings.background : transparent;
+                        ta_add_link := TouchArea {
+                            clicked => {
+                                root.fab_open = false;
+                                root.add_links_open = true;
+                                add_links_sheet.focus_input();
+                            }
+                        }
+
+                        Text {
+                            text: @tr("Add Link(s)");
+                            color: ThemeSettings.text_color;
+                            x: 16px;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Rectangle {
+                        height: 48px;
+                        border-radius: 8px;
+                        background: ta_add_file.has-hover ? ThemeSettings.background : transparent;
+                        ta_add_file := TouchArea {
+                            clicked => { root.fab_open = false; root.add_from_txt_clicked(); }
+                        }
+
+                        Text {
+                            text: @tr("Add from file (.txt), (.torrent)");
+                            color: ThemeSettings.text_color;
+                            x: 16px;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Add links and link preview sheets. Both sit at the bottom, lifted
+        // above the on-screen keyboard while it's up.
+        Rectangle {
+            z: 90;
+            width: 100%;
+            height: 100%;
+            background: #00000060;
+            opacity: root.add_links_open || root.preview_open ? 1.0 : 0.0;
+            visible: self.opacity > 0;
+            animate opacity { duration: 250ms; }
+
+            // Where the sheets' bottom edge goes: above the keyboard, else above
+            // the bottom bar (or the gesture area with the top bar).
+            property <length> keyboard_top: root.virtual-keyboard-size.height > 0
+                ? root.virtual-keyboard-position.y : root.height;
+            property <length> sheet_bottom: Math.min(self.keyboard_top - 12px,
+                AppSettings.top_navigation_bar ? root.height - Math.max(12px, root.safe-area-insets.bottom)
+                : root.height - root.bottom_bar_height - 12px);
+            property <length> sheet_width: Math.min(480px, self.width - 2 * Math.max(12px, root.safe-area-insets.left, root.safe-area-insets.right));
+
+            TapToDismissArea {
+                tapped => { root.close_sheets(); }
+            }
+
+            add_links_sheet := AddLinksSheet {
+                text <=> root.add_links_text;
+                width: parent.sheet_width;
+                x: (parent.width - self.width) / 2;
+                y: root.add_links_open ? parent.sheet_bottom - self.height : parent.sheet_bottom - self.height + 24px;
+                opacity: root.add_links_open ? 1 : 0;
+                // Visible straight away when opening, so the text box can take focus.
+                visible: root.add_links_open || self.opacity > 0;
+                animate y, opacity { duration: 250ms; easing: ease-out-quad; }
+
+                cancel => { root.close_sheets(); }
+                process => {
+                    Links.process_text(root.add_links_text);
+                    root.add_links_text = "";
+                    root.close_sheets();
+                }
+            }
+
+            if Links.pending.length > 0: LinkPreviewSheet {
+                link: Links.pending[0];
+                position: 1;
+                total: Links.pending.length;
+                available_height: parent.sheet_bottom - Math.max(24px, root.safe-area-insets.top) - 12px;
+                width: parent.sheet_width;
+                x: (parent.width - self.width) / 2;
+                y: root.preview_open ? parent.sheet_bottom - self.height : parent.sheet_bottom - self.height + 24px;
+                opacity: root.preview_open ? 1 : 0;
+                visible: self.opacity > 0;
+                animate y, opacity { duration: 250ms; easing: ease-out-quad; }
+
+                skip => { Links.skip(self.link.id); }
+                download(backend, format, filename) => { Links.start(self.link.id, backend, format, filename); }
+            }
+        }
+
+        // A download's options, at the bottom, lifted above the keyboard while
+        // renaming or pasting a link.
+        Rectangle {
+            z: 90;
+            width: 100%;
+            height: 100%;
+            background: #00000060;
+            opacity: root.item_options_open ? 1.0 : 0.0;
+            visible: self.opacity > 0;
+            animate opacity { duration: 250ms; }
+
+            property <length> keyboard_top: root.virtual-keyboard-size.height > 0
+                ? root.virtual-keyboard-position.y : root.height;
+            property <length> sheet_bottom: Math.min(self.keyboard_top - 12px,
+                AppSettings.top_navigation_bar ? root.height - Math.max(12px, root.safe-area-insets.bottom)
+                : root.height - root.bottom_bar_height - 12px);
+
+            TapToDismissArea {
+                tapped => { root.close_item_options(); }
+            }
+
+            options_sheet := DownloadOptionsSheet {
+                item: root.options_item;
+                available_height: parent.sheet_bottom - Math.max(24px, root.safe-area-insets.top) - 12px;
+                width: Math.min(480px, parent.width - 2 * Math.max(12px, root.safe-area-insets.left, root.safe-area-insets.right));
+                x: (parent.width - self.width) / 2;
+                y: root.item_options_open ? parent.sheet_bottom - self.height : parent.sheet_bottom - self.height + 24px;
+                animate y { duration: 250ms; easing: ease-out-quad; }
+
+                action(action, value) => {
+                    root.download_action(root.options_item.id, action, value);
+                    root.close_item_options();
+                }
+                delete_requested => {
+                    root.close_item_options();
+                    root.delete_files = false;
+                    root.delete_target = root.options_item.id;
+                    root.delete_confirm_open = true;
+                }
+            }
+        }
+
+        // Delete confirmation for selected downloads (or one, from its options).
+        Rectangle {
+            z: 90;
+            width: 100%;
+            height: 100%;
+            background: #00000060;
+            opacity: root.delete_confirm_open ? 1.0 : 0.0;
+            visible: self.opacity > 0;
+            animate opacity { duration: 250ms; }
+
+            TapToDismissArea {
+                tapped => { root.delete_confirm_open = false; }
+            }
+
+            DeleteConfirmSheet {
+                count: root.delete_target >= 0 ? 1 : root.selected_count;
+                delete_files <=> root.delete_files;
+                width: Math.min(400px, parent.width - 2 * Math.max(24px, root.safe-area-insets.left, root.safe-area-insets.right));
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2 + (root.delete_confirm_open ? 0px : 24px);
+                animate y { duration: 250ms; easing: ease-out-quad; }
+
+                cancel => { root.delete_confirm_open = false; }
+                confirm => {
+                    root.delete_confirm_open = false;
+                    if (root.delete_target >= 0) {
+                        root.download_action(root.delete_target, ItemAction.Delete, root.delete_files ? "files" : "");
+                    } else {
+                        root.selection_action(root.active_tab, SelectionAction.Delete, root.delete_files);
+                        root.clear_selection();
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            z: 100;
+            width: 100%;
+            height: 100%;
+            opacity: root.show_settings ? 1.0 : 0.0;
+            y: root.show_settings ? 0px : 40px;
+            visible: self.opacity > 0;
+            animate opacity, y {
+                duration: 250ms;
+                easing: ease-out-quad;
+            }
+
+            st_page := SettingsPage {
+                background_color: ThemeSettings.background;
+                text_color: ThemeSettings.text_color;
+                accent_color: ThemeSettings.primary_accent;
+
+                is_landscape: root.is_landscape;
+                is_mobile_landscape: root.is_mobile_landscape;
+                safe_area_top: root.safe-area-insets.top;
+                safe_area_left: root.safe-area-insets.left;
+                safe_area_right: root.safe-area-insets.right;
+                safe_area_bottom: root.safe-area-insets.bottom;
+
+                back_pressed => { root.show_settings = false; }
+                // A tap on a focusable child (e.g. the theme ListView) takes focus;
+                // take it back before that child slides off-screen and loses it.
+                changed active_tab => { back_scope.focus(); }
+            }
+        }
+    }
+}

@@ -1,0 +1,144 @@
+import { ThemeSettings } from "../themes/theme.slint";
+import { ListOptions, SortKey, FileFilter, TabListOptions } from "../globals/ListOptions.slint";
+import { Chip, SectionLabel } from "Chips.slint";
+
+// Sort & filter options for one download tab, shown when its already-active
+// nav button is tapped again. Reads and writes the tab's entry in ListOptions.
+export component ListOptionsSheet inherits Rectangle {
+    in property <int> tab; // 0 = Downloading, 1 = Stopped, 2 = Completed
+    // Space the sheet may take; past this its contents scroll.
+    in property <length> available_height: 10000px;
+
+    private property <TabListOptions> current: root.tab == 0 ? ListOptions.downloading
+        : (root.tab == 1 ? ListOptions.stopped : ListOptions.completed);
+    // Everything in Completed is at 100%, so sorting by progress is pointless there.
+    private property <bool> has_progress: root.tab != 2;
+
+    function apply(options: TabListOptions) {
+        if (root.tab == 0) {
+            ListOptions.downloading = options;
+        } else if (root.tab == 1) {
+            ListOptions.stopped = options;
+        } else {
+            ListOptions.completed = options;
+        }
+        ListOptions.options_changed(root.tab);
+    }
+    function set_sort(key: SortKey) {
+        root.apply({ sort: key, ascending: root.current.ascending, filter: root.current.filter });
+    }
+    function set_ascending(ascending: bool) {
+        root.apply({ sort: root.current.sort, ascending: ascending, filter: root.current.filter });
+    }
+    function set_filter(filter: FileFilter) {
+        root.apply({ sort: root.current.sort, ascending: root.current.ascending, filter: filter });
+    }
+
+    height: Math.min(layout.preferred-height, root.available_height);
+    background: ThemeSettings.surface;
+    border-radius: 16px;
+    clip: true;
+    drop-shadow-blur: 12px;
+    drop-shadow-color: #00000020;
+
+    // Keeps taps on the sheet's gaps from reaching the backdrop behind it.
+    TouchArea { }
+
+    Flickable {
+        content-height: layout.preferred-height;
+        // Only scrollable when the content doesn't fit.
+        interactive: layout.preferred-height > root.height;
+
+        layout := VerticalLayout {
+            padding: 16px;
+            spacing: 10px;
+
+            Text {
+                text: @tr("Sort & filter · {}", root.tab == 0 ? @tr("Downloading") : (root.tab == 1 ? @tr("Stopped") : @tr("Completed")));
+                font-size: 16px;
+                font-weight: 700;
+                color: ThemeSettings.text_color;
+            }
+
+            SectionLabel { text: @tr("Sort by"); }
+
+            HorizontalLayout {
+                spacing: 8px;
+                Chip {
+                    text: @tr("Date");
+                    selected: root.current.sort == SortKey.DateAdded;
+                    clicked => { root.set_sort(SortKey.DateAdded); }
+                }
+                Chip {
+                    text: @tr("Name");
+                    selected: root.current.sort == SortKey.Name;
+                    clicked => { root.set_sort(SortKey.Name); }
+                }
+                Chip {
+                    text: @tr("Size");
+                    selected: root.current.sort == SortKey.Size;
+                    clicked => { root.set_sort(SortKey.Size); }
+                }
+                if root.has_progress: Chip {
+                    text: @tr("Progress");
+                    selected: root.current.sort == SortKey.Progress;
+                    clicked => { root.set_sort(SortKey.Progress); }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 8px;
+                Chip {
+                    text: @tr("Ascending");
+                    selected: root.current.ascending;
+                    clicked => { root.set_ascending(true); }
+                }
+                Chip {
+                    text: @tr("Descending");
+                    selected: !root.current.ascending;
+                    clicked => { root.set_ascending(false); }
+                }
+            }
+
+            SectionLabel { text: @tr("Show"); }
+
+            HorizontalLayout {
+                spacing: 8px;
+                Chip {
+                    text: @tr("All");
+                    selected: root.current.filter == FileFilter.All;
+                    clicked => { root.set_filter(FileFilter.All); }
+                }
+                Chip {
+                    text: @tr("Video");
+                    selected: root.current.filter == FileFilter.Video;
+                    clicked => { root.set_filter(FileFilter.Video); }
+                }
+                Chip {
+                    text: @tr("Audio");
+                    selected: root.current.filter == FileFilter.Audio;
+                    clicked => { root.set_filter(FileFilter.Audio); }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 8px;
+                Chip {
+                    text: @tr("Images");
+                    selected: root.current.filter == FileFilter.Image;
+                    clicked => { root.set_filter(FileFilter.Image); }
+                }
+                Chip {
+                    text: @tr("Documents");
+                    selected: root.current.filter == FileFilter.Document;
+                    clicked => { root.set_filter(FileFilter.Document); }
+                }
+                Chip {
+                    text: @tr("Archives");
+                    selected: root.current.filter == FileFilter.Archive;
+                    clicked => { root.set_filter(FileFilter.Archive); }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,52 @@
+// One of the yt-dlp helper apps on Android (YTDLnis's packages).
+export struct HelperPackage {
+    key: string, // "python", "ffmpeg" or "deno"
+    installed: string, // installed version, "" when it isn't
+    latest: string, // newest release for this device, "" when unknown
+    size: string, // the newest release's download size
+    // 0 checking, 1 not installed, 2 installed, 3 update available,
+    // 4 downloading, 5 downloaded (ready to install, Android), 6 no build
+    // for this device, 7 couldn't check, 8 installing (desktop: unpacking)
+    state: int,
+    progress: float, // while downloading, 0..1
+}
+
+export global AppSettings {
+    in-out property <bool> is_mobile: false;
+    in-out property <bool> haptic_feedback: false;
+    in-out property <bool> bottom_navigation_bar: true;
+    // Icon-only tab bar under the header instead of the bottom bar.
+    in-out property <bool> top_navigation_bar: false;
+    in property <string> current_download_path: "";
+    // Shown when no download folder has been picked.
+    in property <string> default_download_path: "Download/Eddy";
+    // Android "All files access": downloads can go straight into any folder.
+    // Without it, folders outside Download/ and Documents/ get the finished
+    // files copied in.
+    in property <bool> all_files_access: false;
+    // UI language: "" follows the system, otherwise a bundled locale ("en", "fr").
+    in-out property <string> language: "";
+
+    callback preferences_changed();
+    callback theme_changed();
+    callback select_download_folder();
+    // Opens Android's "All files access" screen for the app.
+    callback request_all_files_access();
+    // Re-reads `all_files_access` (the app came back to the front, maybe
+    // from that screen).
+    callback storage_access_check();
+
+    // yt-dlp and friends. Android: YTDLnis's helper apps, which Eddy never
+    // installs itself: it downloads one when asked (after a confirmation)
+    // and opens Android's installer. Desktop ("ytdlp", "ffmpeg", "deno"):
+    // installed into Eddy's own folder, also only once confirmed.
+    in property <[HelperPackage]> helper_packages;
+    // Look for newer releases (the Downloads settings opened).
+    callback helpers_check();
+    // Download a package's APK, then open the installer.
+    callback helper_download(string);
+    // Open the installer for an APK that's already downloaded.
+    callback helper_install(string);
+    // Fired after `language` changes so the Rust side can switch translations.
+    callback language_changed();
+}

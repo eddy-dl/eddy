@@ -1,0 +1,71 @@
+[package]
+name = "eddy-ui"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+# Android/IOS build target
+[lib]
+name = "eddy"
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+# Linux/Win/Mac build target
+[[bin]]
+name = "eddy"
+path = "src/main.rs"
+
+[dependencies]
+aria2-core = { git = "https://github.com/balovess/aria2_rust/", package = "aria2-core", features = ["bittorrent", "metalink", "sftp"] }
+# Torrent file parsing (names and sizes for picked .torrent files).
+aria2-protocol = { git = "https://github.com/balovess/aria2_rust/", package = "aria2-protocol" }
+base64 = "0.21"
+dirs = "5.0"
+linkify = "0.11"
+log = "0.4"
+percent-encoding = "2"
+rand = "0.8"
+regex = "1"
+# Link checks. Same reqwest build as aria2-core.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+rusqlite = { version = "0.40.1", features = ["bundled"] }
+sha2 = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+slint = { version = "1.17.1" }
+sys-locale = "0.3"
+tokio = { version = "1.30", features = ["rt-multi-thread", "macros", "time", "sync", "fs", "io-util"] }
+url = "2"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+# Unpacking yt-dlp, ffmpeg and Deno (Settings → Downloads); pure Rust.
+lzma-rs = "0.3"
+rfd = "0.14"
+tar = "0.4"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+system-theme = { version = "0.3", default-features = false }
+webbrowser = "1.0"
+
+[target.'cfg(target_os = "android")'.dependencies]
+android-activity = { version = "0.6.1", features = ["native-activity"] }
+android_logger = "0.14"
+jni = "0.22"
+ndk-context = "0.1"
+# HTTPS certificate checks through Android's own verifier (used by reqwest in
+# aria2-core and the link checks); set up in platform::init. Its Java half comes from Gradle.
+rustls-platform-verifier = "0.7"
+serde_json = "1.0"
+slint = { version = "1.17.1", features = ["backend-android-activity-06"] }
+
+[build-dependencies]
+slint-build = { version = "1.17.1" }
+
+[target.'cfg(target_os = "windows")'.build-dependencies]
+winres = "0.1"
+
+[profile.release]
+lto = "fat"
+opt-level = "z"
+strip = "symbols"
+codegen-units = 1
+panic = "abort"

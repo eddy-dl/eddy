@@ -1,0 +1,160 @@
+import { ThemeSettings } from "../themes/theme.slint";
+
+export component ActionButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary: false;
+    in property <bool> danger: false;
+    in property <bool> destructive: false;
+    callback clicked;
+
+    height: 56px;
+    border-radius: 16px;
+
+    // helper functions cause the tenary expressions were getting a tad unreadable
+    function get_background() -> brush {
+        if primary {
+            return ThemeSettings.primary_accent;
+        }
+        if danger {
+            return #FF3B30;
+        }
+        return ThemeSettings.surface;
+    }
+    function get_txt_color() -> color {
+        if destructive {
+            return #FF3B30;
+        }
+        if primary || danger {
+            return #ffffff;
+        }
+        return ThemeSettings.text_color;
+    }
+
+    background: get_background();
+    animate background { duration: 200ms; }
+
+    Text {
+        text: root.text;
+        color: get_txt_color();
+        font-size: 16px;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        animate color { duration: 200ms; }
+    }
+
+    TouchArea {
+        clicked => { root.clicked() }
+    }
+}
+
+export component ColorCircle inherits Rectangle {
+    in property <color> fill_color;
+    in property <bool> is_active: false;
+    property <bool> is-pulsing: ta.pressed;
+    callback clicked;
+
+    width: 48px;
+    height: 48px;
+    border-radius: 24px;
+    background: fill_color;
+
+    border-width: 0px;
+    border-color: ThemeSettings.text_color;
+
+    ta := TouchArea {
+        clicked => { root.clicked() }
+    }
+
+    states [
+        pulse-state when root.is-pulsing: {
+            root.border-width: 8px;
+            in {
+                animate root.border-width {
+                    duration: 100ms;
+                    easing: ease-out;
+                }
+            }
+            out {
+                animate root.border-width {
+                    duration: 250ms;
+                    easing: ease-in-out;
+                }
+            }
+        }
+        active-state when root.is_active && !ta.pressed: {
+            root.border-width: 4px;
+            in {
+                animate root.border-width {
+                    duration: 150ms;
+                    easing: ease-in-out;
+                }
+            }
+            out {
+                animate root.border-width {
+                    duration: 150ms;
+                    easing: ease-in-out;
+                }
+            }
+        }
+    ]
+}
+
+
+export component ModernSwitch inherits Rectangle {
+    in-out property <bool> checked;
+    callback toggled;
+
+    width: 52px;
+    height: 32px;
+    border-radius: 16px;
+    // ThemeSettings.primary_accent.brighter(0.7)
+
+    background: root.checked ? (ThemeSettings.is_dark ? Colors.white.mix(ThemeSettings.primary_accent, 40%) : ThemeSettings.primary_accent) :
+        (ThemeSettings.is_dark ? #444746 : #E3E3E3);
+
+    border-width: root.checked ? 0px : 2px;
+    border-color: root.checked ? transparent :
+        (ThemeSettings.is_dark ? #8E918F : #747775);
+
+    animate background { duration: 250ms; }
+    animate border-color { duration: 250ms; }
+    animate border-width { duration: 250ms; }
+
+    Rectangle {
+        width: root.checked ? 24px : 16px;
+        height: root.checked ? 24px : 16px;
+        border-radius: self.width / 2;
+
+        background: root.checked ?
+            (ThemeSettings.is_dark ? ThemeSettings.primary_accent.darker(2.0) : #ffffff) :
+            (ThemeSettings.is_dark ? #8E918F : #747775);
+
+        x: root.checked ? parent.width - self.width - 4px : 8px;
+        y: (parent.height - self.height) / 2;
+
+        animate x {
+            duration: 250ms;
+            easing: cubic-bezier(0.2, 0.0, 0, 1.0);
+        }
+        animate width {
+            duration: 250ms;
+            easing: cubic-bezier(0.2, 0.0, 0, 1.0);
+        }
+        animate height {
+            duration: 250ms;
+            easing: cubic-bezier(0.2, 0.0, 0, 1.0);
+        }
+        animate background { duration: 250ms; }
+
+        drop-shadow-blur: root.checked ? 4px : 0px;
+        drop-shadow-color: root.checked ? #00000040 : transparent;
+    }
+
+    TouchArea {
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled();
+        }
+    }
+}

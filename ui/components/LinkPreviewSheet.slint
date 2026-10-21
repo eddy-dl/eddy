@@ -1,0 +1,501 @@
+import { LineEdit, Spinner } from "std-widgets.slint";
+import { ThemeSettings } from "../themes/theme.slint";
+import { FileTypeIcon } from "FileTypeIcon.slint";
+import { ActionButton } from "Buttons.slint";
+import { Chip, SectionLabel } from "Chips.slint";
+import { LinkBackend, LinkFormat, Links, PendingLink, ProbeState, TorrentFile } from "../globals/Links.slint";
+
+// One quality option for a yt-dlp link: radio dot, label, detail on the right.
+component FormatRow inherits Rectangle {
+    in property <LinkFormat> format;
+    in property <bool> selected;
+    callback clicked();
+
+    height: 44px;
+    border-radius: 8px;
+    background: ta.pressed ? ThemeSettings.text_color.transparentize(92%) : transparent;
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 12px;
+
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 20px;
+                height: 20px;
+                border-radius: 10px;
+                border-width: 2px;
+                border-color: root.selected ? ThemeSettings.primary_accent : ThemeSettings.text_color.transparentize(50%);
+                animate border-color { duration: 150ms; }
+
+                Rectangle {
+                    width: root.selected ? 10px : 0px;
+                    height: self.width;
+                    border-radius: self.width / 2;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    background: ThemeSettings.primary_accent;
+                    animate width { duration: 150ms; easing: ease-in-out; }
+                }
+            }
+        }
+
+        Text {
+            text: root.format.label;
+            font-size: 14px;
+            font-weight: 600;
+            color: ThemeSettings.text_color;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: root.format.detail;
+            font-size: 12px;
+            color: ThemeSettings.text_color.transparentize(35%);
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+    }
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// One file inside a torrent: checkbox, path, size. Tapping toggles it.
+component FileRow inherits Rectangle {
+    in property <TorrentFile> file;
+    callback clicked();
+
+    height: 40px;
+    border-radius: 8px;
+    background: ta.pressed ? ThemeSettings.text_color.transparentize(92%) : transparent;
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 12px;
+
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 20px;
+                height: 20px;
+                border-radius: 5px;
+                border-width: root.file.selected ? 0px : 2px;
+                border-color: ThemeSettings.text_color.transparentize(50%);
+                background: root.file.selected ? ThemeSettings.primary_accent : transparent;
+                animate background { duration: 150ms; }
+
+                Path {
+                    width: 14px;
+                    height: 14px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    viewbox-width: 24;
+                    viewbox-height: 24;
+                    stroke: #ffffff;
+                    stroke-width: 3px;
+                    stroke-line-cap: round;
+                    stroke-line-join: round;
+                    fill: transparent;
+                    commands: "M5 12.5l4.5 4.5l9.5 -10";
+                    opacity: root.file.selected ? 1 : 0;
+                }
+            }
+        }
+
+        Text {
+            text: root.file.path;
+            font-size: 13px;
+            color: root.file.selected ? ThemeSettings.text_color : ThemeSettings.text_color.transparentize(45%);
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+
+        Text {
+            text: root.file.size;
+            font-size: 12px;
+            color: ThemeSettings.text_color.transparentize(35%);
+            vertical-alignment: center;
+        }
+    }
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// Preview of one pending link with its download options: how to download it
+// (direct, torrent or yt-dlp), the quality for yt-dlp, the file name, and
+// for a torrent which of its files to fetch.
+export component LinkPreviewSheet inherits Rectangle {
+    in property <PendingLink> link;
+    in property <int> position; // 1-based, for "1 of 3"
+    in property <int> total;
+    // Space the sheet may take; past this its contents scroll.
+    in property <length> available_height: 10000px;
+    // The height everything needs without scrolling.
+    out property <length> content_height: layout.preferred-height + footer.preferred-height;
+
+    callback download(backend: LinkBackend, format: string, filename: string);
+    callback skip();
+
+    // The user's choices, reset whenever a different link is shown.
+    private property <int> backend_index: 0;
+    private property <int> format_index: 0;
+    private property <string> filename_text: root.link.filename;
+    private property <int> shown_id: root.link.id;
+    changed shown_id => {
+        root.backend_index = 0;
+        root.format_index = 0;
+        root.audio_mode = false;
+        root.filename_text = root.link.filename;
+        root.name_edited = false;
+    }
+    // The name arrives once the link has been checked; take it unless the
+    // user already typed one.
+    private property <bool> name_edited: false;
+    private property <string> suggested_name: root.link.filename;
+    changed suggested_name => {
+        if (!root.name_edited) {
+            root.filename_text = root.suggested_name;
+        }
+    }
+
+    private property <LinkBackend> backend: root.link.backends.length > 0
+        ? root.link.backends[Math.min(root.backend_index, root.link.backends.length - 1)] : LinkBackend.Direct;
+    // Media links: save a video as it is, or as audio (music is only audio).
+    private property <bool> is_media: root.backend == LinkBackend.Media;
+    private property <bool> audio_mode: false;
+    private property <bool> as_audio: root.is_media && (root.link.media_kind == 2 || root.audio_mode);
+    private property <int> codec_index: 0; // 0 = M4A, 1 = MP3
+    private property <[LinkFormat]> qualities: root.as_audio ? root.link.audio_formats : root.link.formats;
+    private property <bool> show_formats: root.is_media && root.qualities.length > 0;
+    // Torrent links always list Torrent first. Downloading one Direct saves
+    // the .torrent file itself, so the name gets that extension.
+    private property <bool> torrent_link: root.link.backends.length > 0 && root.link.backends[0] == LinkBackend.Torrent;
+    private property <bool> torrent_file_direct: root.torrent_link && root.backend == LinkBackend.Direct;
+    // A torrent's own files keep their names; picking which ones replaces
+    // the name field.
+    // A post's or playlist's items get picked the same way.
+    private property <bool> show_files: (root.backend == LinkBackend.Torrent || root.is_media) && root.link.files.length > 1;
+    private property <bool> can_download: !((root.backend == LinkBackend.Torrent || root.is_media)
+        && root.link.files.length > 0 && root.link.files_selected == 0);
+
+    height: Math.min(root.content_height, root.available_height);
+    background: ThemeSettings.surface;
+    border-radius: 16px;
+    clip: true;
+    drop-shadow-blur: 12px;
+    drop-shadow-color: #00000020;
+
+    // Keeps taps on the sheet's gaps from reaching the backdrop behind it.
+    TouchArea { }
+
+    // The options scroll when they don't fit; Skip / Download stay put
+    // underneath.
+    VerticalLayout {
+        Flickable {
+            vertical-stretch: 1;
+            content-height: layout.preferred-height;
+            // Only scrollable when the content doesn't fit.
+            interactive: layout.preferred-height > self.height;
+
+            layout := VerticalLayout {
+                padding: 16px;
+                padding-bottom: 4px;
+                spacing: 10px;
+
+                HorizontalLayout {
+                    Text {
+                        text: @tr("New download");
+                        font-size: 16px;
+                        font-weight: 700;
+                        color: ThemeSettings.text_color;
+                        horizontal-stretch: 1;
+                    }
+                    if root.total > 1: Text {
+                        text: @tr("{} of {}", root.position, root.total);
+                        font-size: 13px;
+                        color: ThemeSettings.text_color.transparentize(35%);
+                        vertical-alignment: center;
+                    }
+                }
+
+                // A media link's thumbnail, cropped to a banner.
+                if root.link.thumbnail.width > 0: Rectangle {
+                    height: Math.min(180px, self.width * 9 / 16);
+                    border-radius: 12px;
+                    clip: true;
+                    background: ThemeSettings.text_color.transparentize(92%);
+                    Image {
+                        width: 100%;
+                        height: 100%;
+                        source: root.link.thumbnail;
+                        image-fit: cover;
+                    }
+                }
+
+                // What the link is.
+                HorizontalLayout {
+                    spacing: 12px;
+                    padding-top: 4px;
+                    padding-bottom: 4px;
+
+                    VerticalLayout {
+                        alignment: center;
+                        FileTypeIcon {
+                            file_type: root.link.file_type;
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        horizontal-stretch: 1;
+
+                        Text {
+                            text: root.link.filename != "" ? root.link.filename : root.link.url;
+                            font-size: 15px;
+                            font-weight: 600;
+                            color: ThemeSettings.text_color;
+                            overflow: elide;
+                        }
+
+                        HorizontalLayout {
+                            spacing: 6px;
+                            if root.link.state == ProbeState.Probing: Spinner {
+                                width: 14px;
+                                height: 14px;
+                                indeterminate: true;
+                            }
+                            Text {
+                                text: root.link.state == ProbeState.Probing ? @tr("Checking link…")
+                                    : root.link.state == ProbeState.Failed ? root.link.error
+                                    : root.link.size != "" ? root.link.source + " · " + root.link.size
+                                    : root.link.source + " · " + @tr("Size unknown");
+                                font-size: 12px;
+                                color: root.link.state == ProbeState.Failed ? #E5534B : ThemeSettings.text_color.transparentize(35%);
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                                overflow: elide;
+                            }
+                        }
+                    }
+                }
+
+                SectionLabel { text: @tr("Download with"); }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    for backend[i] in root.link.backends: Chip {
+                        text: backend == LinkBackend.Media ? (root.link.service.is-empty ? @tr("Media") : root.link.service)
+                            : backend == LinkBackend.Torrent ? @tr("Torrent")
+                            : @tr("Direct");
+                        selected: root.backend == backend;
+                        clicked => {
+                            root.backend_index = i;
+                            root.format_index = 0;
+                        }
+                    }
+                }
+
+                // Videos can be saved as just their audio.
+                if root.is_media && root.link.media_kind == 1: SectionLabel { text: @tr("Save as"); }
+                if root.is_media && root.link.media_kind == 1: HorizontalLayout {
+                    spacing: 8px;
+                    Chip {
+                        text: @tr("Video");
+                        selected: !root.audio_mode;
+                        clicked => {
+                            root.audio_mode = false;
+                            root.format_index = 0;
+                        }
+                    }
+                    Chip {
+                        text: @tr("Audio");
+                        selected: root.audio_mode;
+                        clicked => {
+                            root.audio_mode = true;
+                            root.format_index = 0;
+                        }
+                    }
+                }
+
+                if root.as_audio: SectionLabel { text: @tr("Audio format"); }
+                if root.as_audio: HorizontalLayout {
+                    spacing: 8px;
+                    Chip {
+                        text: "M4A";
+                        selected: root.codec_index == 0;
+                        clicked => { root.codec_index = 0; }
+                    }
+                    Chip {
+                        text: "MP3";
+                        selected: root.codec_index == 1;
+                        clicked => { root.codec_index = 1; }
+                    }
+                }
+
+                if root.show_formats: SectionLabel { text: @tr("Quality"); }
+
+                if root.show_formats: VerticalLayout {
+                    for format[i] in root.qualities: FormatRow {
+                        format: format;
+                        selected: root.format_index == i;
+                        clicked => { root.format_index = i; }
+                    }
+                }
+
+                if root.show_files: HorizontalLayout {
+                    spacing: 8px;
+                    SectionLabel {
+                        text: root.is_media ? @tr("Items") : @tr("Files");
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: @tr("{} of {} selected", root.link.files_selected, root.link.files.length);
+                        font-size: 12px;
+                        color: ThemeSettings.text_color.transparentize(35%);
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    // Selects everything, or nothing once everything is selected.
+                    Rectangle {
+                        property <bool> all_selected: root.link.files_selected == root.link.files.length;
+                        width: all_label.preferred-width + 20px;
+                        height: 28px;
+                        border-radius: 14px;
+                        background: ta_all.pressed ? ThemeSettings.text_color.transparentize(88%) : transparent;
+                        all_label := Text {
+                            text: parent.all_selected ? @tr("None") : @tr("All");
+                            font-size: 13px;
+                            font-weight: 600;
+                            color: ThemeSettings.primary_accent;
+                            vertical-alignment: center;
+                        }
+                        ta_all := TouchArea {
+                            clicked => { Links.select_all_files(root.link.id, !parent.all_selected); }
+                        }
+                    }
+                }
+
+                if root.show_files: VerticalLayout {
+                    for file in root.link.files: FileRow {
+                        file: file;
+                        clicked => { Links.toggle_file(root.link.id, file.index); }
+                    }
+                }
+
+                if root.backend != LinkBackend.Torrent: SectionLabel { text: @tr("File name"); }
+
+                if root.backend != LinkBackend.Torrent: HorizontalLayout {
+                    spacing: 6px;
+                    LineEdit {
+                        text <=> root.filename_text;
+                        edited => { root.name_edited = true; }
+                        horizontal-stretch: 1;
+                        font-size: 14px;
+                        input-method-hints: { capitalization: CapitalizationMode.none, auto-correct: false, auto-complete: false };
+                        placeholder-text: @tr("Chosen when the download starts");
+                    }
+                    if root.torrent_file_direct: Text {
+                        text: ".torrent";
+                        font-size: 14px;
+                        color: ThemeSettings.text_color.transparentize(35%);
+                        vertical-alignment: center;
+                    }
+                }
+
+                SectionLabel { text: @tr("Save to"); }
+
+                // Tap to pick a different folder for just this download.
+                Rectangle {
+                    height: 48px;
+                    border-radius: 8px;
+                    border-width: 1px;
+                    border-color: ThemeSettings.text_color.transparentize(70%);
+                    background: ta_folder.pressed ? ThemeSettings.text_color.transparentize(92%) : transparent;
+
+                    ta_folder := TouchArea {
+                        clicked => { Links.pick_folder(root.link.id); }
+                    }
+
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        spacing: 12px;
+
+                        VerticalLayout {
+                            alignment: center;
+                            Path {
+                                width: 20px;
+                                height: 20px;
+                                viewbox-width: 24;
+                                viewbox-height: 24;
+                                stroke: ThemeSettings.text_color.transparentize(20%);
+                                stroke-width: 2px;
+                                stroke-line-cap: round;
+                                stroke-line-join: round;
+                                fill: transparent;
+                                commands: "M3 7a2 2 0 0 1 2 -2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2H5a2 2 0 0 1 -2 -2z";
+                            }
+                        }
+                        Text {
+                            text: root.link.folder;
+                            font-size: 14px;
+                            color: ThemeSettings.text_color;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: @tr("Change");
+                            font-size: 13px;
+                            font-weight: 600;
+                            color: ThemeSettings.primary_accent;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+
+        footer := HorizontalLayout {
+            padding: 16px;
+            padding-top: 12px;
+            spacing: 12px;
+            ActionButton {
+                text: @tr("Skip");
+                horizontal-stretch: 1;
+                height: 48px;
+                clicked => { root.skip(); }
+            }
+            ActionButton {
+                text: @tr("Download");
+                primary: true;
+                horizontal-stretch: 1;
+                height: 48px;
+                opacity: root.can_download ? 1.0 : 0.4;
+                animate opacity { duration: 150ms; }
+                clicked => {
+                    if (root.can_download) {
+                        root.download(root.backend,
+                            // Audio: "audio|<kbps>|<codec>"; otherwise the quality's key.
+                            root.as_audio
+                                ? "audio|" + (root.qualities.length > 0 ? root.qualities[Math.min(root.format_index, root.qualities.length - 1)].selector : "0")
+                                    + "|" + (root.codec_index == 1 ? "mp3" : "m4a")
+                                : root.show_formats ? root.qualities[Math.min(root.format_index, root.qualities.length - 1)].selector : "",
+                            root.torrent_file_direct && !root.filename_text.is-empty ? root.filename_text + ".torrent" : root.filename_text);
+                    }
+                }
+            }
+        }
+    }
+}

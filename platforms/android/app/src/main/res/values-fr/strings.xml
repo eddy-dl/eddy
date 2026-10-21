@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_channel">Téléchargements</string>
+    <string name="starting_download">Démarrage du téléchargement…</string>
+    <string name="download_failed">Impossible de démarrer le téléchargement</string>
+    <plurals name="downloading_count">
+        <item quantity="one">%d fichier en cours de téléchargement</item>
+        <item quantity="many">%d fichiers en cours de téléchargement</item>
+        <item quantity="other">%d fichiers en cours de téléchargement</item>
+    </plurals>
+    <string name="share_add">Ajouter à Eddy</string>
+    <string name="share_download">Télécharger avec Eddy</string>
+    <string name="share_preview">Aperçu dans Eddy</string>
+    <string name="no_links_found">Aucun lien trouvé</string>
+    <plurals name="links_added">
+        <item quantity="one">%d lien ajouté à Eddy</item>
+        <item quantity="many">%d liens ajoutés à Eddy</item>
+        <item quantity="other">%d liens ajoutés à Eddy</item>
+    </plurals>
+    <string name="download_started">Téléchargement démarré</string>
+    <string name="results_channel">Téléchargements terminés</string>
+    <string name="no_active_downloads">Aucun téléchargement en cours</string>
+    <string name="downloaded_name">%s téléchargé</string>
+    <string name="download_failed_name">Échec du téléchargement : %s</string>
+    <string name="cant_open_file">Impossible d\'ouvrir le fichier</string>
+    <string name="allow_installs">Autorisez Eddy à installer des applications, puis touchez à nouveau le paquet</string>
+</resources>

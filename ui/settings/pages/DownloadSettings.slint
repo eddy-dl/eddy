@@ -1,0 +1,322 @@
+import { ActionButton, ModernSwitch } from "../../components/Buttons.slint";
+import { AppSettings, HelperPackage } from "../../globals/AppSettings.slint";
+import { ThemeSettings } from "../../themes/theme.slint";
+import { AnimatedPopup } from "../../components/AnimatedPopup.slint";
+
+// One yt-dlp helper app: what it is, its state, and what tapping does.
+component HelperRow inherits Rectangle {
+    in property <HelperPackage> package;
+    in property <color> text_color;
+    callback clicked();
+
+    property <string> name: root.package.key == "python" ? @tr("Python & yt-dlp")
+        : root.package.key == "ytdlp" ? "yt-dlp"
+        : root.package.key == "ffmpeg" ? "FFmpeg" : "Deno";
+    property <string> action: root.package.state == 1 ? @tr("Get")
+        : root.package.state == 3 ? @tr("Update")
+        : root.package.state == 5 ? @tr("Install") : "";
+
+    border-radius: 8px;
+    background: ta.has-hover ? ThemeSettings.hover_color : transparent;
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding: 8px;
+        spacing: 16px;
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 4px;
+            horizontal-stretch: 1;
+
+            Text {
+                text: root.name;
+                font-size: 16px;
+                font-weight: 600;
+                color: root.text_color;
+            }
+            Text {
+                text: root.package.key == "python" || root.package.key == "ytdlp" ? @tr("Needed for media from most sites")
+                    : root.package.key == "ffmpeg" ? @tr("Joins video and audio, converts to audio, saves streams")
+                    : @tr("Optional: helps with YouTube and Instagram");
+                font-size: 13px;
+                color: root.text_color.transparentize(40%);
+                wrap: word-wrap;
+            }
+            Text {
+                text: root.package.state == 0 ? @tr("Checking…")
+                    : root.package.state == 1 ? @tr("Not installed · {}", root.package.size)
+                    : root.package.state == 2 ? @tr("Installed · {}", root.package.installed)
+                    : root.package.state == 3 ? @tr("Update: {} → {} · {}", root.package.installed, root.package.latest, root.package.size)
+                    : root.package.state == 4 ? @tr("Downloading… {}%", Math.round(root.package.progress * 100))
+                    : root.package.state == 5 ? @tr("Downloaded · tap to install")
+                    : root.package.state == 6 ? @tr("Not available for this device")
+                    : root.package.state == 8 ? @tr("Installing…")
+                    : @tr("Couldn't check for packages");
+                font-size: 13px;
+                color: root.package.state == 2 ? ThemeSettings.primary_accent.transparentize(30%) : root.text_color.transparentize(40%);
+                wrap: word-wrap;
+            }
+        }
+
+        if root.action != "": VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: action_label.preferred-width + 24px;
+                height: 32px;
+                border-radius: 16px;
+                background: ThemeSettings.primary_accent;
+                action_label := Text {
+                    text: root.action;
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: #ffffff;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}
+
+export component DownloadSettings inherits Rectangle {
+    in property <color> text_color: #FFFFFF;
+    // True once the content has scrolled away from the top; tints the settings header.
+    out property <bool> scrolled: scroller.content-y < 0;
+
+    // Size of the whole window, so the popup's dimming covers all of it.
+    in property <length> window_width;
+    in property <length> window_height;
+
+    // True while the download confirmation is showing.
+    out property <bool> popup_open: false;
+    private property <int> dismiss_requests: 0;
+    // Back/Escape pressed inside the popup.
+    callback popup_back_pressed();
+    // Animates the popup out (for Back/Escape).
+    public function dismiss_popup() {
+        root.dismiss_requests += 1;
+    }
+
+    // The package the confirmation is about.
+    private property <HelperPackage> confirming;
+    private property <string> confirming_name: root.confirming.key == "python" ? @tr("Python & yt-dlp")
+        : root.confirming.key == "ytdlp" ? "yt-dlp"
+        : root.confirming.key == "ffmpeg" ? "FFmpeg" : "Deno";
+
+    function helper_tapped(package: HelperPackage) {
+        if (package.state == 1 || package.state == 3) {
+            // Nothing downloads without asking.
+            root.confirming = package;
+            root.popup_open = true;
+            confirm_popup.show();
+        } else if (package.state == 5) {
+            AppSettings.helper_install(package.key);
+        } else if (package.state == 7) {
+            AppSettings.helpers_check();
+        }
+    }
+
+    confirm_popup := PopupWindow {
+        // Spans the whole window (popup coordinates are relative to this page).
+        x: -root.absolute-position.x;
+        y: -root.absolute-position.y;
+        width: root.window_width;
+        height: root.window_height;
+        // AnimatedPopup handles outside clicks so it can animate out first.
+        close-policy: PopupClosePolicy.no-auto-close;
+
+        AnimatedPopup {
+            card_width: Math.min(340px, root.window_width - 40px);
+            card_height: confirm_layout.preferred-height;
+            dismiss_requests: root.dismiss_requests;
+            back_pressed => { root.popup_back_pressed(); }
+            closed => {
+                confirm_popup.close();
+                root.popup_open = false;
+            }
+
+            confirm_layout := VerticalLayout {
+                padding: 20px;
+                spacing: 12px;
+
+                Text {
+                    text: @tr("Download {}?", root.confirming_name);
+                    font-size: 18px;
+                    font-weight: 700;
+                    color: root.text_color;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: AppSettings.is_mobile
+                        ? @tr("Eddy downloads its installer ({}) from YTDLnis's packages on GitHub. Android then asks you whether to install it.", root.confirming.size)
+                        : @tr("Eddy downloads it ({}) from GitHub and keeps it in its own folder.", root.confirming.size);
+                    font-size: 14px;
+                    color: root.text_color.transparentize(30%);
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    spacing: 12px;
+                    padding-top: 4px;
+                    ActionButton {
+                        text: @tr("Cancel");
+                        horizontal-stretch: 1;
+                        height: 48px;
+                        clicked => { root.dismiss_popup(); }
+                    }
+                    ActionButton {
+                        text: @tr("Download");
+                        primary: true;
+                        horizontal-stretch: 1;
+                        height: 48px;
+                        clicked => {
+                            AppSettings.helper_download(root.confirming.key);
+                            root.dismiss_popup();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    TouchArea { }
+
+    scroller := Flickable {
+        width: 100%;
+        height: 100%;
+        content-height: dl_layout.preferred-height;
+
+        dl_layout := VerticalLayout {
+            spacing: 24px;
+            alignment: start;
+            padding-left: 12px;
+            padding-right: 12px;
+            padding-top: 8px;
+
+            // Full-row clickable download location setting
+            Rectangle {
+                border-radius: 8px;
+                background: dl_row_ta.has-hover ? ThemeSettings.hover_color : transparent;
+
+                dl_row_ta := TouchArea {
+                    clicked => {
+                        AppSettings.select_download_folder();
+                    }
+                }
+
+                HorizontalLayout {
+                    padding: 8px;
+                    alignment: space-between;
+                    spacing: 16px;
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        horizontal-stretch: 1;
+
+                        Text {
+                            text: @tr("Download Location");
+                            font-size: 18px;
+                            font-weight: 600;
+                            color: root.text_color;
+                        }
+
+                        Text {
+                            text: AppSettings.current_download_path != "" ? AppSettings.current_download_path : AppSettings.default_download_path;
+                            font-size: 13px;
+                            color: ThemeSettings.primary_accent.transparentize(30%);
+                            overflow: elide;
+                        }
+                    }
+                }
+            }
+
+            // Android only. The switch shows whether access is granted; the
+            // row opens Android's screen to grant (or take back) it.
+            if AppSettings.is_mobile: Rectangle {
+                border-radius: 8px;
+                background: access_ta.has-hover ? ThemeSettings.hover_color : transparent;
+
+                access_ta := TouchArea {
+                    clicked => { AppSettings.request_all_files_access(); }
+                }
+
+                HorizontalLayout {
+                    padding: 8px;
+                    spacing: 16px;
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        horizontal-stretch: 1;
+
+                        Text {
+                            text: @tr("All files access");
+                            font-size: 18px;
+                            font-weight: 600;
+                            color: root.text_color;
+                        }
+
+                        Text {
+                            text: AppSettings.all_files_access
+                                ? @tr("Downloads go straight into any folder you pick.")
+                                : @tr("Lets downloads go straight into any folder. Without it, folders outside Download and Documents get the files copied in once they finish.");
+                            font-size: 13px;
+                            color: root.text_color.transparentize(40%);
+                            wrap: word-wrap;
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: switch.width;
+                            height: switch.height;
+                            switch := ModernSwitch {
+                                checked: AppSettings.all_files_access;
+                            }
+                            // Over the switch, so it never flips by itself:
+                            // it follows the permission.
+                            TouchArea {
+                                clicked => { AppSettings.request_all_files_access(); }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // yt-dlp and friends (Android: YTDLnis's helper apps, which the user
+            // installs; desktop: Eddy's own copies).
+            if AppSettings.helper_packages.length > 0: VerticalLayout {
+                spacing: 8px;
+
+                VerticalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    spacing: 4px;
+                    Text {
+                        text: AppSettings.is_mobile ? @tr("yt-dlp packages") : @tr("Media tools");
+                        font-size: 13px;
+                        font-weight: 700;
+                        color: ThemeSettings.primary_accent;
+                    }
+                    Text {
+                        text: AppSettings.is_mobile
+                            ? @tr("Media from most sites needs these. They're separate apps, YTDLnis's packages: Eddy can fetch one for you, and you install it.")
+                            : @tr("Media from most sites needs these. Eddy can install them in its own folder; copies you already have are used too.");
+                        font-size: 13px;
+                        color: root.text_color.transparentize(40%);
+                        wrap: word-wrap;
+                    }
+                }
+                for package in AppSettings.helper_packages: HelperRow {
+                    package: package;
+                    text_color: root.text_color;
+                    clicked => { root.helper_tapped(package); }
+                }
+            }
+        }
+    }
+}

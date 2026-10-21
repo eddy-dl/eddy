@@ -1,0 +1,428 @@
+msgid ""
+msgstr ""
+"Language: fr\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+msgid "Downloads"
+msgstr "Téléchargements"
+
+msgid "Downloading"
+msgstr "En cours"
+
+msgid "Stopped"
+msgstr "Arrêtés"
+
+msgid "Completed"
+msgstr "Terminés"
+
+msgid "Settings"
+msgstr "Paramètres"
+
+msgid "Add Link(s)"
+msgstr "Ajouter des liens"
+
+msgid "Add from file (.txt), (.torrent)"
+msgstr "Ajouter depuis un fichier (.txt), (.torrent)"
+
+msgid "General"
+msgstr "Général"
+
+msgid "Appearance"
+msgstr "Apparence"
+
+msgid "Select a setting category"
+msgstr "Choisissez une catégorie de paramètres"
+
+msgid "Language"
+msgstr "Langue"
+
+msgid "Language, haptics"
+msgstr "Langue, retour haptique"
+
+msgid "Haptic Feedback"
+msgstr "Retour haptique"
+
+msgid "Enable haptic feedback for some actions"
+msgstr "Activer le retour haptique pour certaines actions"
+
+msgid "Download Location"
+msgstr "Emplacement des téléchargements"
+
+
+msgid "Sort & filter · {}"
+msgstr "Trier et filtrer · {}"
+
+msgid "Sort by"
+msgstr "Trier par"
+
+msgid "Date"
+msgstr "Date"
+
+msgid "Name"
+msgstr "Nom"
+
+msgid "Size"
+msgstr "Taille"
+
+msgid "Progress"
+msgstr "Progression"
+
+msgid "Ascending"
+msgstr "Croissant"
+
+msgid "Descending"
+msgstr "Décroissant"
+
+msgid "Show"
+msgstr "Afficher"
+
+msgid "All"
+msgstr "Tout"
+
+msgid "Video"
+msgstr "Vidéo"
+
+msgid "Audio"
+msgstr "Audio"
+
+msgid "Images"
+msgstr "Images"
+
+msgid "Documents"
+msgstr "Documents"
+
+msgid "Archives"
+msgstr "Archives"
+
+msgid "Change themes & accent color"
+msgstr "Thème et couleur d’accent"
+
+msgid "Folder for files, threads per download"
+msgstr "Dossier des fichiers, connexions par téléchargement"
+
+msgid "Theme Mode"
+msgstr "Thème"
+
+msgid "System Default"
+msgstr "Par défaut du système"
+
+msgid "Light Mode"
+msgstr "Clair"
+
+msgid "Dark Mode"
+msgstr "Sombre"
+
+msgid "Accent Color"
+msgstr "Couleur d’accent"
+
+msgid "Muted Red"
+msgstr "Rouge doux"
+
+msgid "Green"
+msgstr "Vert"
+
+msgid "Pink"
+msgstr "Rose"
+
+msgid "Purple"
+msgstr "Violet"
+
+msgid "Yellow"
+msgstr "Jaune"
+
+msgid "Orange"
+msgstr "Orange"
+
+msgid "Blue"
+msgstr "Bleu"
+
+msgid "Greyscale"
+msgstr "Niveaux de gris"
+
+msgid "System Accent"
+msgstr "Accent du système"
+
+msgid "Color"
+msgstr "Couleur"
+
+msgid "AMOLED Pure Black"
+msgstr "Noir pur AMOLED"
+
+msgid "Use true black backgrounds for OLED displays"
+msgstr "Utiliser un fond noir pur pour les écrans OLED"
+
+msgid "Tap to pick a primary color"
+msgstr "Touchez pour choisir une couleur principale"
+
+msgid "Navigation"
+msgstr "Navigation"
+
+msgid "Top Navigation Bar"
+msgstr "Barre de navigation en haut"
+
+msgid "Show the tabs under the header instead of at the bottom"
+msgstr "Afficher les onglets sous l’en-tête plutôt qu’en bas"
+
+msgid "{} of {}"
+msgstr "{} sur {}"
+
+msgid "{} left"
+msgstr "{} restant"
+
+msgid "Failed"
+msgstr "Échec"
+
+msgid "Queued"
+msgstr "En attente"
+
+msgid "Paused"
+msgstr "En pause"
+
+msgid "Cancelled"
+msgstr "Annulé"
+
+msgid "Added {}"
+msgstr "Ajouté le {}"
+
+msgid "{n} selected"
+msgid_plural "{n} selected"
+msgstr[0] "{n} sélectionné"
+msgstr[1] "{n} sélectionnés"
+
+msgid "Add links"
+msgstr "Ajouter des liens"
+
+msgid "Paste"
+msgstr "Coller"
+
+msgid "Paste links, or any text containing them"
+msgstr "Collez des liens, ou un texte qui en contient"
+
+msgid "Each link is checked before it's added, so you can pick how to download it."
+msgstr "Chaque lien est vérifié avant d'être ajouté, pour choisir comment le télécharger."
+
+msgid "Cancel"
+msgstr "Annuler"
+
+msgid "Process"
+msgstr "Traiter"
+
+msgid "New download"
+msgstr "Nouveau téléchargement"
+
+msgid "Checking link…"
+msgstr "Vérification du lien…"
+
+msgid "Size unknown"
+msgstr "Taille inconnue"
+
+msgid "Download with"
+msgstr "Télécharger avec"
+
+msgid "Torrent"
+msgstr "Torrent"
+
+msgid "Direct"
+msgstr "Direct"
+
+msgid "Quality"
+msgstr "Qualité"
+
+msgid "File name"
+msgstr "Nom du fichier"
+
+msgid "Chosen when the download starts"
+msgstr "Choisi au début du téléchargement"
+
+msgid "Skip"
+msgstr "Passer"
+
+msgid "Download"
+msgstr "Télécharger"
+
+msgid "Download now"
+msgstr "Télécharger maintenant"
+
+msgid "{n} link"
+msgid_plural "{n} links"
+msgstr[0] "{n} lien"
+msgstr[1] "{n} liens"
+
+msgid "Auto"
+msgstr "Auto"
+
+msgid "Each link is checked first and downloaded the best way for it."
+msgstr "Chaque lien est d'abord vérifié, puis téléchargé de la meilleure façon."
+
+msgid "Torrents and magnets always download as torrents."
+msgstr "Les torrents et liens magnet sont toujours téléchargés en torrent."
+
+msgid "Later"
+msgstr "Plus tard"
+
+msgid "Files"
+msgstr "Fichiers"
+
+msgid "{} of {} selected"
+msgstr "{} sur {} sélectionnés"
+
+msgid "All"
+msgstr "Tous"
+
+msgid "None"
+msgstr "Aucun"
+
+msgid "Pause"
+msgstr "Mettre en pause"
+
+msgid "Resume"
+msgstr "Reprendre"
+
+msgid "Retry"
+msgstr "Réessayer"
+
+msgid "Delete"
+msgstr "Supprimer"
+
+msgid "Delete {n} download?"
+msgid_plural "Delete {n} downloads?"
+msgstr[0] "Supprimer {n} téléchargement ?"
+msgstr[1] "Supprimer {n} téléchargements ?"
+
+msgid "They're removed from the list and their files are deleted."
+msgstr "Ils sont retirés de la liste et leurs fichiers sont supprimés."
+
+msgid "They're removed from the list. Their files stay where they are."
+msgstr "Ils sont retirés de la liste. Leurs fichiers restent en place."
+
+msgid "Also delete the files"
+msgstr "Supprimer aussi les fichiers"
+
+msgid "Rename"
+msgstr "Renommer"
+
+msgid "Change folder"
+msgstr "Changer de dossier"
+
+msgid "Refresh link"
+msgstr "Actualiser le lien"
+
+msgid "Paste a new link if this one expired"
+msgstr "Collez un nouveau lien si celui-ci a expiré"
+
+msgid "Copy link"
+msgstr "Copier le lien"
+
+msgid "Link copied"
+msgstr "Lien copié"
+
+msgid "New link"
+msgstr "Nouveau lien"
+
+msgid "A new link to the same file, e.g. after it expired. The download carries on from where it got to."
+msgstr "Un nouveau lien vers le même fichier, par exemple après expiration. Le téléchargement reprend là où il s'était arrêté."
+
+msgid "Back"
+msgstr "Retour"
+
+msgid "Save"
+msgstr "Enregistrer"
+
+msgid "Save to"
+msgstr "Enregistrer dans"
+
+msgid "Change"
+msgstr "Changer"
+
+msgid "All files access"
+msgstr "Accès à tous les fichiers"
+
+msgid "Downloads go straight into any folder you pick."
+msgstr "Les téléchargements vont directement dans le dossier choisi."
+
+msgid "Lets downloads go straight into any folder. Without it, folders outside Download and Documents get the files copied in once they finish."
+msgstr "Permet d'enregistrer directement dans n'importe quel dossier. Sans cet accès, les fichiers sont copiés dans les dossiers hors de Download et Documents une fois terminés."
+
+msgid "Media"
+msgstr "Média"
+
+msgid "Save as"
+msgstr "Enregistrer en"
+
+msgid "Audio format"
+msgstr "Format audio"
+
+msgid "Items"
+msgstr "Éléments"
+
+msgid "Python & yt-dlp"
+msgstr "Python et yt-dlp"
+
+msgid "Get"
+msgstr "Obtenir"
+
+msgid "Update"
+msgstr "Mettre à jour"
+
+msgid "Install"
+msgstr "Installer"
+
+msgid "Needed for media from most sites"
+msgstr "Nécessaire pour les médias de la plupart des sites"
+
+msgid "Joins video and audio, converts to audio, saves streams"
+msgstr "Assemble vidéo et audio, convertit en audio, enregistre les flux"
+
+msgid "Optional: helps with YouTube and Instagram"
+msgstr "Facultatif : aide pour YouTube et Instagram"
+
+msgid "Checking…"
+msgstr "Vérification…"
+
+msgid "Not installed · {}"
+msgstr "Non installé · {}"
+
+msgid "Installed · {}"
+msgstr "Installé · {}"
+
+msgid "Update: {} → {} · {}"
+msgstr "Mise à jour : {} → {} · {}"
+
+msgid "Downloading… {}%"
+msgstr "Téléchargement… {} %"
+
+msgid "Downloaded · tap to install"
+msgstr "Téléchargé · touchez pour installer"
+
+msgid "Not available for this device"
+msgstr "Non disponible pour cet appareil"
+
+msgid "Couldn't check for packages"
+msgstr "Impossible de vérifier les paquets"
+
+msgid "Download {}?"
+msgstr "Télécharger {} ?"
+
+msgid "Eddy downloads its installer ({}) from YTDLnis's packages on GitHub. Android then asks you whether to install it."
+msgstr "Eddy télécharge son installateur ({}) depuis les paquets de YTDLnis sur GitHub. Android vous demande ensuite si vous voulez l'installer."
+
+msgid "yt-dlp packages"
+msgstr "Paquets yt-dlp"
+
+msgid "Media from most sites needs these. They're separate apps, YTDLnis's packages: Eddy can fetch one for you, and you install it."
+msgstr "Les médias de la plupart des sites en ont besoin. Ce sont des applications séparées, les paquets de YTDLnis : Eddy peut en récupérer un pour vous, et vous l'installez."
+
+msgid "Installing…"
+msgstr "Installation…"
+
+msgid "Eddy downloads it ({}) from GitHub and keeps it in its own folder."
+msgstr "Eddy le télécharge ({}) depuis GitHub et le garde dans son propre dossier."
+
+msgid "Media tools"
+msgstr "Outils média"
+
+msgid "Media from most sites needs these. Eddy can install them in its own folder; copies you already have are used too."
+msgstr "Les médias de la plupart des sites en ont besoin. Eddy peut les installer dans son propre dossier ; ceux déjà installés sont aussi utilisés."

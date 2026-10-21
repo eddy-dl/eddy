@@ -1,0 +1,13 @@
+// Horizontal swipe on the navigation bars, reported by TabSwipeArea.
+// app.slint moves the list strip with `offset` while `active`, and decides on
+// a tab change whenever `releases` changes.
+export global TabSwipe {
+    // A swipe is in progress (finger down, moving sideways).
+    in-out property <bool> active: false;
+    // Sideways distance from where the finger went down.
+    in-out property <length> offset: 0px;
+    // Distance at the moment the finger lifted (0 if the swipe was cancelled).
+    in-out property <length> released_offset: 0px;
+    // Bumped each time a swipe ends.
+    in-out property <int> releases: 0;
+}

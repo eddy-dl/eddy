@@ -1,0 +1,18 @@
+# Rust
+/target/
+
+# Android build output (Gradle, and the Rust library copied in by copyRustLibs)
+/platforms/android/.gradle/
+/platforms/android/build/
+/platforms/android/app/build/
+/platforms/android/app/src/main/jniLibs/
+/platforms/android/local.properties
+/platforms/android/keystore.properties
+
+# Signing keys
+*.keystore
+*.jks
+
+# Local editor / assistant settings
+/.claude/
+/.helix/

@@ -1,0 +1,79 @@
+import { Palette } from "std-widgets.slint";
+import { ThemeSettings } from "themes/theme.slint";
+import { Links } from "globals/Links.slint";
+import { LinkPreviewSheet } from "components/LinkPreviewSheet.slint";
+import { QuickDownloadSheet } from "components/QuickDownloadSheet.slint";
+
+// The share popup on Android: a small window at the bottom of the screen,
+// over whatever app the links were shared from. It runs in its own process,
+// so it only has what it was shared; anything left when it closes stays
+// pending in the main app.
+export component PreviewApp inherits Window {
+    // 1 = "Download now" (ask how, then start everything), 2 = preview.
+    in property <int> mode: 2;
+
+    // Close the popup (links not dealt with stay pending).
+    callback close_requested();
+    // The height the content needs, so the window can be sized to fit.
+    callback resize_requested(length);
+
+    title: "Eddy";
+    background: ThemeSettings.surface;
+    preferred-width: 420px;
+
+    // The window height the content needs: content plus the navigation bar
+    // the window reaches under. Rust applies it once the window is up, then
+    // on every change.
+    // (Android caps the window at 85% of the screen.)
+    out property <length> wanted_height: (root.mode == 1 ? quick.preferred-height : preview.content_height)
+        + root.safe-area-insets.bottom;
+    // The preview takes the window's actual height; its options scroll if
+    // they still don't fit, with the buttons kept in view.
+    private property <length> preview_height: Math.max(0px, root.height - root.safe-area-insets.bottom);
+    changed wanted_height => { root.resize_requested(self.wanted_height); }
+
+    init => {
+        ThemeSettings.system_is_dark = Palette.color-scheme == ColorScheme.dark;
+        scope.focus();
+    }
+
+    scope := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Back || event.text == Key.Escape) {
+                root.close_requested();
+                return accept;
+            }
+            return reject;
+        }
+
+        // Placed by hand rather than in a layout: the preview's height comes
+        // from the window's, so it mustn't feed back into the window's size.
+        width: 100%;
+        height: 100%;
+
+        quick := QuickDownloadSheet {
+            visible: root.mode == 1;
+            y: 0;
+            width: parent.width;
+            height: self.preferred-height;
+            count: Links.pending.length;
+            ytdlp_available: Links.ytdlp_available;
+            download(choice) => { Links.quick_download(choice); }
+            later => { root.close_requested(); }
+        }
+
+        preview := LinkPreviewSheet {
+            visible: root.mode == 2 && Links.pending.length > 0;
+            y: 0;
+            width: parent.width;
+            height: root.preview_height;
+            drop-shadow-blur: 0px;
+            link: Links.pending.length > 0 ? Links.pending[0] : { id: -1 };
+            position: 1;
+            total: Links.pending.length;
+            available_height: root.preview_height;
+            skip => { Links.skip(self.link.id); }
+            download(backend, format, filename) => { Links.start(self.link.id, backend, format, filename); }
+        }
+    }
+}

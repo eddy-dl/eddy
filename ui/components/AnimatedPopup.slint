@@ -1,0 +1,132 @@
+import { ThemeSettings } from "../themes/theme.slint";
+
+// Backdrop that dismisses on a real tap only: a press that drifted (a swipe
+// or scroll attempt) or was held down doesn't count. Shared by every popup
+// and overlay menu so they all close the same way.
+export component TapToDismissArea inherits TouchArea {
+    callback tapped();
+
+    private property <duration> pressed_at;
+
+    pointer-event(event) => {
+        if (event.kind == PointerEventKind.down) {
+            self.pressed_at = animation-tick();
+        }
+    }
+    clicked => {
+        if (abs(self.mouse-x - self.pressed-x) < 8px
+                && abs(self.mouse-y - self.pressed-y) < 8px
+                && animation-tick() - self.pressed_at < 400ms) {
+            root.tapped();
+        }
+    }
+}
+
+// Body of a PopupWindow that fades and scales its card in when shown and back
+// out before closing. Give the PopupWindow the full area the popup covers and
+// `close-policy: PopupClosePolicy.no-auto-close`, then call the window's
+// `close()` from `closed`. A tap outside the card dismisses it; so does
+// bumping `dismiss_requests` (used to route Back/Escape in from outside).
+export component AnimatedPopup inherits Rectangle {
+    in property <length> card_width;
+    in property <length> card_height;
+
+    // Fires once the exit animation has finished.
+    callback closed();
+
+    // Back/Escape pressed while the popup is open. Showing a popup takes
+    // keyboard focus away from the window (and key events stop at popups), so
+    // the app's root back handler can't see these keys; they're forwarded
+    // here for the caller to route into it.
+    callback back_pressed();
+
+    // Each change asks the popup to dismiss itself. Elements inside a popup
+    // can't be reached from outside, so callers bind this to a counter.
+    in property <int> dismiss_requests;
+    changed dismiss_requests => { root.dismiss(); }
+
+    private property <bool> open: false;
+    private property <duration> anim_duration: 200ms;
+
+    // Dims everything behind the card, fading with it.
+    background: root.open ? #00000060 : transparent;
+    animate background {
+        duration: root.anim_duration;
+        easing: ease-out-quad;
+    }
+
+    public function dismiss() {
+        if (root.open) {
+            root.open = false;
+            close_timer.running = true;
+        }
+    }
+
+    // A popup's contents are created each time it is shown, so this runs on
+    // every open. Changes made during init aren't animated (there's no
+    // previous frame to animate from), so flip `open` one tick later instead.
+    open_timer := Timer {
+        interval: 1ms;
+        running: true;
+        triggered => {
+            self.running = false;
+            root.open = true;
+            // Slint restores the previous focus by itself when the popup closes.
+            key_scope.focus();
+        }
+    }
+
+    key_scope := FocusScope {
+        width: 100%;
+        height: 100%;
+        key-pressed(event) => {
+            if (event.text == Key.Back || event.text == Key.Escape) {
+                root.back_pressed();
+                return accept;
+            }
+            return reject;
+        }
+
+        TapToDismissArea {
+            tapped => { root.dismiss(); }
+        }
+
+        card := Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2 + (root.open ? 0px : 16px);
+            width: root.card_width;
+            height: root.card_height;
+            opacity: root.open ? 1.0 : 0.0;
+            transform-scale: root.open ? 1.0 : 0.92;
+            animate opacity, y, transform-scale {
+                duration: root.anim_duration;
+                easing: ease-out-quad;
+            }
+
+            border-radius: 12px;
+            background: ThemeSettings.background.brighter(0.1);
+            drop-shadow-blur: 16px;
+            drop-shadow-color: #00000060;
+            border-width: 1px;
+            border-color: ThemeSettings.primary_accent.transparentize(80%);
+            animate background, border-color {
+                duration: 300ms;
+                easing: ease-in-out;
+            }
+
+            // Catches clicks inside the card's dead space so they don't dismiss it.
+            TouchArea { }
+
+            @children
+        }
+    }
+
+    close_timer := Timer {
+        interval: root.anim_duration;
+        running: false;
+        triggered => {
+            self.running = false;
+            root.closed();
+        }
+    }
+}

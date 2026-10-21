@@ -1,0 +1,20 @@
+export enum SortKey { DateAdded, Name, Size, Progress }
+
+export enum FileFilter { All, Video, Audio, Image, Document, Archive }
+
+export struct TabListOptions {
+    sort: SortKey,
+    ascending: bool,
+    filter: FileFilter,
+}
+
+// Sort & filter choices for each download tab. The UI only records them;
+// the Rust side re-sorts/filters the matching item list on `options_changed`.
+export global ListOptions {
+    in-out property <TabListOptions> downloading: { sort: SortKey.DateAdded, ascending: false, filter: FileFilter.All };
+    in-out property <TabListOptions> stopped: { sort: SortKey.DateAdded, ascending: false, filter: FileFilter.All };
+    in-out property <TabListOptions> completed: { sort: SortKey.DateAdded, ascending: false, filter: FileFilter.All };
+
+    // Tab index: 0 = Downloading, 1 = Stopped, 2 = Completed.
+    callback options_changed(int);
+}

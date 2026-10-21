@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Eddy</string>
+    <string name="notification_channel">Downloads</string>
+    <string name="starting_download">Starting download…</string>
+    <string name="download_failed">Couldn\'t start the download</string>
+    <plurals name="downloading_count">
+        <item quantity="one">Downloading %d file</item>
+        <item quantity="other">Downloading %d files</item>
+    </plurals>
+    <string name="share_add">Add to Eddy</string>
+    <string name="share_download">Download with Eddy</string>
+    <string name="share_preview">Preview in Eddy</string>
+    <string name="no_links_found">No links found</string>
+    <plurals name="links_added">
+        <item quantity="one">%d link added to Eddy</item>
+        <item quantity="other">%d links added to Eddy</item>
+    </plurals>
+    <string name="download_started">Download started</string>
+    <string name="results_channel">Finished downloads</string>
+    <string name="no_active_downloads">No active downloads</string>
+    <string name="downloaded_name">Downloaded %s</string>
+    <string name="download_failed_name">Download failed: %s</string>
+    <string name="cant_open_file">Couldn\'t open the file</string>
+    <string name="allow_installs">Allow Eddy to install apps, then tap the package again</string>
+</resources>

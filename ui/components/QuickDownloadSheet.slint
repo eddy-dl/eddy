@@ -1,0 +1,89 @@
+import { ThemeSettings } from "../themes/theme.slint";
+import { ActionButton } from "Buttons.slint";
+import { Chip, SectionLabel } from "Chips.slint";
+import { QuickBackend } from "../globals/Links.slint";
+
+// "Download now" for links shared to Eddy: one question (how to download
+// them), then everything starts. "Later" keeps the links pending in the app.
+export component QuickDownloadSheet inherits Rectangle {
+    in property <int> count;
+    in property <bool> ytdlp_available: true;
+
+    callback download(QuickBackend);
+    callback later();
+
+    private property <QuickBackend> choice: QuickBackend.Auto;
+
+    height: layout.preferred-height;
+    background: ThemeSettings.surface;
+    border-radius: 16px;
+
+    // Keeps taps on the sheet's gaps from reaching anything behind it.
+    TouchArea { }
+
+    layout := VerticalLayout {
+        padding: 16px;
+        spacing: 10px;
+
+        Text {
+            text: @tr("Download now");
+            font-size: 16px;
+            font-weight: 700;
+            color: ThemeSettings.text_color;
+        }
+
+        Text {
+            text: @tr("{n} link" | "{n} links" % root.count);
+            font-size: 13px;
+            color: ThemeSettings.text_color.transparentize(35%);
+        }
+
+        SectionLabel { text: @tr("Download with"); }
+
+        HorizontalLayout {
+            spacing: 8px;
+            Chip {
+                text: @tr("Auto");
+                selected: root.choice == QuickBackend.Auto;
+                clicked => { root.choice = QuickBackend.Auto; }
+            }
+            Chip {
+                text: @tr("Direct");
+                selected: root.choice == QuickBackend.Direct;
+                clicked => { root.choice = QuickBackend.Direct; }
+            }
+            Chip {
+                text: @tr("Media");
+                selected: root.choice == QuickBackend.Media;
+                clicked => { root.choice = QuickBackend.Media; }
+            }
+        }
+
+        Text {
+            text: root.choice == QuickBackend.Auto
+                ? @tr("Each link is checked first and downloaded the best way for it.")
+                : @tr("Torrents and magnets always download as torrents.");
+            font-size: 12px;
+            color: ThemeSettings.text_color.transparentize(35%);
+            wrap: word-wrap;
+        }
+
+        HorizontalLayout {
+            padding-top: 6px;
+            spacing: 12px;
+            ActionButton {
+                text: @tr("Later");
+                horizontal-stretch: 1;
+                height: 48px;
+                clicked => { root.later(); }
+            }
+            ActionButton {
+                text: @tr("Download");
+                primary: true;
+                horizontal-stretch: 1;
+                height: 48px;
+                clicked => { root.download(root.choice); }
+            }
+        }
+    }
+}

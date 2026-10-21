@@ -1,0 +1,327 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  SLINT_STYLE: material
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-C debuginfo=0"
+
+jobs:
+  build-windows-x86_64:
+    name: Build (Windows x86_64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: windows-x86_64-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: windows-x86_64-cargo-
+
+      - name: Build (release)
+        run: cargo build --release --target x86_64-pc-windows-msvc
+
+      - name: Rename Binary
+        run: Move-Item -Path "target\x86_64-pc-windows-msvc\release\eddy.exe" -Destination "target\x86_64-pc-windows-msvc\release\eddy-windows-x86_64.exe" -Force
+
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: eddy-windows-x86_64
+          path: target/x86_64-pc-windows-msvc/release/eddy-windows-x86_64.exe
+          retention-days: 1
+
+  build-windows-arm64:
+    name: Build (Windows arm64)
+    runs-on: windows-11-arm
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: windows-arm64-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: windows-arm64-cargo-
+
+      - name: Build (release)
+        run: cargo build --release
+
+      - name: Rename Binary
+        run: Move-Item -Path "target\release\eddy.exe" -Destination "target\release\eddy-windows-arm64.exe" -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: eddy-windows-arm64
+          path: target/release/eddy-windows-arm64.exe
+          retention-days: 1
+
+  build-linux-x86_64:
+    name: Build (Linux x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux UI dependencies
+        run: |
+          sudo apt-get update
+          # Slint (fontconfig, xcb, xkbcommon), rfd's GTK file dialogs, system-theme (D-Bus).
+          sudo apt-get install -y libfontconfig1-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libgtk-3-dev libdbus-1-dev
+
+      - name: Cache cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: linux-x86_64-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: linux-x86_64-cargo-
+
+      - name: Build (release)
+        run: cargo build --release
+
+      - name: Tests
+        run: cargo test --release --lib
+
+      - name: Rename Binary
+        run: mv -f target/release/eddy target/release/eddy-linux-x86_64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: eddy-linux-x86_64
+          path: target/release/eddy-linux-x86_64
+          retention-days: 1
+
+  build-linux-arm64:
+    name: Build (Linux arm64)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux UI dependencies
+        run: |
+          sudo apt-get update
+          # Slint (fontconfig, xcb, xkbcommon), rfd's GTK file dialogs, system-theme (D-Bus).
+          sudo apt-get install -y libfontconfig1-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libgtk-3-dev libdbus-1-dev
+
+      - name: Cache cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: linux-arm64-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: linux-arm64-cargo-
+
+      - name: Build (release)
+        run: cargo build --release
+
+      - name: Rename Binary
+        run: mv -f target/release/eddy target/release/eddy-linux-arm64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: eddy-linux-arm64
+          path: target/release/eddy-linux-arm64
+          retention-days: 1
+
+  build-android:
+    name: Build (Android)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+    
+      - name: Install Rust stable + Android target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, armv7-linux-androideabi
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
+
+      - name: Cache cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: android-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: android-cargo-
+
+      - name: Install dependencies (Linux host)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev
+
+      - name: Set up SDK and Install Android Platform
+        uses: android-actions/setup-android@v3
+
+      # android-36 for the Rust library (as built locally), 35 for Gradle's compileSdk.
+      - name: Install Android platforms
+        run: sdkmanager "platforms;android-36" "platforms;android-35"
+
+      - name: Build Rust library (arm64-v8a release)
+        env:
+          ANDROID_PLATFORM: android-36
+          ANDROID_JAR: ${{ env.ANDROID_HOME }}/platforms/android-36/android.jar
+        run: cargo ndk -t arm64-v8a -P 26 build --lib --release
+
+      - name: Build Rust library (armeabi-v7a release)
+        env:
+          ANDROID_PLATFORM: android-36
+          ANDROID_JAR: ${{ env.ANDROID_HOME }}/platforms/android-36/android.jar
+          FORCE_SKIA_BUILD: 1 
+        run: cargo ndk -t armeabi-v7a -P 26 build --lib --release
+
+      - name: Decode Android Keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 --decode > platforms/android/app/release.keystore
+
+      - name: Build APKs with Gradle
+        env:
+          KEYSTORE_FILE: "release.keystore"
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          cd platforms/android
+          chmod +x gradlew
+          ./gradlew assembleRelease
+
+      - name: Clean up Keystore
+        if: always()
+        run: rm -f platforms/android/app/release.keystore
+
+      - name: Rename APKs
+        run: |
+          cd platforms/android/app/build/outputs/apk/release
+          find . -name "*arm64-v8a*.apk" -exec mv {} eddy-android-arm64.apk \;
+          find . -name "*armeabi-v7a*.apk" -exec mv {} eddy-android-armv7.apk \;
+          find . -name "*universal*.apk" -exec mv {} eddy-android-universal.apk \;
+          if [ -f app-release.apk ]; then
+            mv app-release.apk eddy-android-universal.apk
+          fi
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@v6
+        with:
+          name: eddy-android
+          path: platforms/android/app/build/outputs/apk/release/*.apk
+          retention-days: 1
+
+  release:
+    name: Draft GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-windows-x86_64, build-windows-arm64, build-linux-x86_64, build-linux-arm64, build-android]
+    if: github.event_name == 'workflow_dispatch'
+    
+    permissions:
+      contents: write 
+      actions: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Extract Version and Generate Checksums
+        id: prep_release
+        run: |
+          VERSION=$(grep -m 1 '^version = ' Cargo.toml | awk -F '"' '{print $2}')
+          echo "APP_VERSION=$VERSION" >> $GITHUB_ENV
+
+          cd release-artifacts
+
+          WIN_X64_SHA=$(sha256sum eddy-windows-x86_64.exe | awk '{print $1}')
+          WIN_ARM_SHA=$(sha256sum eddy-windows-arm64.exe | awk '{print $1}')
+          LINUX_X64_SHA=$(sha256sum eddy-linux-x86_64 | awk '{print $1}')
+          LINUX_ARM_SHA=$(sha256sum eddy-linux-arm64 | awk '{print $1}')
+          
+          APK_ARM64_SHA=$(sha256sum eddy-android-arm64.apk | awk '{print $1}')
+          APK_ARMV7_SHA=$(sha256sum eddy-android-armv7.apk | awk '{print $1}')
+          APK_UNIV_SHA=$(sha256sum eddy-android-universal.apk | awk '{print $1}')
+
+          echo "RELEASE_BODY<<EOF" >> $GITHUB_ENV
+          echo "Eddy v$VERSION" >> $GITHUB_ENV
+          echo "" >> $GITHUB_ENV
+          echo "### Checksums" >> $GITHUB_ENV
+          echo "| Variant | SHA-256 |" >> $GITHUB_ENV
+          echo "| ------- | ------- |" >> $GITHUB_ENV
+          echo "| Windows x86_64 | $WIN_X64_SHA |" >> $GITHUB_ENV
+          echo "| Windows arm64 | $WIN_ARM_SHA |" >> $GITHUB_ENV
+          echo "| Linux x86_64 | $LINUX_X64_SHA |" >> $GITHUB_ENV
+          echo "| Linux arm64 | $LINUX_ARM_SHA |" >> $GITHUB_ENV
+          echo "| Android arm64-v8a | $APK_ARM64_SHA |" >> $GITHUB_ENV
+          echo "| Android armv7 | $APK_ARMV7_SHA |" >> $GITHUB_ENV
+          echo "| Android Universal | $APK_UNIV_SHA |" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Publish Draft Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ env.APP_VERSION }}
+          name: v${{ env.APP_VERSION }}
+          body: ${{ env.RELEASE_BODY }}
+          draft: true
+          files: |
+            release-artifacts/eddy-windows-x86_64.exe
+            release-artifacts/eddy-windows-arm64.exe
+            release-artifacts/eddy-linux-x86_64
+            release-artifacts/eddy-linux-arm64
+            release-artifacts/*.apk
+
+      - name: Delete Artifacts
+        uses: geekyeggo/delete-artifact@v6
+        with:
+          name: eddy-*

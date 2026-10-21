@@ -1,0 +1,438 @@
+import { ThemeSettings } from "../themes/theme.slint";
+import { HoldTouchArea, HintBubble } from "HoldHint.slint";
+import { TabSwipe } from "../globals/TabSwipe.slint";
+
+// The animated tab icons, shared by the bottom and top navigation bars.
+// `cutout_color` draws the details that sit on top of an active (filled)
+// icon, so it must contrast with `icon_color`.
+export component NavIcon inherits Rectangle {
+    in property <int> icon_type; // 0 = Downloading, 1 = Stopped, 2 = Completed
+    in property <bool> is_active;
+    in property <bool> is_downloading: false;
+    in property <color> icon_color;
+    in property <color> cutout_color;
+
+    width: 24px;
+    height: 24px;
+
+    if root.icon_type == 0: downloading_icon := Rectangle {
+        // Where the arrow's tip ends, in viewbox units; same size selected or not.
+        property <float> arrow_tip: 15.5;
+
+        // Counts how many times the tab has been selected. The intro boosts are
+        // driven from it, so they only ever move forward: deselecting leaves
+        // them where they are instead of rewinding (which used to spin the
+        // ring and run the arrow backwards, fast).
+        property <bool> selected: root.is_active;
+        property <int> selections: 0;
+        property <int> selection_changes: 0;
+        changed selected => {
+            self.selection_changes += 1;
+            if (self.selected) {
+                self.selections += 1;
+            }
+        }
+
+        // 1. One-time fast animation for tab switch (Slowed down to 800ms):
+        // an extra full turn of the ring on each selection.
+        property <angle> intro_spin: self.selections * 360deg;
+        animate intro_spin {
+            duration: 800ms;
+            easing: ease-out;
+        }
+
+        // The arrow's matching boost: one extra pass through the circle each
+        // time the tab is selected or deselected, eased the same way, so it
+        // speeds up then settles back.
+        property <float> intro_drop: self.selection_changes;
+        animate intro_drop {
+            duration: 800ms;
+            easing: ease-out;
+        }
+
+        // Where the arrow is in its fall through the circle, 0 → 1 (0.5 is
+        // centred). Downloading, it loops every 1.2s; idle, it rests at the
+        // centre, and the selection boost still drops it through once.
+        property <float> drop_phase: Math.mod(
+            (root.is_downloading ? Math.mod(animation-tick() / 1ms, 1200) / 1200 : 0.5) + self.intro_drop, 1);
+
+        Rectangle {
+            width: 24px;
+            height: 24px;
+
+            // Continuous spin slowed down
+            transform-rotation: intro_spin + (root.is_downloading ? (animation-tick() / 1ms * 0.15deg) : 0deg);
+
+            Path {
+                width: 24px;
+                height: 24px;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                stroke: root.icon_color;
+                stroke-width: 2px;
+                stroke-line-cap: round;
+                // 12 points forming a full dotted circle
+                commands: "M 21 12 l 0.01 0 M 19.79 16.5 l 0.01 0 M 16.5 19.79 l 0.01 0 M 12 21 l 0.01 0 M 7.5 19.79 l 0.01 0 M 4.21 16.5 l 0.01 0 M 3 12 l 0.01 0 M 4.21 7.5 l 0.01 0 M 7.5 4.21 l 0.01 0 M 12 3 l 0.01 0 M 16.5 4.21 l 0.01 0 M 19.79 7.5 l 0.01 0";
+            }
+        }
+
+        Path {
+            width: 24px;
+            height: 24px;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            stroke: root.icon_color;
+            stroke-width: 2px;
+            stroke-line-cap: round;
+            commands: "M 12 3 C 7.03 3 3 7.03 3 12 C 3 16.97 7.03 21 12 21";
+        }
+
+        // The ring's inside acts as a window for the arrow: anything outside
+        // this circle (the ring's inner edge) is clipped away.
+        Rectangle {
+            x: 4px;
+            y: 4px;
+            width: 16px;
+            height: 16px;
+            border-radius: 8px;
+            clip: true;
+
+            Path {
+                // Offset back so the path keeps using the icon's 24-unit coordinates.
+                x: -4px;
+                width: 24px;
+                height: 24px;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                stroke: root.icon_color;
+                stroke-width: 2px;
+                stroke-line-cap: round;
+                stroke-line-join: round;
+
+                // Conventional download loop: the arrow enters from above the
+                // circle, falls straight through it and leaves out the bottom,
+                // then starts again. ±13px is just enough to be fully hidden.
+                y: -4px + (downloading_icon.drop_phase * 26 - 13) * 1px;
+                commands: "M 12 8 L 12 " + downloading_icon.arrow_tip
+                    + " M 8.5 " + (downloading_icon.arrow_tip - 3.5) + " L 12 " + downloading_icon.arrow_tip
+                    + " L 15.5 " + (downloading_icon.arrow_tip - 3.5);
+            }
+        }
+    }
+
+    if root.icon_type == 1: stopped_icon := Rectangle {
+        // Half-length of each arm of the X in viewbox units. Selecting the tab
+        // grows it from a small X to a large one while it spins.
+        // Held back until the 350ms spin is mostly done, so the X grows as the
+        // rotation settles instead of while it's turning.
+        property <float> cross_arm: root.is_active ? 4 : 2.5;
+        animate cross_arm {
+            delay: 200ms;
+            duration: 200ms;
+            easing: cubic-bezier(0.2, 0.0, 0, 1.0);
+        }
+
+        // Half a turn on every selection change, always clockwise: deselecting
+        // keeps turning forward instead of spinning back (the X looks the
+        // same at any half turn).
+        property <bool> selected: root.is_active;
+        property <int> turns: 0;
+        changed selected => { self.turns += 1; }
+
+        transform-rotation: self.turns * 180deg;
+        animate transform-rotation {
+            duration: 350ms;
+            easing: ease-out;
+        }
+
+        Path {
+            width: 24px;
+            height: 24px;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            stroke: root.icon_color;
+            stroke-width: 2px;
+            stroke-line-cap: round;
+            fill: root.is_active ? root.icon_color : transparent;
+            animate fill {
+                duration: 250ms;
+                easing: ease-in-out;
+            }
+            commands: "M3 12c0 -4.97 4.03 -9 9 -9c4.97 0 9 4.03 9 9c0 4.97 -4.03 9 -9 9c-4.97 0 -9 -4.03 -9 -9Z";
+        }
+
+        Path {
+            width: 24px;
+            height: 24px;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            stroke: root.is_active ? root.cutout_color : root.icon_color;
+            stroke-width: 2px;
+            stroke-line-cap: round;
+            stroke-line-join: round;
+            animate stroke {
+                duration: 250ms;
+                easing: ease-in-out;
+            }
+            // Two diagonals through the centre, rebuilt from the animated arm.
+            commands: "M" + (12 - stopped_icon.cross_arm) + " " + (12 - stopped_icon.cross_arm)
+                + "L" + (12 + stopped_icon.cross_arm) + " " + (12 + stopped_icon.cross_arm)
+                + "M" + (12 + stopped_icon.cross_arm) + " " + (12 - stopped_icon.cross_arm)
+                + "L" + (12 - stopped_icon.cross_arm) + " " + (12 + stopped_icon.cross_arm);
+        }
+    }
+
+    if root.icon_type == 2: completed_icon := Rectangle {
+        // Ends of the arrow's stem in viewbox units. The tail stays put, clear
+        // of the folded corner; selecting the tab grows the tip downward.
+        property <float> arrow_tail: 10;
+        property <float> arrow_tip: root.is_active ? 16.5 : 14.5;
+        animate arrow_tip {
+            duration: 350ms;
+            easing: cubic-bezier(0.2, 0.0, 0, 1.0);
+        }
+
+        // Page with a folded top-right corner; filled when active.
+        Path {
+            width: 24px;
+            height: 24px;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            stroke: root.icon_color;
+            stroke-width: 2px;
+            stroke-line-cap: round;
+            stroke-line-join: round;
+            fill: root.is_active ? root.icon_color : transparent;
+            animate fill {
+                duration: 250ms;
+                easing: ease-in-out;
+            }
+            commands: "M14 3H7a2 2 0 0 0 -2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2V8Z";
+        }
+
+        // The folded flap is solid on the outlined (inactive) page. Fill only:
+        // its edges come from the outline and the crease.
+        Path {
+            width: 24px;
+            height: 24px;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            fill: root.is_active ? transparent : root.icon_color;
+            animate fill {
+                duration: 250ms;
+                easing: ease-in-out;
+            }
+            commands: "M14 3v3.5a1.5 1.5 0 0 0 1.5 1.5H19Z";
+        }
+
+        // The fold's crease, drawn in the cutout colour over a filled page.
+        Path {
+            width: 24px;
+            height: 24px;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            stroke: root.is_active ? root.cutout_color : root.icon_color;
+            stroke-width: 2px;
+            stroke-line-cap: round;
+            stroke-line-join: round;
+            fill: transparent;
+            animate stroke {
+                duration: 250ms;
+                easing: ease-in-out;
+            }
+            commands: "M14 3v3.5a1.5 1.5 0 0 0 1.5 1.5H19";
+        }
+
+        // Down arrow, stroked with round caps and joins like the other icons.
+        // Its path is rebuilt from the animated stem ends, so it grows smoothly.
+        Path {
+            width: 24px;
+            height: 24px;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            stroke: root.is_active ? root.cutout_color : root.icon_color;
+            stroke-width: 2px;
+            stroke-line-cap: round;
+            stroke-line-join: round;
+            fill: transparent;
+            animate stroke {
+                duration: 250ms;
+                easing: ease-in-out;
+            }
+            commands: "M12 " + completed_icon.arrow_tail + "V" + completed_icon.arrow_tip
+                + "M9.75 " + (completed_icon.arrow_tip - 2.25) + "l2.25 2.25l2.25 -2.25";
+        }
+    }
+}
+
+// Wraps a navigation bar so sideways swipes on it switch tabs, reporting the
+// drag to TabSwipe. Taps and holds still reach the buttons inside (after the
+// gesture handler's 100ms wait, which doesn't matter on a bar that doesn't
+// scroll); a swipe cancels the button press, so it never taps.
+export component TabSwipeArea inherits SwipeGestureHandler {
+    handle-swipe-left: true;
+    handle-swipe-right: true;
+
+    function finish(released_offset: length) {
+        TabSwipe.active = false;
+        TabSwipe.released_offset = released_offset;
+        TabSwipe.releases += 1;
+    }
+
+    moved => {
+        TabSwipe.active = true;
+        TabSwipe.offset = self.current-position.x - self.pressed-position.x;
+    }
+    swiped => { self.finish(self.current-position.x - self.pressed-position.x); }
+    // Springs back: a cancelled swipe never switches tabs.
+    cancelled => { self.finish(0px); }
+}
+
+export component BottomNavButton inherits Rectangle {
+    in property <string> text;
+    in property <int> icon_type; // 0 = Downloading, 1 = Stopped, 2 = Completed
+    in property <bool> is_active;
+    in property <bool> is_downloading: false;
+
+    callback clicked();
+
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+    background: transparent;
+
+    Rectangle {
+        width: 100%;
+        height: 100%;
+
+        Rectangle {
+            width: 64px;
+            height: 32px;
+            border-radius: 16px;
+            background: root.is_active ? ThemeSettings.primary_accent : transparent;
+
+            x: (parent.width - self.width) / 2;
+            y: root.is_active ? 12px : 24px;
+
+            animate y {
+                duration: 250ms;
+                easing: ease-in-out;
+            }
+            animate background {
+                duration: 250ms;
+                easing: ease-in-out;
+            }
+
+            NavIcon {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                icon_type: root.icon_type;
+                is_active: root.is_active;
+                is_downloading: root.is_downloading;
+                icon_color: root.is_active ? #ffffff : ThemeSettings.text_color;
+                cutout_color: ThemeSettings.primary_accent;
+            }
+        }
+
+        Text {
+            text: root.text;
+            font-size: 12px;
+            font-weight: 700;
+            color: ThemeSettings.text_color;
+            x: (parent.width - self.width) / 2;
+            y: 48px;
+            opacity: root.is_active ? 1.0 : 0.0;
+            animate opacity {
+                duration: 250ms;
+                easing: ease-in-out;
+            }
+        }
+    }
+
+    ta := HoldTouchArea {
+        tapped => { root.clicked(); }
+    }
+
+    // Holding the button names it, above the bar so the finger doesn't hide it.
+    HintBubble {
+        text: root.text;
+        shown: ta.holding;
+        x: (parent.width - self.width) / 2;
+        y: -self.height - 8px;
+    }
+
+    opacity: ta.pressed && !ta.holding ? 0.6 : 1.0;
+    animate opacity {
+        duration: 150ms;
+        easing: ease-out;
+    }
+}
+
+// Icon-only tab strip shown under the header instead of the bottom bar.
+// Tabs share the width equally; the selected tab's accent bar grows out from
+// under its icon.
+export component TopNavBar inherits Rectangle {
+    in property <int> active_tab;
+    in property <bool> is_downloading: false;
+
+    callback tab_selected(int);
+
+    private property <length> indicator_width: 48px;
+
+    height: 48px;
+    // Transparent so it takes the colour of the section it sits in.
+    background: transparent;
+
+    TabSwipeArea {
+        HorizontalLayout {
+            for tab in 3: Rectangle {
+                horizontal-stretch: 1;
+
+                NavIcon {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2 - 2px;
+                    icon_type: tab;
+                    is_active: root.active_tab == tab;
+                    is_downloading: tab == 0 && root.is_downloading;
+                    icon_color: self.is_active ? ThemeSettings.primary_accent : ThemeSettings.text_color;
+                    cutout_color: ThemeSettings.surface;
+                }
+
+                Rectangle {
+                    // Sized to the icon, not the tab, so the edge tabs' bars stay
+                    // clear of the list sheet's rounded corners below.
+                    width: root.active_tab == tab ? root.indicator_width : 0px;
+                    height: 3px;
+                    x: (parent.width - self.width) / 2;
+                    y: parent.height - self.height;
+                    // Rounded on top only, flat where it meets the bar's bottom edge.
+                    border-top-left-radius: self.height;
+                    border-top-right-radius: self.height;
+                    background: ThemeSettings.primary_accent;
+                    animate width {
+                        duration: 250ms;
+                        easing: ease-out;
+                    }
+                }
+
+                ta := HoldTouchArea {
+                    tapped => { root.tab_selected(tab); }
+                }
+
+                // The top bar has no labels, so holding a tab names it, just
+                // below the bar.
+                HintBubble {
+                    text: tab == 0 ? @tr("Downloading") : (tab == 1 ? @tr("Stopped") : @tr("Completed"));
+                    shown: ta.holding;
+                    x: (parent.width - self.width) / 2;
+                    y: parent.height + 8px;
+                }
+
+                opacity: ta.pressed && !ta.holding ? 0.6 : 1.0;
+                animate opacity {
+                    duration: 150ms;
+                    easing: ease-out;
+                }
+            }
+        }
+    }
+}

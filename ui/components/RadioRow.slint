@@ -1,0 +1,76 @@
+import { ThemeSettings } from "../themes/theme.slint";
+
+// Helper component for Material-style Radio Buttons
+export component RadioRow inherits Rectangle {
+    in property <string> text;
+    in property <bool> active;
+    in property <color> text_color;
+    callback clicked;
+
+    height: 48px;
+    border-radius: 8px;
+    background: ta.has-hover ? ThemeSettings.hover_color : transparent;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 16px;
+        alignment: start;
+        cross-axis-alignment: center;
+
+        // Radio Outer Ring
+        outer_ring := Rectangle {
+            width: 20px;
+            height: 20px;
+            border-radius: 10px;
+            border-width: 2px;
+            border-color: root.text_color.transparentize(50%);
+
+            // Radio Inner Dot
+            inner_dot := Rectangle {
+                width: 0px;
+                height: 0px;
+                border-radius: 0px;
+                background: ThemeSettings.primary_accent;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+            }
+        }
+
+        Text {
+            text: root.text;
+            color: root.text_color;
+            font-size: 16px;
+            vertical-alignment: center;
+            animate color {
+                duration: 300ms;
+                easing: ease-in-out;
+            }
+        }
+    }
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    states [
+        active-state when root.active: {
+            outer_ring.border-color: ThemeSettings.primary_accent;
+            inner_dot.width: 10px;
+            inner_dot.height: 10px;
+            inner_dot.border-radius: 5px;
+            in {
+                animate outer_ring.border-color, inner_dot.width, inner_dot.height, inner_dot.border-radius {
+                    duration: 150ms;
+                    easing: ease-in-out;
+                }
+            }
+            out {
+                animate outer_ring.border-color, inner_dot.width, inner_dot.height, inner_dot.border-radius {
+                    duration: 150ms;
+                    easing: ease-in-out;
+                }
+            }
+        }
+    ]
+}

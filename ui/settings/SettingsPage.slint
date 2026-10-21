@@ -1,0 +1,338 @@
+import { SettingsTab } from "Enums.slint";
+import { Sidebar } from "Sidebar.slint";
+import { GeneralSettings } from "pages/GeneralSettings.slint";
+import { DownloadSettings } from "pages/DownloadSettings.slint";
+import { AppSettings } from "../globals/AppSettings.slint";
+import { ThemeSettings } from "../themes/theme.slint"; 
+import { AppearanceSettings } from "pages/AppearanceSettings.slint";
+
+export component SettingsPage inherits Rectangle {
+    in property <color> background_color: #1E1E2E;
+    in property <color> text_color: #FFFFFF;
+    in property <color> accent_color: ThemeSettings.primary_accent;
+
+    in property <bool> is_landscape;
+    in property <bool> is_mobile_landscape;
+    in property <length> safe_area_top;
+    in property <length> safe_area_left;
+    in property <length> safe_area_right;
+    in property <length> safe_area_bottom;
+
+    in-out property <SettingsTab> active_tab: SettingsTab.InActive;
+
+    out property <bool> no_active_tab: root.active_tab == SettingsTab.InActive;
+    out property <bool> appearance_tab_is_active: root.active_tab == SettingsTab.Appearance;
+    out property <bool> general_tab_is_active: root.active_tab == SettingsTab.General;
+    out property <bool> download_tab_is_active: root.active_tab == SettingsTab.Download;
+    // Opening the Downloads settings looks for yt-dlp package updates.
+    changed download_tab_is_active => {
+        if (self.download_tab_is_active) {
+            AppSettings.helpers_check();
+        }
+    }
+
+    callback back_pressed();
+
+    background: root.background_color;
+
+    animate background {
+        duration: 300ms;
+        easing: ease-in-out;
+    }
+
+    // Back is handled by the root FocusScope in app.slint, which calls this.
+    // Keyboard focus must not live in here: Slint drops focus from items that
+    // are hidden or clipped away, and these panels slide off-screen.
+    public function navigate_back() {
+        if (appearance_page.popup_open) {
+            appearance_page.dismiss_popup();
+        } else if (general_page.popup_open) {
+            general_page.dismiss_popup();
+        } else if (download_page.popup_open) {
+            download_page.dismiss_popup();
+        } else if (!root.no_active_tab) {
+            root.active_tab = SettingsTab.InActive;
+        } else {
+            root.back_pressed();
+        }
+    }
+
+    // Whether the panel under each half of the header has been scrolled. In
+    // portrait only one panel is visible, so both halves follow it.
+    private property <bool> page_scrolled:
+        root.appearance_tab_is_active ? appearance_page.scrolled : (
+        root.general_tab_is_active ? general_page.scrolled : (
+        root.download_tab_is_active ? download_page.scrolled : false));
+    private property <bool> sidebar_scrolled: sidebar.scrolled;
+    private property <bool> left_header_tinted: root.is_landscape ? root.sidebar_scrolled : (root.no_active_tab ? root.sidebar_scrolled : root.page_scrolled);
+    private property <bool> right_header_tinted: root.page_scrolled;
+    private property <length> header_height: Math.max(8px, root.safe_area_top) + 40px;
+    private property <length> left_header_width: root.is_landscape ? Math.max(12px, root.safe_area_left) + 260px : root.width;
+
+    // Header backgrounds (status bar area included) that take the surface
+    // colour once the content below them is scrolled.
+    Rectangle {
+        x: 0px;
+        y: 0px;
+        width: root.left_header_width;
+        height: root.header_height;
+        background: root.left_header_tinted ? ThemeSettings.surface : transparent;
+        animate background {
+            duration: 200ms;
+            easing: ease-in-out;
+        }
+    }
+
+    if root.is_landscape: Rectangle {
+        x: root.left_header_width;
+        y: 0px;
+        width: root.width - root.left_header_width;
+        height: root.header_height;
+        background: root.right_header_tinted ? ThemeSettings.surface : transparent;
+        animate background {
+            duration: 200ms;
+            easing: ease-in-out;
+        }
+    }
+
+    // Absolute positioned vertical divider bypassing safe-area paddings
+    if root.is_landscape: Rectangle {
+        width: 1px;
+        height: 100%;
+        x: Math.max(12px, root.safe_area_left) + 260px;
+        y: 0px;
+        background: root.text_color.transparentize(85%);
+        z: 10;
+    }
+
+    // Absolute positioned horizontal divider
+    Rectangle {
+        height: 1px;
+        width: root.is_landscape ? Math.max(12px, root.safe_area_left) + 260px : parent.width;
+        x: 0px;
+        y: Math.max(8px, root.safe_area_top) + 40px;
+        background: root.text_color.transparentize(85%);
+        z: 10;
+    }
+
+    VerticalLayout {
+        padding-top: Math.max(8px, root.safe_area_top);
+        padding-left: Math.max(12px, root.safe_area_left);
+        padding-right: Math.max(12px, root.safe_area_right);
+        padding-bottom: Math.max(12px, root.safe_area_bottom);
+        spacing: 0px;
+
+        // Top Bar
+        HorizontalLayout {
+            height: 40px;
+            spacing: 0px;
+
+            // Left Header Section
+            HorizontalLayout {
+                width: root.is_landscape ? 260px : parent.width;
+                alignment: start;
+                spacing: 12px;
+                cross-axis-alignment: center;
+                padding-left: 4px;
+                padding-right: 4px;
+
+                Rectangle {
+                    width: 40px;
+                    height: 40px;
+                    border-radius: 20px;
+                    background: back_ta.has-hover ? ThemeSettings.hover_color : transparent;
+
+                    Image {
+                        source: @image-url("../icons/arrow_back.svg");
+                        width: 24px;
+                        height: 24px;
+                        colorize: root.text_color;
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                    }
+
+                    back_ta := TouchArea {
+                        clicked => { root.navigate_back(); }
+                    }
+                }
+
+                Text {
+                    text: root.is_landscape ? @tr("Settings") : (
+                        root.general_tab_is_active ? @tr("General") : (
+                        root.download_tab_is_active ? @tr("Downloads") : root.appearance_tab_is_active ? @tr("Appearance") : @tr("Settings")));
+                    font-size: 22px;
+                    font-weight: 700;
+                    color: root.text_color;
+                    vertical-alignment: center;
+                }
+            }
+
+            // Right Header Section (Landscape only)
+            Rectangle {
+                visible: root.is_landscape;
+                horizontal-stretch: root.is_landscape ? 1 : 0;
+                height: 100%;
+
+                HorizontalLayout {
+                    width: 100%;
+                    height: 100%;
+                    alignment: start;
+                    padding-left: 24px;
+                    cross-axis-alignment: center;
+
+                    Text {
+                        text: root.general_tab_is_active ? @tr("General") : (
+                            root.download_tab_is_active ? @tr("Downloads") : root.appearance_tab_is_active ? @tr("Appearance") : "");
+                        font-size: 22px;
+                        font-weight: 700;
+                        color: root.text_color;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        // Adaptive Content Viewport (Rectangle replaces HorizontalLayout to allow absolute x animations)
+        Rectangle {
+            vertical-stretch: 1;
+            clip: true;
+
+            sidebar := Sidebar {
+                x: root.is_landscape ? 0px : (root.no_active_tab ? 0px : -parent.width);
+                width: root.is_landscape ? 260px : parent.width;
+                height: 100%;
+                clip: true;
+                is_landscape: root.is_landscape;
+                text_color: root.text_color;
+                active_tab <=> root.active_tab;
+
+                animate x {
+                    duration: 300ms;
+                    easing: ease-out;
+                }
+            }
+
+            // Right-side panel container
+            Rectangle {
+                x: root.is_landscape ? 260px : (root.no_active_tab ? parent.width : 0px);
+                width: root.is_landscape ? Math.max(0px, parent.width - 260px) : parent.width;
+                height: 100%;
+                clip: true;
+
+                animate x {
+                    duration: 300ms;
+                    easing: ease-out;
+                }
+                Rectangle {
+                    width: 100%;
+                    height: 100%;
+
+                    x: root.appearance_tab_is_active ? 0px : parent.width;
+                    opacity: root.appearance_tab_is_active ? 1.0 : 0.0;
+
+                    animate x {
+                        duration: 300ms;
+                        easing: ease-out;
+                    }
+                    animate opacity {
+                        duration: 200ms;
+                        easing: ease-out-quad;
+                    }
+
+                    HorizontalLayout {
+                        padding-left: root.is_landscape ? 12px : 0px;
+                        width: 100%;
+                        height: 100%;
+
+                        appearance_page := AppearanceSettings {
+                            horizontal-stretch: 1;
+                            height: 100%;
+                            text_color: root.text_color;
+                            // The settings page fills the window.
+                            window_width: root.width;
+                            window_height: root.height;
+                            // The popups hold key focus while open, so their
+                            // Back/Escape comes in here instead of via app.slint.
+                            popup_back_pressed => { root.navigate_back(); }
+                        }
+                    }
+                }
+
+                // General Settings Page Wrapper
+                Rectangle {
+                    width: 100%;
+                    height: 100%;
+
+                    x: root.general_tab_is_active ? 0px : parent.width;
+                    opacity: root.general_tab_is_active ? 1.0 : 0.0;
+
+                    animate x {
+                        duration: 300ms;
+                        easing: ease-out;
+                    }
+                    animate opacity {
+                        duration: 200ms;
+                        easing: ease-out-quad;
+                    }
+
+                    HorizontalLayout {
+                        padding-left: root.is_landscape ? 12px : 0px;
+                        width: 100%;
+                        height: 100%;
+
+                        general_page := GeneralSettings {
+                            horizontal-stretch: 1;
+                            height: 100%;
+                            text_color: root.text_color;
+                            window_width: root.width;
+                            window_height: root.height;
+                            popup_back_pressed => { root.navigate_back(); }
+                        }
+                    }
+                }
+
+                // Download Settings Page Wrapper
+                Rectangle {
+                    width: 100%;
+                    height: 100%;
+
+                    x: root.download_tab_is_active ? 0px : parent.width;
+                    opacity: root.download_tab_is_active ? 1.0 : 0.0;
+
+                    animate x {
+                        duration: 300ms;
+                        easing: ease-out;
+                    }
+                    animate opacity {
+                        duration: 200ms;
+                        easing: ease-out-quad;
+                    }
+
+                    HorizontalLayout {
+                        padding-left: root.is_landscape ? 12px : 0px;
+                        width: 100%;
+                        height: 100%;
+
+                        download_page := DownloadSettings {
+                            horizontal-stretch: 1;
+                            height: 100%;
+                            text_color: root.text_color;
+                            window_width: root.width;
+                            window_height: root.height;
+                            popup_back_pressed => { root.navigate_back(); }
+                        }
+                    }
+                }
+
+                // Placeholder text (Landscape only)
+                if root.is_landscape && root.no_active_tab: Text {
+                    text: @tr("Select a setting category");
+                    color: root.text_color.transparentize(50%);
+                    font-size: 16px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                }
+            }
+        }
+    }
+}

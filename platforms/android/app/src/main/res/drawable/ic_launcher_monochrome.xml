@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Themed (monochrome) launcher icon; the system picks the colour. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Drawn on a 108 grid, scaled to sit inside the safe zone and centred
+         (the glyph spans y 21-84). -->
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="0.68"
+        android:scaleY="0.68"
+        android:translateY="1">
+        <path
+            android:pathData="M54 24 V54 M43 43 L54 54 L65 43"
+            android:strokeWidth="7.5"
+            android:strokeColor="#000000"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+
+        <path
+            android:pathData="M28 68 C36 62 44 74 54 68 C64 62 72 74 80 68"
+            android:strokeWidth="7"
+            android:strokeColor="#000000"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+
+        <path
+            android:pathData="M37 80 C43 76 48 84 54 80 C60 76 65 84 71 80"
+            android:strokeWidth="6.5"
+            android:strokeColor="#000000"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+    </group>
+</vector>

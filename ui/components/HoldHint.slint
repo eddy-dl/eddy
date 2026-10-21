@@ -1,0 +1,100 @@
+import { ThemeSettings } from "../themes/theme.slint";
+
+// TouchArea that tells a tap from a press-and-hold. `holding` is true from
+// the moment the hold registers until the finger lifts; a release after a
+// hold doesn't count as a tap. Moving the finger away cancels the hold, so
+// it stays out of the way of scrolling.
+//
+// A release only counts as a tap if the finger ended near where it pressed.
+// Slint 1.18 turns an Android touch cancel (e.g. the home-swipe gesture
+// taking over) into an ordinary release, which would otherwise "tap" whatever
+// was under the finger.
+//
+// The hold is timed with an animated property rather than a Timer: in Slint
+// 1.18 a Timer's start/stop only takes effect when its `running` binding is
+// next re-read, so a hold timer started late and kept re-firing after release
+// (selection blinking on and off). An animation follows the press exactly.
+export component HoldTouchArea inherits TouchArea {
+    in property <duration> hold_delay: 450ms;
+    out property <bool> holding: false;
+
+    callback tapped();
+    // Fires once, the moment a press turns into a hold.
+    callback held();
+
+    // Set when the current press turned into a hold; cleared on the next press.
+    private property <bool> was_held: false;
+    // Set when the finger drifts too far during the current press.
+    private property <bool> moved_away: false;
+
+    // Runs 0 -> 1 over `hold_delay` while pressed; drops straight back to 0
+    // when released or cancelled.
+    private property <float> hold_progress: self.pressed && !self.moved_away ? 1 : 0;
+    animate hold_progress {
+        duration: self.pressed && !self.moved_away ? root.hold_delay : 0ms;
+    }
+    changed hold_progress => {
+        if (self.hold_progress >= 1 && self.pressed && !self.moved_away && !self.was_held) {
+            self.was_held = true;
+            self.holding = true;
+            self.held();
+        }
+    }
+
+    pointer-event(event) => {
+        if (event.kind == PointerEventKind.down) {
+            self.was_held = false;
+            self.moved_away = false;
+        } else if (event.kind == PointerEventKind.up) {
+            self.holding = false;
+        } else if (event.kind == PointerEventKind.cancel) {
+            self.holding = false;
+        }
+    }
+    moved => {
+        let dx = self.mouse-x - self.pressed-x;
+        let dy = self.mouse-y - self.pressed-y;
+        if (abs(dx) > 10px || abs(dy) > 10px) {
+            self.moved_away = true;
+            self.holding = false;
+        }
+    }
+    clicked => {
+        if (!self.was_held && !self.moved_away
+                && abs(self.mouse-x - self.pressed-x) <= 10px && abs(self.mouse-y - self.pressed-y) <= 10px) {
+            self.tapped();
+        }
+    }
+}
+
+// Small label shown while something is held. Uses inverted colours so it
+// stands out over both the bars and the list. Position it from the parent;
+// it never takes input.
+export component HintBubble inherits Rectangle {
+    in property <string> text;
+    in property <bool> shown;
+
+    width: label.preferred-width + 24px;
+    height: label.preferred-height + 12px;
+    border-radius: 8px;
+    background: ThemeSettings.text_color;
+    drop-shadow-blur: 8px;
+    drop-shadow-color: #00000030;
+
+    opacity: root.shown ? 1.0 : 0.0;
+    transform-scale: root.shown ? 1.0 : 0.9;
+    visible: self.opacity > 0;
+    animate opacity, transform-scale {
+        duration: 150ms;
+        easing: ease-out-quad;
+    }
+
+    label := Text {
+        text: root.text;
+        font-size: 13px;
+        font-weight: 600;
+        color: ThemeSettings.background;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}

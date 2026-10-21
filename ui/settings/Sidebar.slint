@@ -1,0 +1,171 @@
+import { SettingsTab } from "Enums.slint";
+import { AppSettings } from "../globals/AppSettings.slint";
+import { AccentColor, ThemeSettings } from "../themes/theme.slint";
+
+component SidebarItem inherits Rectangle {
+    in property <string> text;
+    in property <string> subtitle;
+    in property <image> icon;
+    in property <bool> active;
+    in property <bool> is_landscape;
+    in property <color> icon_bg_color;
+    in property <color> text_color: #FFFFFF;
+
+    callback clicked();
+
+    min-height: 60px;
+    border-radius: 8px;
+    background: root.active ? ThemeSettings.primary_accent.transparentize(80%) : ta.has-hover ? ThemeSettings.hover_color : transparent;
+
+    animate background {
+        enabled: !ta.has-hover;
+        duration: 400ms;
+        easing: ease-out-quint;
+    }
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    layout := HorizontalLayout {
+        property <brush> icon_bg_color: ThemeSettings.accent == AccentColor.Greyscale ? ThemeSettings.primary_accent : parent.icon_bg_color;
+
+        padding-top: 10px;
+        padding-bottom: 10px;
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 16px;
+        alignment: start;
+        cross-axis-alignment: center;
+
+        // Portrait filled icon container
+        if !root.is_landscape: Rectangle {
+            width: 36px;
+            height: 36px;
+            border-radius: 18px;
+            background: ThemeSettings.is_dark ? icon_bg_color : icon_bg_color.mix(Colors.white, 80%);
+
+            Image {
+                source: root.icon;
+                width: 20px;
+                height: 20px;
+                colorize: ThemeSettings.is_dark ? #1e1e2e : #2d3748;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+            }
+        }
+
+        if root.is_landscape: Image {
+            source: root.icon;
+            width: 24px;
+            height: 24px;
+            colorize: root.active ? ThemeSettings.primary_accent : root.text_color;
+        }
+
+        // Text layout with horizontal-stretch and word-wrap to prevent horizontal expansion/scrolling
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 2px;
+
+            Text {
+                text: root.text;
+                color: root.active ? ThemeSettings.primary_accent : root.text_color;
+                font-size: 15px;
+                font-weight: root.active ? 600 : 500;
+                wrap: word-wrap;
+                animate color {
+                    duration: 400ms;
+                    easing: ease-out-expo;
+                }
+            }
+
+            Text {
+                text: root.subtitle;
+                color: root.active ? ThemeSettings.primary_accent.transparentize(20%) : root.text_color.transparentize(40%);
+                font-size: 12px;
+                wrap: word-wrap;
+                animate color {
+                    duration: 400ms;
+                    easing: ease-out-quint;
+                }
+            }
+        }
+    }
+}
+
+export component Sidebar inherits Rectangle {
+    in property <color> text_color: #FFFFFF;
+    // True once the content has scrolled away from the top; tints the settings header.
+    out property <bool> scrolled: scroller.content-y < 0;
+    in property <bool> is_landscape;
+    in-out property <SettingsTab> active_tab: SettingsTab.InActive;
+    out property <SettingsTab> appearance_tab: SettingsTab.Appearance;
+    out property <SettingsTab> download_tab: SettingsTab.Download;
+    out property <SettingsTab> general_tab: SettingsTab.General;
+
+    callback item_selected(SettingsTab);
+
+    TouchArea { }
+
+    scroller := Flickable {
+        width: 100%;
+        height: 100%;
+        content-width: parent.width; // Prevents any horizontal scrolling
+        content-height: sidebar_layout.preferred-height;
+
+        sidebar_layout := VerticalLayout {
+            width: parent.width;
+            spacing: 8px;
+            padding-left: 8px;
+            padding-right: 8px;
+            padding-top: 8px;
+            alignment: start;
+
+            SidebarItem {
+                width: 100%;
+                text: @tr("Appearance");
+                subtitle: @tr("Change themes & accent color");
+                icon: @image-url("../icons/palette.svg");
+                active: root.active_tab == appearance_tab;
+                is_landscape: root.is_landscape;
+                icon_bg_color: #ffbcff;
+                text_color: root.text_color;
+                clicked => {
+                    root.active_tab = appearance_tab;
+                    root.item_selected(appearance_tab);
+                }
+            }
+
+            SidebarItem {
+                width: 100%;
+                text: @tr("General");
+                subtitle: @tr("Language, haptics");
+                icon: @image-url("../icons/settings.svg");
+                active: root.active_tab == general_tab;
+                is_landscape: root.is_landscape;
+                icon_bg_color: #ffd8be;
+                text_color: root.text_color;
+                clicked => {
+                    root.active_tab = general_tab;
+                    root.item_selected(general_tab);
+                }
+            }
+
+            SidebarItem {
+                width: 100%;
+                text: @tr("Downloads");
+                subtitle: @tr("Folder for files, threads per download");
+                icon: @image-url("../icons/download.svg");
+                active: root.active_tab == download_tab;
+                is_landscape: root.is_landscape;
+                icon_bg_color: #cbe4de;
+                text_color: root.text_color;
+                clicked => {
+                    root.active_tab = download_tab;
+                    root.item_selected(download_tab);
+                }
+            }
+        }
+    }
+}

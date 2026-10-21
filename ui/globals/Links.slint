@@ -1,0 +1,117 @@
+import { FileType } from "../components/FileTypeIcon.slint";
+
+// How a link gets downloaded.
+export enum LinkBackend {
+    Direct, // plain HTTP/FTP file, through aria2
+    Torrent, // magnet or .torrent, through aria2's BitTorrent
+    Media, // a page's video / audio / images, through an extractor (yt-dlp or a native one)
+}
+
+export enum ProbeState { Probing, Ready, Failed }
+
+// "Download now" choice: each link's best way, or prefer one backend where
+// a link supports it. Torrents always download as torrents.
+export enum QuickBackend { Auto, Direct, Media }
+
+// One quality choice for a yt-dlp link.
+export struct LinkFormat {
+    selector: string, // passed to yt-dlp as -f
+    label: string, // e.g. "1080p", "Audio only"
+    detail: string, // e.g. "mp4 · ~245 MB"
+}
+
+// One file inside a torrent.
+export struct TorrentFile {
+    index: int, // 1-based, as aria2's select-file counts
+    path: string, // inside the torrent, e.g. "Show/S01E01.mkv"
+    size: string, // formatted
+    selected: bool,
+}
+
+// A link found in the Add links text, waiting for the user to look at it.
+// The Rust side fills in the details as it checks the link.
+export struct PendingLink {
+    id: int,
+    url: string,
+    state: ProbeState,
+    error: string, // why the check failed (state == Failed)
+    // Suggested file name. For yt-dlp it has no extension: that depends on
+    // the format picked.
+    filename: string,
+    file_type: FileType,
+    size: string, // formatted, "" when unknown
+    source: string, // host, e.g. "example.com"
+    backends: [LinkBackend], // ways this link can be downloaded, best first
+    formats: [LinkFormat], // yt-dlp qualities, best first
+    files: [TorrentFile], // a torrent's files, once known; all selected at first
+    files_selected: int, // how many of `files` are selected
+    folder: string, // where it'll be saved, as shown to the user
+    folder_uri: string, // a folder picked for this link; "" for the usual one
+    // Media links (LinkBackend.Media):
+    service: string, // the extractor, e.g. "yt-dlp", "TikTok"
+    thumbnail: image, // empty when there's none
+    media_kind: int, // 0 = not media, 1 = video, 2 = audio, 3 = image
+    // Bitrates for saving as audio (selector: kbps, e.g. "128").
+    audio_formats: [LinkFormat],
+}
+
+export global Links {
+    // Links waiting for a decision, oldest first.
+    // PLACEHOLDER: sample links so the pending button and preview can be
+    // designed in the viewer; the Rust side replaces this with its own list.
+    in property <[PendingLink]> pending: [
+        { id: 1, url: "https://www.youtube.com/watch?v=aqz-KE-bpKQ", state: ProbeState.Ready, error: "",
+          filename: "Big Buck Bunny 60fps 4K - Official Blender Foundation Short Film", file_type: FileType.Video,
+          size: "~604 MB", source: "youtube.com", folder: "Download/Eddy", backends: [LinkBackend.Media, LinkBackend.Direct],
+          formats: [
+              { selector: "3840:2160", label: "2160p", detail: "3840×2160 · ~604 MB" },
+              { selector: "1920:1080", label: "1080p", detail: "1920×1080 · ~186 MB" },
+              { selector: "1280:720", label: "720p", detail: "1280×720 · ~92 MB" },
+          ],
+          service: "yt-dlp", media_kind: 1,
+          audio_formats: [
+              { selector: "320", label: "320 kbps", detail: "~24 MB" },
+              { selector: "256", label: "256 kbps", detail: "~19 MB" },
+              { selector: "192", label: "192 kbps", detail: "~14 MB" },
+              { selector: "128", label: "128 kbps", detail: "~9.6 MB" },
+          ] },
+        { id: 2, url: "https://releases.ubuntu.com/24.04/ubuntu-24.04-desktop-amd64.iso", state: ProbeState.Probing, error: "",
+          filename: "ubuntu-24.04-desktop-amd64.iso", file_type: FileType.DiskImage,
+          size: "", source: "releases.ubuntu.com", folder: "Download/Eddy", backends: [LinkBackend.Direct], formats: [] },
+        { id: 3, url: "https://example.com/missing.zip", state: ProbeState.Failed, error: "404 Not Found",
+          filename: "missing.zip", file_type: FileType.Archive,
+          size: "", source: "example.com", folder: "Download/Eddy", backends: [LinkBackend.Direct], formats: [] },
+        { id: 4, url: "https://webtorrent.io/torrents/sintel.torrent", state: ProbeState.Ready, error: "",
+          filename: "Sintel", file_type: FileType.Torrent,
+          size: "129 MB", source: "webtorrent.io", folder: "Download/Eddy", backends: [LinkBackend.Torrent, LinkBackend.Direct], formats: [],
+          files: [
+              { index: 1, path: "Sintel/Sintel.mp4", size: "123 MB", selected: true },
+              { index: 2, path: "Sintel/Sintel.en.srt", size: "1.6 KB", selected: true },
+              { index: 3, path: "Sintel/Sintel.de.srt", size: "1.6 KB", selected: false },
+              { index: 4, path: "Sintel/poster.jpg", size: "45 KB", selected: true },
+          ],
+          files_selected: 3 },
+    ];
+
+    // Whether yt-dlp can be offered at all on this device.
+    in property <bool> ytdlp_available: true;
+
+    // Find the links in some text and add them to `pending`.
+    callback process_text(string);
+    // Download a pending link (and drop it from `pending`). `format` is a
+    // LinkFormat selector for yt-dlp, otherwise "".
+    callback start(id: int, backend: LinkBackend, format: string, filename: string);
+    // Drop a pending link without downloading it.
+    callback skip(id: int);
+    // Pick a different folder for one link (it starts out with the usual one).
+    callback pick_folder(id: int);
+    // Select or unselect one of a torrent link's files (by TorrentFile.index).
+    callback toggle_file(id: int, index: int);
+    // Select or unselect all of a torrent link's files.
+    callback select_all_files(id: int, selected: bool);
+    // Download every pending link with the given choice, each as soon as
+    // its check is done (failed ones stay pending).
+    callback quick_download(QuickBackend);
+    // Re-read the pending links saved by the share popup.
+    callback sync();
+}
