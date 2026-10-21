@@ -34,7 +34,7 @@
         android:allowBackup="true"
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
-        android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+        android:theme="@style/Theme.Eddy"
         android:resizeableActivity="true"
         android:hardwareAccelerated="true"
         android:requestLegacyExternalStorage="true">
@@ -92,7 +92,7 @@
         <activity
             android:name=".SharePopupActivity"
             android:process=":popup"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:theme="@style/Theme.Eddy.Popup"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard|smallestScreenSize|density|uiMode"
             android:windowSoftInputMode="stateHidden|adjustPan"
             android:excludeFromRecents="true"
@@ -130,7 +130,7 @@
             android:targetActivity=".SharePopupActivity"
             android:label="@string/share_download"
             android:exported="true">
-            <!-- NativeActivity reads the library name from the alias that
+            <!-- GameActivity reads the library name from the alias that
                  launched it, not from SharePopupActivity. -->
             <meta-data
                 android:name="android.app.lib_name"
@@ -156,7 +156,7 @@
             android:targetActivity=".SharePopupActivity"
             android:label="@string/share_preview"
             android:exported="true">
-            <!-- NativeActivity reads the library name from the alias that
+            <!-- GameActivity reads the library name from the alias that
                  launched it, not from SharePopupActivity. -->
             <meta-data
                 android:name="android.app.lib_name"

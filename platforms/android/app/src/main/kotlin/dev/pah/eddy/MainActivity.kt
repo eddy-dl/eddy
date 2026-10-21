@@ -1,6 +1,5 @@
 package dev.pah.eddy
 
-import android.app.NativeActivity
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -15,10 +14,12 @@ import android.view.WindowManager
 import android.webkit.MimeTypeMap
 import android.widget.Toast
 import androidx.core.content.FileProvider
+import androidx.core.view.WindowCompat
 import java.io.File
 import androidx.annotation.Keep
+import com.google.androidgamesdk.GameActivity
 
-class MainActivity : NativeActivity() {
+class MainActivity : GameActivity() {
     companion object {
         private const val REQUEST_CODE_FOLDER_PICKER = 1001
         private const val REQUEST_CODE_FILE_PICKER = 1002
@@ -32,6 +33,10 @@ class MainActivity : NativeActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Edge to edge, like NativeActivity's window was: Slint pads the
+        // content by the system bars itself (its safe-area insets).
+        WindowCompat.setDecorFitsSystemWindows(window, false)
 
         // Draw under the camera cutout instead of letterboxing it. Slint 1.18+
         // already pads by the cutout inset, so letterboxing doubled the gap.

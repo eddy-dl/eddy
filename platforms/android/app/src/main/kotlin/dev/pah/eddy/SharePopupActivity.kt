@@ -1,6 +1,5 @@
 package dev.pah.eddy
 
-import android.app.NativeActivity
 import android.content.Intent
 import android.graphics.Color
 import android.os.Build
@@ -9,13 +8,14 @@ import android.os.Process
 import android.view.Gravity
 import android.view.WindowManager
 import androidx.annotation.Keep
+import com.google.androidgamesdk.GameActivity
 
 // "Download with Eddy" / "Preview in Eddy" from the share sheet: a small
 // Slint window at the bottom of the screen, over the app the links came from.
 // It runs in its own process (see the manifest), because Slint can only start
 // once per process and the main app may already be running. Rust's
 // android_main sees this class and shows the popup instead of the app.
-class SharePopupActivity : NativeActivity() {
+class SharePopupActivity : GameActivity() {
     companion object {
         const val MODE_DOWNLOAD = 1
         const val MODE_PREVIEW = 2

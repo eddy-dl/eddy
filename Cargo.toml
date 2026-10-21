@@ -47,7 +47,7 @@ system-theme = { version = "0.3", default-features = false }
 webbrowser = "1.0"
 
 [target.'cfg(target_os = "android")'.dependencies]
-android-activity = { version = "0.6.1", features = ["native-activity"] }
+android-activity = { version = "0.6.1", features = ["game-activity"] }
 android_logger = "0.14"
 jni = "0.22"
 ndk-context = "0.1"
@@ -71,7 +71,8 @@ codegen-units = 1
 panic = "abort"
 
 # Slint 1.18.1's Android backend with the upstream fix that releases the GPU
-# surface when the window goes (see patches/i-slint-backend-android-activity).
+# surface when the window goes, running on GameActivity (see
+# patches/i-slint-backend-game-activity).
 # Drop once a Slint release includes it.
 [patch.crates-io]
-i-slint-backend-android-activity = { path = "patches/i-slint-backend-android-activity" }
+i-slint-backend-android-activity = { path = "patches/i-slint-backend-game-activity" }
