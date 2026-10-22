@@ -781,9 +781,17 @@ pub fn ytdlp_ready() -> bool {
 /// yt-dlp, ready for its arguments: Python running the yt-dlp script, told
 /// where ffmpeg and a JS runtime are.
 pub fn ytdlp_command() -> Option<std::process::Command> {
+    // Eddy's own, newer yt-dlp when there is one (the Python package's
+    // ages; sites change): see components::update_ytdlp.
+    let own = own_ytdlp();
     with_runtime(RUNTIME_WAIT, |r| {
         let mut command = std::process::Command::new(r.python.as_ref()?);
-        command.arg(r.ytdlp.as_ref()?).envs(&r.env);
+        if own.is_file() {
+            command.arg(&own);
+        } else {
+            command.arg(r.ytdlp.as_ref()?);
+        }
+        command.envs(&r.env);
         if let Some(ffmpeg) = &r.ffmpeg {
             command.args(["--ffmpeg-location", ffmpeg]);
         }
@@ -797,6 +805,11 @@ pub fn ytdlp_command() -> Option<std::process::Command> {
         }
         Some(command)
     })
+}
+
+/// Where Eddy keeps its own yt-dlp (one file, run by the Python package).
+pub fn own_ytdlp() -> std::path::PathBuf {
+    std::path::PathBuf::from(get_app_data_dir()).join("ytdl").join("yt-dlp")
 }
 
 /// Deno (the Instagram extractor's SnapSave fallback), if its helper is

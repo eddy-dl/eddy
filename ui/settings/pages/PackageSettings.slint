@@ -39,7 +39,8 @@ component HelperRow inherits Rectangle {
                 color: root.text_color;
             }
             Text {
-                text: root.package.key == "python" || root.package.key == "ytdlp" ? @tr("Needed for media from most sites")
+                text: root.package.key == "python" ? @tr("Needed for media from most sites")
+                    : root.package.key == "ytdlp" ? @tr("Kept up to date apart from the Python package: sites change often")
                     : root.package.key == "ffmpeg" ? @tr("Joins video and audio, converts to audio, saves streams")
                     : @tr("Optional: helps with YouTube and Instagram");
                 font-size: 13px;
@@ -153,7 +154,9 @@ export component PackageSettings inherits Rectangle {
                     wrap: word-wrap;
                 }
                 Text {
-                    text: AppSettings.is_mobile
+                    text: AppSettings.is_mobile && root.confirming.key == "ytdlp"
+                        ? @tr("Eddy downloads it ({}) from GitHub and uses it instead of the one in the Python package.", root.confirming.size)
+                        : AppSettings.is_mobile
                         ? @tr("Eddy downloads its installer ({}) from YTDLnis's packages on GitHub. Android then asks you whether to install it.", root.confirming.size)
                         : @tr("Eddy downloads it ({}) from GitHub and keeps it in its own folder.", root.confirming.size);
                     font-size: 14px;

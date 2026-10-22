@@ -600,3 +600,9 @@ msgstr "Nouveau dossier"
 
 msgid "Use this folder"
 msgstr "Utiliser ce dossier"
+
+msgid "Kept up to date apart from the Python package: sites change often"
+msgstr "Tenu à jour à part du paquet Python : les sites changent souvent"
+
+msgid "Eddy downloads it ({}) from GitHub and uses it instead of the one in the Python package."
+msgstr "Eddy le télécharge ({}) depuis GitHub et l'utilise à la place de celui du paquet Python."

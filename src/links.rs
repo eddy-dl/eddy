@@ -757,11 +757,21 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
 
     // A web page (or a server that turns us away, as some media sites do with
     // plain requests): see whether yt-dlp can get something out of it.
-    if page_or_error && crate::platform::ytdlp_available() {
-        if let Ok(info) = extractors::ytdlp::get_info(url).await {
-            if !info.items.is_empty() {
-                return Ok(media_probe(info).await);
+    let is_page = matches!(&head, Ok(info) if info.status < 400 && info.is_page());
+    if page_or_error {
+        if crate::platform::ytdlp_available() {
+            match extractors::ytdlp::get_info(url).await {
+                Ok(info) if !info.items.is_empty() => return Ok(media_probe(info).await),
+                Ok(_) => {}
+                // Just a page, no media: it can still be saved as it is.
+                Err(e) if e.contains("Unsupported URL") => {}
+                // A media page yt-dlp couldn't read: say why, rather than
+                // offer the page itself.
+                Err(e) if is_page => return Err(format!("yt-dlp: {e}")),
+                Err(e) => log::warn!(target: "ytdlp", "{url}: {e}"),
             }
+        } else if is_page {
+            return Err("A web page: Eddy needs the yt-dlp packages (Settings → Downloads) to get its media".to_string());
         }
     }
 

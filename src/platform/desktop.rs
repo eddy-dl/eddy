@@ -203,3 +203,9 @@ pub fn ytdlp_available() -> bool {
 pub fn ytdlp_ready() -> bool {
     ytdlp_available()
 }
+
+/// Where Eddy would keep its own yt-dlp (Android's; desktop installs its
+/// tools through components_desktop instead).
+pub fn own_ytdlp() -> std::path::PathBuf {
+    tools_dir().join("yt-dlp-own")
+}
