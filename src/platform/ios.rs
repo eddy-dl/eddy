@@ -46,7 +46,7 @@ pub fn get_app_data_dir() -> String {
 }
 
 pub fn open_native_url(_url: &str) {}
-pub fn trigger_haptic() {}
+pub fn trigger_haptic(_: super::Haptic) {}
 pub fn show_toast(_: &str) {}
 pub fn set_bar_icons_dark(_: bool) {}
 

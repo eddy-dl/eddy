@@ -85,6 +85,12 @@ class SharePopupActivity : GameActivity() {
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
+    // Called from Rust (kind: see Haptics).
+    @Keep
+    fun triggerHaptic(kind: Int) {
+        runOnUiThread { Haptics.play(this, kind) }
+    }
+
     @Keep fun shareMode(): Int = mode
     @Keep fun sharedText(): String? = shared?.text
     @Keep fun sharedPath(): String? = shared?.path

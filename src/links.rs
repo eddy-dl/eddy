@@ -523,6 +523,7 @@ fn apply_probe(id: i32, result: Result<Probe, String>) {
         let mut link = m.row_data(index).unwrap();
         match result {
             Ok(probe) => {
+                crate::platform::trigger_haptic(crate::platform::Haptic::LinkChecked);
                 link.state = ProbeState::Ready;
                 if !probe.filename.is_empty() {
                     link.filename = probe.filename.into();

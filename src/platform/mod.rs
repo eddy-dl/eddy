@@ -2,6 +2,17 @@ use std::{fs, io, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+/// A vibration, if haptic feedback is on (Android). Each feels different;
+/// the numbers match Haptics.kt.
+#[derive(Clone, Copy, Debug)]
+pub enum Haptic {
+    /// A link was checked (tiny).
+    LinkChecked = 0,
+    Downloaded = 1,
+    Failed = 2,
+    Click = 3,
+}
+
 #[derive(Debug)]
 pub enum PrefError {
     Io(std::io::Error),

@@ -279,9 +279,11 @@ pub fn set_bar_icons_dark(dark: bool) {
     });
 }
 
-pub fn trigger_haptic() {
+/// Vibrates through the activity showing (the app or the share popup),
+/// which checks the haptic feedback setting.
+pub fn trigger_haptic(kind: super::Haptic) {
     let _ = with_env(|env, activity| {
-        env.call_method(activity, jni_str!("triggerHaptic"), jni_sig!("()V"), &[])?;
+        env.call_method(activity, jni_str!("triggerHaptic"), jni_sig!("(I)V"), &[JValue::Int(kind as i32)])?;
         Ok(())
     });
 }

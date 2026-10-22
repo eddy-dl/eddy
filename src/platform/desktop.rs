@@ -127,7 +127,7 @@ pub fn get_app_data_dir() -> String {
         .into_owned()
 }
 
-pub fn trigger_haptic() {}
+pub fn trigger_haptic(_: super::Haptic) {}
 pub fn show_toast(_: &str) {}
 pub fn set_bar_icons_dark(_: bool) {}
 

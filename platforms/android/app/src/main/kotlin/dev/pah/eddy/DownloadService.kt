@@ -230,6 +230,7 @@ class DownloadService : Service() {
     }
 
     private fun postResult(ok: Boolean, name: String, message: String) {
+        Haptics.play(this, if (ok) Haptics.DOWNLOADED else Haptics.FAILED)
         val notification = NotificationCompat.Builder(this, RESULTS_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(getString(if (ok) R.string.downloaded_name else R.string.download_failed_name, name))
