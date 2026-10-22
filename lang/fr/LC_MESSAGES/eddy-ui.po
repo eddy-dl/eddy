@@ -370,8 +370,6 @@ msgstr "Mettre à jour"
 msgid "Install"
 msgstr "Installer"
 
-msgid "Needed for media from most sites"
-msgstr "Nécessaire pour les médias de la plupart des sites"
 
 msgid "Joins video and audio, converts to audio, saves streams"
 msgstr "Assemble vidéo et audio, convertit en audio, enregistre les flux"
@@ -601,8 +599,12 @@ msgstr "Nouveau dossier"
 msgid "Use this folder"
 msgstr "Utiliser ce dossier"
 
-msgid "Kept up to date apart from the Python package: sites change often"
-msgstr "Tenu à jour à part du paquet Python : les sites changent souvent"
 
 msgid "Eddy downloads it ({}) from GitHub and uses it instead of the one in the Python package."
 msgstr "Eddy le télécharge ({}) depuis GitHub et l'utilise à la place de celui du paquet Python."
+
+msgid "Runs yt-dlp"
+msgstr "Fait tourner yt-dlp"
+
+msgid "Downloads media from most sites"
+msgstr "Télécharge les médias de la plupart des sites"

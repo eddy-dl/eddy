@@ -58,117 +58,140 @@ export component FolderBrowserSheet inherits Rectangle {
     private property <string> new_name;
     private property <bool> naming: false;
 
-    background: ThemeSettings.surface;
+    // The page's background, so the plain buttons (surface) stand out.
+    background: ThemeSettings.background;
 
-    // Nothing behind it gets the taps.
-    TouchArea { }
+    // Nothing behind it gets the taps; a tap off the name field takes the
+    // focus back (so Back works again).
+    TouchArea {
+        clicked => { scope.focus(); }
+    }
 
-    VerticalLayout {
-        padding: 16px;
-        padding-top: Math.max(16px, root.safe_top + 8px);
-        padding-bottom: Math.max(16px, root.safe_bottom + 8px);
-        spacing: 8px;
-
-        Text {
-            text: @tr("Choose a folder");
-            font-size: 20px;
-            font-weight: 700;
-            color: ThemeSettings.text_color;
-            height: self.preferred-height;
-        }
-        Text {
-            text: FolderBrowser.path;
-            font-size: 13px;
-            color: ThemeSettings.primary_accent;
-            wrap: word-wrap;
-            height: self.preferred-height;
-        }
-
-        // Takes the space left; the folders scroll inside it.
-        Rectangle {
-            vertical-stretch: 1;
-            Flickable {
-                width: 100%;
-                height: 100%;
-                content-height: list.preferred-height;
-                list := VerticalLayout {
-                    if FolderBrowser.can_up: FolderRow {
-                        name: @tr("Up");
-                        is_up: true;
-                        clicked => { FolderBrowser.up(); }
-                    }
-                    for folder in FolderBrowser.folders: FolderRow {
-                        name: folder;
-                        clicked => { FolderBrowser.enter(folder); }
-                    }
-                    if FolderBrowser.folders.length == 0: Text {
-                        text: @tr("No folders here");
-                        font-size: 13px;
-                        color: ThemeSettings.text_color.transparentize(40%);
-                        horizontal-alignment: center;
-                    }
-                }
-            }
-        }
-
-        if FolderBrowser.error != "": Text {
-            text: FolderBrowser.error;
-            font-size: 13px;
-            color: #E5534B;
-            wrap: word-wrap;
-            height: self.preferred-height;
-        }
-
-        // A new folder inside this one.
-        if root.naming: HorizontalLayout {
-            spacing: 8px;
-            LineEdit {
-                text <=> root.new_name;
-                placeholder-text: @tr("New folder's name");
-                horizontal-stretch: 1;
-                font-size: 14px;
-                init => { self.focus(); }
-            }
-            ActionButton {
-                text: @tr("Create");
-                primary: true;
-                width: 96px;
-                height: 44px;
-                opacity: root.new_name.is-empty ? 0.4 : 1.0;
-                clicked => {
-                    if (!root.new_name.is-empty) {
-                        FolderBrowser.create(root.new_name);
-                        root.new_name = "";
-                        root.naming = false;
-                    }
-                }
-            }
-        }
-        if !root.naming: FolderRow {
-            name: @tr("New folder");
-            clicked => { root.naming = true; }
-        }
-
-        HorizontalLayout {
-            spacing: 12px;
-            padding-top: 4px;
-            ActionButton {
-                text: @tr("Cancel");
-                horizontal-stretch: 1;
-                height: 48px;
-                clicked => {
+    // It sits outside the window's Back handling, so it has its own: Back
+    // stops naming a new folder, then closes.
+    scope := FocusScope {
+        init => { self.focus(); }
+        key-pressed(event) => {
+            if (event.text == Key.Back || event.text == Key.Escape) {
+                if (root.naming) {
                     root.naming = false;
+                    root.new_name = "";
+                    self.focus();
+                } else {
                     FolderBrowser.cancel();
                 }
+                return accept;
             }
-            ActionButton {
-                text: @tr("Use this folder");
-                primary: true;
-                horizontal-stretch: 1;
-                height: 48px;
-                clicked => {
-                    root.naming = false;
-                    FolderBrowser.choose();
+            return reject;
+        }
+
+        VerticalLayout {
+            padding: 16px;
+            padding-top: Math.max(16px, root.safe_top + 8px);
+            padding-bottom: Math.max(16px, root.safe_bottom + 8px);
+            spacing: 8px;
+
+            Text {
+                text: @tr("Choose a folder");
+                font-size: 20px;
+                font-weight: 700;
+                color: ThemeSettings.text_color;
+                height: self.preferred-height;
+            }
+            Text {
+                text: FolderBrowser.path;
+                font-size: 13px;
+                color: ThemeSettings.primary_accent;
+                wrap: word-wrap;
+                height: self.preferred-height;
+            }
+
+            // Takes the space left; the folders scroll inside it.
+            Rectangle {
+                vertical-stretch: 1;
+                Flickable {
+                    width: 100%;
+                    height: 100%;
+                    content-height: list.preferred-height;
+                    list := VerticalLayout {
+                        if FolderBrowser.can_up: FolderRow {
+                            name: @tr("Up");
+                            is_up: true;
+                            clicked => { FolderBrowser.up(); }
+                        }
+                        for folder in FolderBrowser.folders: FolderRow {
+                            name: folder;
+                            clicked => { FolderBrowser.enter(folder); }
+                        }
+                        if FolderBrowser.folders.length == 0: Text {
+                            text: @tr("No folders here");
+                            font-size: 13px;
+                            color: ThemeSettings.text_color.transparentize(40%);
+                            horizontal-alignment: center;
+                        }
+                    }
+                }
+            }
+
+            if FolderBrowser.error != "": Text {
+                text: FolderBrowser.error;
+                font-size: 13px;
+                color: #E5534B;
+                wrap: word-wrap;
+                height: self.preferred-height;
+            }
+
+            // A new folder inside this one.
+            if root.naming: HorizontalLayout {
+                spacing: 8px;
+                LineEdit {
+                    text <=> root.new_name;
+                    placeholder-text: @tr("New folder's name");
+                    horizontal-stretch: 1;
+                    font-size: 14px;
+                    init => { self.focus(); }
+                }
+                ActionButton {
+                    text: @tr("Create");
+                    primary: true;
+                    width: 96px;
+                    height: 44px;
+                    opacity: root.new_name.is-empty ? 0.4 : 1.0;
+                    clicked => {
+                        if (!root.new_name.is-empty) {
+                            FolderBrowser.create(root.new_name);
+                            root.new_name = "";
+                            root.naming = false;
+                        }
+                    }
+                }
+            }
+            if !root.naming: FolderRow {
+                name: @tr("New folder");
+                clicked => { root.naming = true; }
+            }
+
+            HorizontalLayout {
+                spacing: 12px;
+                padding-top: 4px;
+                ActionButton {
+                    text: @tr("Cancel");
+                    horizontal-stretch: 1;
+                    height: 48px;
+                    clicked => {
+                        root.naming = false;
+                        FolderBrowser.cancel();
+                    }
+                }
+                ActionButton {
+                    text: @tr("Use this folder");
+                    primary: true;
+                    horizontal-stretch: 1;
+                    height: 48px;
+                    clicked => {
+                        root.naming = false;
+                        FolderBrowser.choose();
+                    }
                 }
             }
         }

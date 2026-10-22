@@ -162,7 +162,9 @@ fn refresh() {
         let state = match (in_progress.get("ytdlp"), &version, &release, &releases) {
             (Some(p), ..) => (4, *p),
             (None, None, ..) | (None, _, None, None) => (0, 0.0),
-            (None, Some(v), Some(r), _) if v.is_empty() || r.version.as_str() > v.as_str() => (3, 0.0),
+            // None yet (newer Python packages don't carry it): Get.
+            (None, Some(v), _, _) if v.is_empty() => (1, 0.0),
+            (None, Some(v), Some(r), _) if r.version.as_str() > v.as_str() => (3, 0.0),
             (None, Some(_), _, _) => (2, 0.0),
         };
         rows.insert(
@@ -181,6 +183,8 @@ fn refresh() {
     UI.with(|u| {
         if let Some(ui) = u.borrow().as_ref().and_then(|w| w.upgrade()) {
             ui.global::<AppSettings>().set_helper_packages(ModelRc::new(VecModel::from(rows)));
+            // yt-dlp may have just arrived (or gone).
+            ui.global::<crate::Links>().set_ytdlp_available(crate::platform::ytdlp_ready());
         }
     });
 }

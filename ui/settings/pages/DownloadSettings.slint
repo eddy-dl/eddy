@@ -68,6 +68,79 @@ export component DownloadSettings inherits Rectangle {
                 }
             }
 
+            // A cookies.txt for sites that need a login. Tapping picks one
+            // (replacing the old one); Remove forgets it.
+            Rectangle {
+                border-radius: 8px;
+                background: cookies_ta.has-hover ? ThemeSettings.hover_color : transparent;
+
+                cookies_ta := TouchArea {
+                    clicked => { AppSettings.cookies_add(); }
+                }
+
+                HorizontalLayout {
+                    padding: 8px;
+                    spacing: 16px;
+
+                    VerticalLayout {
+                        alignment: center;
+                        Image {
+                            source: @image-url("../../icons/cookie.svg");
+                            width: 24px;
+                            height: 24px;
+                            colorize: root.text_color;
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        horizontal-stretch: 1;
+
+                        Text {
+                            text: @tr("Cookies");
+                            font-size: 18px;
+                            font-weight: 600;
+                            color: root.text_color;
+                        }
+                        Text {
+                            text: AppSettings.cookies_error == 1 ? @tr("Couldn't read that file")
+                                : AppSettings.cookies_error == 2 ? @tr("That isn't a cookies.txt (Netscape format)")
+                                : AppSettings.cookies_error == 3 ? @tr("Couldn't save the cookies")
+                                : AppSettings.cookies_count == 0 ? @tr("Add a cookies.txt exported from your browser, for sites that need you logged in.")
+                                : @tr("{n} cookie" | "{n} cookies" % AppSettings.cookies_count) + " · " + AppSettings.cookies_sites;
+                            font-size: 13px;
+                            color: AppSettings.cookies_error != 0 ? #e5534b
+                                : AppSettings.cookies_count > 0 ? ThemeSettings.primary_accent.transparentize(30%)
+                                : root.text_color.transparentize(40%);
+                            wrap: word-wrap;
+                        }
+                    }
+
+                    if AppSettings.cookies_count > 0: VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: remove_label.preferred-width + 24px;
+                            height: 32px;
+                            border-radius: 16px;
+                            border-width: 1px;
+                            border-color: root.text_color.transparentize(60%);
+                            background: remove_ta.has-hover ? ThemeSettings.hover_color : transparent;
+                            remove_label := Text {
+                                text: @tr("Remove");
+                                font-size: 13px;
+                                font-weight: 600;
+                                color: root.text_color;
+                                vertical-alignment: center;
+                            }
+                            remove_ta := TouchArea {
+                                clicked => { AppSettings.cookies_remove(); }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Android only. The switch shows whether access is granted; the
             // row opens Android's screen to grant (or take back) it.
             if AppSettings.is_mobile: Rectangle {
@@ -171,79 +244,6 @@ export component DownloadSettings inherits Rectangle {
                             width: 16px;
                             height: 16px;
                             colorize: root.text_color.transparentize(40%);
-                        }
-                    }
-                }
-            }
-
-            // A cookies.txt for sites that need a login. Tapping picks one
-            // (replacing the old one); Remove forgets it.
-            Rectangle {
-                border-radius: 8px;
-                background: cookies_ta.has-hover ? ThemeSettings.hover_color : transparent;
-
-                cookies_ta := TouchArea {
-                    clicked => { AppSettings.cookies_add(); }
-                }
-
-                HorizontalLayout {
-                    padding: 8px;
-                    spacing: 16px;
-
-                    VerticalLayout {
-                        alignment: center;
-                        Image {
-                            source: @image-url("../../icons/cookie.svg");
-                            width: 24px;
-                            height: 24px;
-                            colorize: root.text_color;
-                        }
-                    }
-
-                    VerticalLayout {
-                        alignment: center;
-                        spacing: 4px;
-                        horizontal-stretch: 1;
-
-                        Text {
-                            text: @tr("Cookies");
-                            font-size: 18px;
-                            font-weight: 600;
-                            color: root.text_color;
-                        }
-                        Text {
-                            text: AppSettings.cookies_error == 1 ? @tr("Couldn't read that file")
-                                : AppSettings.cookies_error == 2 ? @tr("That isn't a cookies.txt (Netscape format)")
-                                : AppSettings.cookies_error == 3 ? @tr("Couldn't save the cookies")
-                                : AppSettings.cookies_count == 0 ? @tr("Add a cookies.txt exported from your browser, for sites that need you logged in.")
-                                : @tr("{n} cookie" | "{n} cookies" % AppSettings.cookies_count) + " · " + AppSettings.cookies_sites;
-                            font-size: 13px;
-                            color: AppSettings.cookies_error != 0 ? #e5534b
-                                : AppSettings.cookies_count > 0 ? ThemeSettings.primary_accent.transparentize(30%)
-                                : root.text_color.transparentize(40%);
-                            wrap: word-wrap;
-                        }
-                    }
-
-                    if AppSettings.cookies_count > 0: VerticalLayout {
-                        alignment: center;
-                        Rectangle {
-                            width: remove_label.preferred-width + 24px;
-                            height: 32px;
-                            border-radius: 16px;
-                            border-width: 1px;
-                            border-color: root.text_color.transparentize(60%);
-                            background: remove_ta.has-hover ? ThemeSettings.hover_color : transparent;
-                            remove_label := Text {
-                                text: @tr("Remove");
-                                font-size: 13px;
-                                font-weight: 600;
-                                color: root.text_color;
-                                vertical-alignment: center;
-                            }
-                            remove_ta := TouchArea {
-                                clicked => { AppSettings.cookies_remove(); }
-                            }
                         }
                     }
                 }

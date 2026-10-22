@@ -39,8 +39,8 @@ component HelperRow inherits Rectangle {
                 color: root.text_color;
             }
             Text {
-                text: root.package.key == "python" ? @tr("Needed for media from most sites")
-                    : root.package.key == "ytdlp" ? @tr("Kept up to date apart from the Python package: sites change often")
+                text: root.package.key == "python" ? @tr("Runs yt-dlp")
+                    : root.package.key == "ytdlp" ? @tr("Downloads media from most sites")
                     : root.package.key == "ffmpeg" ? @tr("Joins video and audio, converts to audio, saves streams")
                     : @tr("Optional: helps with YouTube and Instagram");
                 font-size: 13px;

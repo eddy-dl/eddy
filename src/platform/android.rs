@@ -769,13 +769,16 @@ fn with_runtime<T>(wait: std::time::Duration, f: impl FnOnce(&YtdlRuntime) -> Op
 const RUNTIME_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Whether yt-dlp can run (waits for the setup if it's still going).
+/// Python, and yt-dlp: the package's (older packages carry it) or Eddy's own.
 pub fn ytdlp_available() -> bool {
-    with_runtime(RUNTIME_WAIT, |r| Some(r.python.is_some() && r.ytdlp.is_some())).unwrap_or(false)
+    let own = own_ytdlp().is_file();
+    with_runtime(RUNTIME_WAIT, |r| Some(r.python.is_some() && (own || r.ytdlp.is_some()))).unwrap_or(false)
 }
 
 /// Like ytdlp_available, without waiting (for the UI thread).
 pub fn ytdlp_ready() -> bool {
-    with_runtime(std::time::Duration::ZERO, |r| Some(r.python.is_some() && r.ytdlp.is_some())).unwrap_or(false)
+    let own = own_ytdlp().is_file();
+    with_runtime(std::time::Duration::ZERO, |r| Some(r.python.is_some() && (own || r.ytdlp.is_some()))).unwrap_or(false)
 }
 
 /// yt-dlp, ready for its arguments: Python running the yt-dlp script, told

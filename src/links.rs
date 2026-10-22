@@ -350,6 +350,8 @@ fn start_link(id: i32, backend: Backend, format: String, filename: String, optio
     } else {
         String::new()
     };
+    // Saving a video as its audio ("audio|<kbps>|<codec>").
+    let audio = backend == Backend::Media && format.starts_with("audio|");
     // Media downloads hand the extractor's details over as JSON; books their
     // options.
     let format = match backend {
@@ -364,7 +366,7 @@ fn start_link(id: i32, backend: Backend, format: String, filename: String, optio
         filename,
         select_files,
         folder: link.folder_uri.to_string(),
-        settings: download_settings(options, &link),
+        settings: download_settings(options, &link, audio),
         id: 0,
     };
     match crate::platform::start_download(&request) {
@@ -377,7 +379,8 @@ fn start_link(id: i32, backend: Backend, format: String, filename: String, optio
 }
 
 /// The preview's options as the downloader's settings.
-fn download_settings(options: &crate::LinkOptions, link: &PendingLink) -> crate::downloader::DownloadSettings {
+/// `audio`: a video saved as its audio (it's music then, for its folder).
+fn download_settings(options: &crate::LinkOptions, link: &PendingLink, audio: bool) -> crate::downloader::DownloadSettings {
     crate::downloader::DownloadSettings {
         max_speed: options.speed_kbps.max(0) as u64 * 1024,
         connections: options.connections.clamp(1, 16) as u16,
@@ -389,6 +392,7 @@ fn download_settings(options: &crate::LinkOptions, link: &PendingLink) -> crate:
         subfolder: match options.category {
             false => String::new(),
             true if link.backends.row_data(0) == Some(LinkBackend::Book) => "Books".to_string(),
+            true if audio => category_folder(FileType::Audio).to_string(),
             true => category_folder(link.file_type).to_string(),
         },
     }
