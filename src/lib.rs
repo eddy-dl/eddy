@@ -173,12 +173,6 @@ fn run_share_popup() {
     };
     links::on_empty(close);
     ui.on_close_requested(close);
-    // Heights go over in logical pixels (dp on Android); Kotlin converts
-    // them with the display density, which is right from the start (the
-    // window's scale factor isn't until it's shown).
-    ui.on_resize_requested(platform::set_popup_height);
-    // The first size: `init` runs before the handler above is set.
-    platform::set_popup_height(ui.get_wanted_height());
 
     if let Err(e) = ui.run() {
         log::error!("Share popup failed: {:?}", e);

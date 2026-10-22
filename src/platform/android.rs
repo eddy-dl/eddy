@@ -576,14 +576,6 @@ pub fn popup_share() -> Option<(i32, Shared)> {
     .flatten()
 }
 
-/// Sizes the share popup's window to fit its content (logical pixels, i.e. dp).
-pub fn set_popup_height(height: f32) {
-    let _ = with_env(|env, activity| {
-        env.call_method(activity, jni_str!("setPopupHeight"), jni_sig!("(F)V"), &[JValue::Float(height)])?;
-        Ok(())
-    });
-}
-
 /// Closes the running activity (the share popup when it's done).
 pub fn finish_activity() {
     let _ = with_env(|env, activity| {
