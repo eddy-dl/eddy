@@ -68,6 +68,60 @@ export component DownloadSettings inherits Rectangle {
                 }
             }
 
+            // Android only. The switch shows whether access is granted; the
+            // row opens Android's screen to grant (or take back) it.
+            if AppSettings.is_mobile: Rectangle {
+                border-radius: 8px;
+                background: access_ta.has-hover ? ThemeSettings.hover_color : transparent;
+
+                access_ta := TouchArea {
+                    clicked => { AppSettings.request_all_files_access(); }
+                }
+
+                HorizontalLayout {
+                    padding: 8px;
+                    spacing: 16px;
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        horizontal-stretch: 1;
+
+                        Text {
+                            text: @tr("All files access");
+                            font-size: 18px;
+                            font-weight: 600;
+                            color: root.text_color;
+                        }
+
+                        Text {
+                            text: AppSettings.all_files_access
+                                ? @tr("Downloads go straight into any folder you pick.")
+                                : @tr("Lets downloads go straight into any folder. Without it, folders outside Download and Documents get the files copied in once they finish.");
+                            font-size: 13px;
+                            color: root.text_color.transparentize(40%);
+                            wrap: word-wrap;
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: switch.width;
+                            height: switch.height;
+                            switch := ModernSwitch {
+                                checked: AppSettings.all_files_access;
+                            }
+                            // Over the switch, so it never flips by itself:
+                            // it follows the permission.
+                            TouchArea {
+                                clicked => { AppSettings.request_all_files_access(); }
+                            }
+                        }
+                    }
+                }
+            }
+
             // A cookies.txt for sites that need a login. Tapping picks one
             // (replacing the old one); Remove forgets it.
             Rectangle {
@@ -135,60 +189,6 @@ export component DownloadSettings inherits Rectangle {
                             }
                             remove_ta := TouchArea {
                                 clicked => { AppSettings.cookies_remove(); }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Android only. The switch shows whether access is granted; the
-            // row opens Android's screen to grant (or take back) it.
-            if AppSettings.is_mobile: Rectangle {
-                border-radius: 8px;
-                background: access_ta.has-hover ? ThemeSettings.hover_color : transparent;
-
-                access_ta := TouchArea {
-                    clicked => { AppSettings.request_all_files_access(); }
-                }
-
-                HorizontalLayout {
-                    padding: 8px;
-                    spacing: 16px;
-
-                    VerticalLayout {
-                        alignment: center;
-                        spacing: 4px;
-                        horizontal-stretch: 1;
-
-                        Text {
-                            text: @tr("All files access");
-                            font-size: 18px;
-                            font-weight: 600;
-                            color: root.text_color;
-                        }
-
-                        Text {
-                            text: AppSettings.all_files_access
-                                ? @tr("Downloads go straight into any folder you pick.")
-                                : @tr("Lets downloads go straight into any folder. Without it, folders outside Download and Documents get the files copied in once they finish.");
-                            font-size: 13px;
-                            color: root.text_color.transparentize(40%);
-                            wrap: word-wrap;
-                        }
-                    }
-
-                    VerticalLayout {
-                        alignment: center;
-                        Rectangle {
-                            width: switch.width;
-                            height: switch.height;
-                            switch := ModernSwitch {
-                                checked: AppSettings.all_files_access;
-                            }
-                            // Over the switch, so it never flips by itself:
-                            // it follows the permission.
-                            TouchArea {
-                                clicked => { AppSettings.request_all_files_access(); }
                             }
                         }
                     }

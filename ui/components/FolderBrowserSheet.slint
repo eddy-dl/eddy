@@ -54,6 +54,9 @@ component FolderRow inherits Rectangle {
 export component FolderBrowserSheet inherits Rectangle {
     in property <length> safe_top;
     in property <length> safe_bottom;
+    // How much of the window the on-screen keyboard covers (0 when it's
+    // down), so the name field and buttons stay above it.
+    in property <length> keyboard;
 
     private property <string> new_name;
     private property <bool> naming: false;
@@ -88,7 +91,7 @@ export component FolderBrowserSheet inherits Rectangle {
         VerticalLayout {
             padding: 16px;
             padding-top: Math.max(16px, root.safe_top + 8px);
-            padding-bottom: Math.max(16px, root.safe_bottom + 8px);
+            padding-bottom: Math.max(16px, root.safe_bottom + 8px, root.keyboard + 8px);
             spacing: 8px;
 
             Text {

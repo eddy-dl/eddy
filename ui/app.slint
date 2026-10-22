@@ -1233,5 +1233,6 @@ export component DownloaderApp inherits Window {
         height: 100%;
         safe_top: root.safe-area-insets.top;
         safe_bottom: root.safe-area-insets.bottom;
+        keyboard: root.virtual-keyboard-size.height > 0 ? root.height - root.virtual-keyboard-position.y : 0px;
     }
 }
