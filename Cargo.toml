@@ -45,6 +45,20 @@ tar = "0.4"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 system-theme = { version = "0.3", default-features = false }
 webbrowser = "1.0"
+# Finished / failed download notifications.
+notify-rust = "4"
+# The window handle, for Windows' taskbar progress.
+raw-window-handle = "0.6"
+slint = { version = "1.17.1", features = ["raw-window-handle-06"] }
+
+# Taskbar progress: Windows' ITaskbarList3 (the version Slint already uses).
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell"] }
+
+# Taskbar progress: the Unity launcher entry signal (KDE, Dash to Dock),
+# over the D-Bus library Slint already uses.
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = "5"
 
 [target.'cfg(target_os = "android")'.dependencies]
 android-activity = { version = "0.6.1", features = ["game-activity"] }

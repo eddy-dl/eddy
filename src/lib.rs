@@ -1,6 +1,8 @@
 pub mod components;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod components_desktop;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub mod desktop_notify;
 pub mod db;
 pub mod downloader;
 pub mod extractors;
