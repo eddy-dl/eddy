@@ -157,7 +157,7 @@ export component Sidebar inherits Rectangle {
                 text: @tr("Downloads");
                 subtitle: @tr("Folder for files, threads per download");
                 icon: @image-url("../icons/download.svg");
-                active: root.active_tab == download_tab;
+                active: root.active_tab == download_tab || root.active_tab == SettingsTab.Packages;
                 is_landscape: root.is_landscape;
                 icon_bg_color: #cbe4de;
                 text_color: root.text_color;

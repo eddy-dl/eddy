@@ -426,3 +426,9 @@ msgstr "Outils média"
 
 msgid "Media from most sites needs these. Eddy can install them in its own folder; copies you already have are used too."
 msgstr "Les médias de la plupart des sites en ont besoin. Eddy peut les installer dans son propre dossier ; ceux déjà installés sont aussi utilisés."
+
+msgid "Python & yt-dlp, FFmpeg, Deno"
+msgstr "Python et yt-dlp, FFmpeg, Deno"
+
+msgid "yt-dlp, FFmpeg, Deno"
+msgstr "yt-dlp, FFmpeg, Deno"
