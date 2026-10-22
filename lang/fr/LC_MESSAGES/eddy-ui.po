@@ -570,3 +570,6 @@ msgid "{n} connection"
 msgid_plural "{n} connections"
 msgstr[0] "{n} connexion"
 msgstr[1] "{n} connexions"
+
+msgid "Saving restarts the download with these, carrying on from where it got to."
+msgstr "Enregistrer relance le téléchargement avec ces réglages, en reprenant là où il en était."

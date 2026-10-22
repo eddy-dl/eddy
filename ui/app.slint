@@ -14,7 +14,7 @@ import { AddLinksSheet } from "components/AddLinksSheet.slint";
 import { LinkPreviewSheet } from "components/LinkPreviewSheet.slint";
 import { SelectionAction, SelectionActionBar, DeleteConfirmSheet } from "components/SelectionActions.slint";
 import { DownloadOptionsSheet, ItemAction } from "components/DownloadOptionsSheet.slint";
-import { Links, LinkBackend } from "globals/Links.slint";
+import { Links, LinkBackend, LinkOptions } from "globals/Links.slint";
 import { ScrollHint } from "components/ScrollHint.slint";
 import { TabSwipe } from "globals/TabSwipe.slint";
 import { DownloadItem, DownloadState, FileType, DownloadingCard, QueuedCard, ListHeader, StoppedCard, CompletedCard } from "components/DownloadCards.slint";
@@ -289,6 +289,8 @@ export component DownloaderApp inherits Window {
     // for Rename, the new link for RefreshLink, "files" for a Delete that
     // also removes the files, otherwise "".
     callback download_action(id: int, action: ItemAction, value: string);
+    // New options for one download (from its options sheet).
+    callback download_options_changed(id: int, options: LinkOptions);
 
     // Tapping an unfinished download shows its options.
     in-out property <bool> item_options_open: false;
@@ -1134,6 +1136,10 @@ export component DownloaderApp inherits Window {
 
                 action(action, value) => {
                     root.download_action(root.options_item.id, action, value);
+                    root.close_item_options();
+                }
+                options_changed(options) => {
+                    root.download_options_changed(root.options_item.id, options);
                     root.close_item_options();
                 }
                 delete_requested => {

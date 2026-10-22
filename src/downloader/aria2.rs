@@ -404,6 +404,13 @@ impl AriaEngineClient {
             .map_err(|e| e.to_string())
     }
 
+    /// Stops a download for good (it shows up as "removed").
+    pub fn remove_download(&self, gid_hex: &str) {
+        if let Some(gid) = GroupId::from_hex_string(gid_hex) {
+            let _ = self.cmd_tx.send(EngineCommand::RemoveDownload { gid });
+        }
+    }
+
     /// Safely commands the engine to pause
     pub fn pause_download(&self, gid_hex: &str) -> Result<(), String> {
         let gid = GroupId::from_hex_string(gid_hex).ok_or("Invalid GID")?;

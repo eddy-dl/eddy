@@ -7,8 +7,8 @@ use super::{Deliver, DownloadRequest, finished, runtime};
 use crate::extractors::{self, Fetch, MediaRequest, Service};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 /// A running media download: its name, and bytes done out of total (0 when
 /// unknown).
@@ -19,23 +19,44 @@ pub struct Job {
     pub total: u64,
 }
 
-static JOBS: Mutex<Option<HashMap<u64, Job>>> = Mutex::new(None);
+/// How to stop a job: its flag (so a stopped job doesn't report a failure),
+/// its task, and yt-dlp's process.
+#[derive(Default)]
+struct Control {
+    cancelled: Arc<AtomicBool>,
+    abort: Option<tokio::task::AbortHandle>,
+    child: Option<Arc<Mutex<Option<std::process::Child>>>>,
+}
+
+static JOBS: Mutex<Option<HashMap<u64, (Job, Control)>>> = Mutex::new(None);
 static NEXT_JOB: AtomicU64 = AtomicU64::new(1);
 
-fn with_jobs<T>(f: impl FnOnce(&mut HashMap<u64, Job>) -> T) -> T {
+fn with_jobs<T>(f: impl FnOnce(&mut HashMap<u64, (Job, Control)>) -> T) -> T {
     let mut jobs = JOBS.lock().unwrap_or_else(|e| e.into_inner());
     f(jobs.get_or_insert_with(HashMap::new))
 }
 
-pub(super) fn begin(label: &str) -> u64 {
+/// A new job; returns its id and its cancelled flag.
+pub(super) fn begin(label: &str) -> (u64, Arc<AtomicBool>) {
     let id = NEXT_JOB.fetch_add(1, Ordering::SeqCst);
-    with_jobs(|jobs| jobs.insert(id, Job { label: label.to_string(), done: 0, total: 0 }));
-    id
+    let control = Control::default();
+    let cancelled = Arc::clone(&control.cancelled);
+    with_jobs(|jobs| jobs.insert(id, (Job { label: label.to_string(), done: 0, total: 0 }, control)));
+    (id, cancelled)
+}
+
+/// The job's task, so cancelling can stop it.
+pub(super) fn set_task(id: u64, abort: tokio::task::AbortHandle) {
+    with_jobs(|jobs| {
+        if let Some((_, control)) = jobs.get_mut(&id) {
+            control.abort = Some(abort);
+        }
+    });
 }
 
 pub(super) fn progress(id: u64, done: u64, total: u64) {
     with_jobs(|jobs| {
-        if let Some(job) = jobs.get_mut(&id) {
+        if let Some((job, _)) = jobs.get_mut(&id) {
             job.done = done;
             job.total = total;
         }
@@ -46,13 +67,34 @@ pub(super) fn end(id: u64) {
     with_jobs(|jobs| jobs.remove(&id));
 }
 
-/// Media downloads still going.
-pub fn jobs() -> Vec<Job> {
-    with_jobs(|jobs| jobs.values().cloned().collect())
+/// Stops a job (pausing or cancelling): its task, or yt-dlp.
+pub fn cancel(id: u64) {
+    let control = with_jobs(|jobs| jobs.remove(&id)).map(|(_, c)| c);
+    if let Some(control) = control {
+        control.cancelled.store(true, Ordering::SeqCst);
+        if let Some(abort) = control.abort {
+            abort.abort();
+        }
+        if let Some(child) = control.child {
+            if let Some(child) = child.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+                let _ = child.kill();
+            }
+        }
+    }
 }
 
-/// Starts a media download (`request.format` holds the MediaRequest).
-pub fn start(request: &DownloadRequest, dir: &str, name: Option<String>, deliver: Option<Deliver>) -> Result<(), String> {
+/// Media and book downloads still going.
+pub fn jobs() -> Vec<Job> {
+    with_jobs(|jobs| jobs.values().map(|(j, _)| j.clone()).collect())
+}
+
+pub fn job(id: u64) -> Option<Job> {
+    with_jobs(|jobs| jobs.get(&id).map(|(j, _)| j.clone()))
+}
+
+/// Starts a media download (`request.format` holds the MediaRequest);
+/// returns its job.
+pub fn start(request: &DownloadRequest, dir: &str, name: Option<String>, deliver: Option<Deliver>) -> Result<u64, String> {
     let media: MediaRequest = if request.format.is_empty() {
         MediaRequest::default()
     } else {
@@ -60,26 +102,33 @@ pub fn start(request: &DownloadRequest, dir: &str, name: Option<String>, deliver
     };
     let service = media.service.or_else(|| extractors::native_service(&request.url)).unwrap_or(Service::YtDlp);
     let label = super::label_for(request);
+    let record = request.id;
     match service {
-        Service::YtDlp => start_ytdlp(&request.url, &media, dir, name, label, deliver, &request.settings),
+        Service::YtDlp => start_ytdlp(record, &request.url, &media, dir, name, label, deliver, &request.settings),
         native => {
-            let job = begin(&label);
+            let (job, cancelled) = begin(&label);
             let (url, dir) = (request.url.clone(), PathBuf::from(dir));
             let max_speed = request.settings.max_speed;
-            runtime().spawn(async move {
+            let task = runtime().spawn(async move {
                 let result = download_native(job, native, &url, &media, &dir, name.as_deref(), max_speed).await;
                 end(job);
+                if cancelled.load(Ordering::SeqCst) {
+                    return;
+                }
                 match result {
-                    Ok(files) => finished(saved_name(&files, label), true, String::new(), deliver),
-                    Err(e) => finished(label, false, e, None),
+                    Ok(files) => finished(record, saved_name(&files, label), true, String::new(), deliver, files.first().cloned()),
+                    Err(e) => finished(record, label, false, e, None, None),
                 }
             });
-            Ok(())
+            set_task(job, task.abort_handle());
+            Ok(job)
         }
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn start_ytdlp(
+    record: i64,
     url: &str,
     media: &MediaRequest,
     dir: &str,
@@ -87,7 +136,7 @@ fn start_ytdlp(
     label: String,
     deliver: Option<Deliver>,
     settings: &super::DownloadSettings,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     use std::io::BufRead;
     let args = extractors::ytdlp::download_args(url, media, dir, name.as_deref(), settings);
     let mut child = crate::platform::ytdlp_command()
@@ -98,8 +147,15 @@ fn start_ytdlp(
         .spawn()
         .map_err(|e| format!("Couldn't run yt-dlp: {e}"))?;
 
-    let job = begin(&label);
+    let (job, cancelled) = begin(&label);
     let stdout = child.stdout.take();
+    // Shared with cancel(), which kills it.
+    let child = Arc::new(Mutex::new(Some(child)));
+    with_jobs(|jobs| {
+        if let Some((_, control)) = jobs.get_mut(&job) {
+            control.child = Some(Arc::clone(&child));
+        }
+    });
     std::thread::spawn(move || {
         let mut files = Vec::new();
         if let Some(stdout) = stdout {
@@ -111,19 +167,28 @@ fn start_ytdlp(
                 }
             }
         }
-        let result = child.wait_with_output();
+        let child = child.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let result = match child {
+            Some(child) => child.wait_with_output(),
+            None => return,
+        };
         end(job);
+        if cancelled.load(Ordering::SeqCst) {
+            return; // paused or cancelled
+        }
         match result {
-            Ok(output) if output.status.success() => finished(saved_name(&files, label), true, String::new(), deliver),
+            Ok(output) if output.status.success() => {
+                finished(record, saved_name(&files, label), true, String::new(), deliver, files.first().cloned())
+            }
             Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 let last = stderr.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("yt-dlp failed");
-                finished(label, false, last.trim_start_matches("ERROR: ").to_string(), None);
+                finished(record, label, false, last.trim_start_matches("ERROR: ").to_string(), None, None);
             }
-            Err(e) => finished(label, false, e.to_string(), None),
+            Err(e) => finished(record, label, false, e.to_string(), None, None),
         }
     });
-    Ok(())
+    Ok(job)
 }
 
 /// What the notification calls a finished download: the file's name, with

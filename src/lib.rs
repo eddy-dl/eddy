@@ -7,6 +7,7 @@ pub mod components_desktop;
 pub mod desktop_notify;
 pub mod db;
 pub mod downloader;
+pub mod downloads;
 pub mod extractors;
 pub mod links;
 pub mod novels;
@@ -136,6 +137,7 @@ fn android_main(app: AndroidApp) {
     });
     links::install_main(&ui);
     selection::install(&ui);
+    downloads::install(&ui);
     components::install(&ui);
     cookies::install(&ui);
     cache::install(&ui);

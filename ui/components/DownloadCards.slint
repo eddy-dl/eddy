@@ -1,7 +1,7 @@
 import { ThemeSettings } from "../themes/theme.slint";
 import { FileType, FileTypeIcon } from "FileTypeIcon.slint";
 import { HoldTouchArea } from "HoldHint.slint";
-import { LinkBackend } from "../globals/Links.slint";
+import { LinkBackend, LinkOptions } from "../globals/Links.slint";
 
 export { FileType }
 
@@ -26,6 +26,7 @@ export struct DownloadItem {
     url: string, // where it's downloaded from (a magnet or .torrent path for torrents)
     backend: LinkBackend, // how it's downloaded
     folder: string, // where it's saved, as shown to the user
+    options: LinkOptions, // its speed limit, connections, user agent, folder
 }
 
 component ProgressBar inherits Rectangle {

@@ -365,6 +365,7 @@ fn start_link(id: i32, backend: Backend, format: String, filename: String, optio
         select_files,
         folder: link.folder_uri.to_string(),
         settings: download_settings(options, &link),
+        id: 0,
     };
     match crate::platform::start_download(&request) {
         Ok(()) => {
@@ -512,7 +513,7 @@ fn initial_link(id: i32, url: &str) -> PendingLink {
 
 /// How the folder downloads usually go to is shown: the one picked in
 /// settings, or the default.
-fn usual_folder_display() -> String {
+pub fn usual_folder_display() -> String {
     crate::platform::get_pref(crate::preferences::DOWNLOAD_DIR_DISPLAY, "")
         .ok()
         .filter(|d| !d.is_empty())

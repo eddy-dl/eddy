@@ -41,6 +41,7 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.global::<AppSettings>().set_default_download_path(eddy::storage::default_display().into());
     links::install_main(&ui);
     eddy::selection::install(&ui);
+    eddy::downloads::install(&ui);
     eddy::components_desktop::install(&ui);
     eddy::desktop_notify::install(&ui);
     eddy::cookies::install(&ui);

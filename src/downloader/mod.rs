@@ -5,6 +5,7 @@ pub mod media;
 use aria2::AriaEngineClient;
 use aria2_core::engine::download_engine::DownloadEngine;
 use aria2_core::request::request_group_man::RequestGroupMan;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -12,8 +13,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 pub struct DownloadClient {}
 
 /// How a download is fetched (same order as the UI's LinkBackend).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Backend {
+    #[default]
     Direct,
     Torrent,
     /// A page's media, through an extractor; `format` is a MediaRequest.
@@ -46,8 +48,12 @@ impl Backend {
 }
 
 /// Everything needed to start one download.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct DownloadRequest {
+    /// Its record in the downloads lists (downloads.rs); 0 for a new one,
+    /// which gets a record when it starts.
+    pub id: i64,
     /// A URL or magnet, or the path of a saved .torrent file.
     pub url: String,
     pub backend: Backend,
@@ -133,8 +139,18 @@ pub fn engine() -> &'static AriaEngineClient {
 /// Auto downloads still being checked before they start.
 static CHOOSING: AtomicUsize = AtomicUsize::new(0);
 
+/// What's doing a download's work, for its progress and to pause or stop
+/// it: an aria2 download (its gid), or a job (media, books).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Handle {
+    Aria(String),
+    Job(u64),
+}
+
 /// aria2 downloads started here, watched until they end.
 struct Watched {
+    /// The download's record.
+    id: i64,
     gid: String,
     label: String,
     /// Where the finished files still have to be copied, if anywhere.
@@ -154,6 +170,8 @@ static FINISHED: Mutex<Vec<Finished>> = Mutex::new(Vec::new());
 /// How a download ended, for the notification.
 #[derive(Clone, Debug)]
 pub struct Finished {
+    /// The download's record.
+    pub id: i64,
     pub name: String,
     pub ok: bool,
     /// Files to copy into a picked folder now that it's done (only when it
@@ -163,18 +181,32 @@ pub struct Finished {
     pub message: String,
 }
 
-fn finished(name: String, ok: bool, message: String, deliver: Option<Deliver>) {
+/// A download ended. `path` is what it saved (its first file), when it's
+/// staying where it was saved. Downloads the user stopped don't get a
+/// notification.
+fn finished(id: i64, name: String, ok: bool, message: String, deliver: Option<Deliver>, path: Option<PathBuf>) {
+    finished_by(id, None, name, ok, message, deliver, path)
+}
+
+/// `finished`, for the aria2 download `handle` (ignored when the download
+/// has been restarted onto another one since).
+fn finished_by(id: i64, handle: Option<&Handle>, name: String, ok: bool, message: String, deliver: Option<Deliver>, path: Option<PathBuf>) {
     if ok {
         log::info!("download finished: {name}");
     } else {
         log::error!("download failed: {name}: {message}");
     }
     let deliver = deliver.filter(|_| ok);
-    FINISHED.lock().unwrap_or_else(|e| e.into_inner()).push(Finished { name, ok, message, deliver });
+    // Staged files move into the picked folder, so the path won't hold.
+    let path = if deliver.is_some() { None } else { path };
+    if !crate::downloads::ended(id, handle, &name, ok, &message, path) {
+        return;
+    }
+    FINISHED.lock().unwrap_or_else(|e| e.into_inner()).push(Finished { id, name, ok, message, deliver });
 }
 
 /// A short name for notifications: the chosen name, else the URL's end.
-fn label_for(request: &DownloadRequest) -> String {
+pub fn label_for(request: &DownloadRequest) -> String {
     if !request.filename.is_empty() {
         return request.filename.clone();
     }
@@ -192,9 +224,13 @@ pub fn take_finished() -> Vec<Finished> {
                 // A torrent's metadata is done; its files are still to come.
                 let children = engine.followed_by(&w.gid);
                 if children.is_empty() {
-                    finished(w.label.clone(), true, String::new(), w.deliver.clone());
+                    let path = (!p.filename.is_empty()).then(|| PathBuf::from(&p.filename));
+                    finished_by(w.id, Some(&Handle::Aria(w.gid.clone())), w.label.clone(), true, String::new(), w.deliver.clone(), path);
                 } else {
+                    // Its progress is the files' now.
+                    crate::downloads::running(w.id, Handle::Aria(children[0].clone()));
                     followers.extend(children.into_iter().map(|gid| Watched {
+                        id: w.id,
                         gid,
                         label: w.label.clone(),
                         deliver: w.deliver.clone(),
@@ -204,7 +240,7 @@ pub fn take_finished() -> Vec<Finished> {
             }
             Some(p) if p.status == "error" || p.status == "removed" => {
                 let message = engine.error_message(&w.gid).unwrap_or_else(|| p.status.clone());
-                finished(w.label.clone(), false, message, None);
+                finished_by(w.id, Some(&Handle::Aria(w.gid.clone())), w.label.clone(), false, message, None, None);
                 false
             }
             _ => true,
@@ -250,9 +286,30 @@ pub fn summary() -> (usize, String, Option<f64>) {
     (count, first, (total > 0).then(|| done as f64 / total as f64))
 }
 
-/// Starts a download in the background. On Android this runs inside the
-/// download service, which keeps the app alive until downloads finish.
+/// Starts a download in the background, giving it a record in the
+/// downloads lists if it's new (`request.id` 0). On Android this runs inside
+/// the download service, which keeps the app alive until downloads finish.
 pub fn start(request: &DownloadRequest) -> Result<(), String> {
+    let mut request = request.clone();
+    if request.id == 0 {
+        request.id = crate::downloads::register(&request);
+    }
+    match launch(&request) {
+        Ok(Some(handle)) => {
+            crate::downloads::running(request.id, handle);
+            Ok(())
+        }
+        // Auto: the handle comes once it's picked how.
+        Ok(None) => Ok(()),
+        Err(e) => {
+            crate::downloads::ended(request.id, None, &label_for(&request), false, &e, None);
+            Err(e)
+        }
+    }
+}
+
+/// Starts `request`'s work; its handle, or None while Auto decides.
+fn launch(request: &DownloadRequest) -> Result<Option<Handle>, String> {
     let target = crate::storage::resolve(&request.folder);
     let deliver = match &target {
         crate::storage::SaveTarget::Staged { tree_uri, staging } => {
@@ -276,43 +333,92 @@ pub fn start(request: &DownloadRequest) -> Result<(), String> {
     let label = label_for(request);
     let watch = |gid: String| {
         WATCHED.lock().unwrap_or_else(|e| e.into_inner()).push(Watched {
-            gid,
+            id: request.id,
+            gid: gid.clone(),
             label: label.clone(),
             deliver: deliver.clone(),
-        })
+        });
+        Some(Handle::Aria(gid))
     };
     let name = (!request.filename.is_empty()).then(|| request.filename.replace(['/', '\\'], "_"));
     let select = (!request.select_files.is_empty()).then_some(request.select_files.as_str());
-    match request.backend {
+    Ok(match request.backend {
         Backend::Torrent if !request.url.contains(':') || request.url.starts_with('/') => {
             // A saved .torrent file.
             let torrent = std::fs::read(&request.url).map_err(|e| e.to_string())?;
-            watch(engine().start_torrent(torrent, &dir, select, &request.settings)?);
+            watch(engine().start_torrent(torrent, &dir, select, &request.settings)?)
         }
         // A magnet, or a .torrent link aria2 fetches and then follows: the
         // files take their names from the torrent.
-        Backend::Torrent => {
-            watch(engine().start_download(&request.url, &dir, None, select, &request.settings)?);
-        }
+        Backend::Torrent => watch(engine().start_download(&request.url, &dir, None, select, &request.settings)?),
         // Direct on a .torrent link saves the .torrent file itself.
-        Backend::Direct => {
-            watch(engine().start_download(&request.url, &dir, name.as_deref(), None, &request.settings)?);
-        }
-        Backend::Media => media::start(request, &dir, name, deliver.clone())?,
-        Backend::Book => book::start(request, &dir, name, deliver.clone())?,
+        Backend::Direct => watch(engine().start_download(&request.url, &dir, name.as_deref(), None, &request.settings)?),
+        Backend::Media => Some(Handle::Job(media::start(request, &dir, name, deliver.clone())?)),
+        Backend::Book => Some(Handle::Job(book::start(request, &dir, name, deliver.clone())?)),
         Backend::Auto => {
             CHOOSING.fetch_add(1, Ordering::SeqCst);
             let mut request = request.clone();
             runtime().spawn(async move {
                 (request.backend, request.format) = crate::links::pick_backend(&request.url).await;
-                if let Err(e) = start(&request) {
-                    finished(label_for(&request), false, e, None);
+                // The record keeps what was picked, for resuming.
+                crate::downloads::update_request(&request);
+                match launch(&request) {
+                    Ok(Some(handle)) => crate::downloads::running(request.id, handle),
+                    Ok(None) => {}
+                    Err(e) => finished(request.id, label_for(&request), false, e, None, None),
                 }
                 CHOOSING.fetch_sub(1, Ordering::SeqCst);
             });
+            None
         }
+    })
+}
+
+/// Pauses a download's work. aria2 keeps its place; a job stops (resuming
+/// starts it again: yt-dlp carries on with its .part file, books with the
+/// chapters they have).
+pub fn pause(handle: &Handle) {
+    match handle {
+        Handle::Aria(gid) => {
+            let _ = engine().pause_download(gid);
+        }
+        Handle::Job(job) => media::cancel(*job),
     }
-    Ok(())
+}
+
+/// Resumes a paused aria2 download (jobs are started again instead).
+pub fn unpause(handle: &Handle) -> bool {
+    match handle {
+        Handle::Aria(gid) => engine().resume_download(gid).is_ok(),
+        Handle::Job(_) => false,
+    }
+}
+
+/// Stops a download for good (its partial files stay until it's deleted).
+pub fn cancel(handle: &Handle) {
+    match handle {
+        Handle::Aria(gid) => engine().remove_download(gid),
+        Handle::Job(job) => media::cancel(*job),
+    }
+}
+
+/// A download's progress right now: (state, done, total, bytes per second).
+pub fn progress(handle: &Handle) -> Option<(crate::downloads::Live, u64, u64, f64)> {
+    use crate::downloads::Live;
+    match handle {
+        Handle::Aria(gid) => {
+            let p = ENGINE.get()?.get_progress(gid)?;
+            let live = match p.status.as_str() {
+                "waiting" => Live::Queued,
+                "paused" => Live::Paused,
+                "complete" => Live::Done,
+                "error" | "removed" => Live::Stopped,
+                _ => Live::Active,
+            };
+            Some((live, p.completed_length, p.total_length, p.download_speed))
+        }
+        Handle::Job(job) => media::job(*job).map(|j| (Live::Active, j.done, j.total, 0.0)),
+    }
 }
 
 /// Downloads still running or queued, across every backend. Doesn't start

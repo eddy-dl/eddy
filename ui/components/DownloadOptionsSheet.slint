@@ -1,10 +1,11 @@
+import { DownloadOptionsEditor } from "DownloadOptionsEditor.slint";
 import { LineEdit } from "std-widgets.slint";
 import { ThemeSettings } from "../themes/theme.slint";
 import { ActionButton } from "Buttons.slint";
 import { SectionLabel } from "Chips.slint";
 import { FileTypeIcon } from "FileTypeIcon.slint";
 import { DownloadItem, DownloadState } from "DownloadCards.slint";
-import { LinkBackend } from "../globals/Links.slint";
+import { LinkBackend, LinkOptions } from "../globals/Links.slint";
 
 // Things that can be done to one download. `Rename` and `RefreshLink` come
 // with the new name or link.
@@ -78,6 +79,9 @@ export component DownloadOptionsSheet inherits Rectangle {
     // Delete is asked about first (the owner shows the confirmation).
     callback action(ItemAction, string);
     callback delete_requested();
+    // New speed limit, connections, user agent or folder (a running download
+    // restarts with them, carrying on where it got to).
+    callback options_changed(LinkOptions);
 
     // Called by the owner when the sheet opens, so it starts on the options.
     public function reset() {
@@ -85,10 +89,16 @@ export component DownloadOptionsSheet inherits Rectangle {
         root.copied = false;
     }
 
-    // 0 = the options; 1 = renaming; 2 = pasting a new link.
+    // 0 = the options; 1 = renaming; 2 = pasting a new link; 3 = its
+    // download options.
     private property <int> editing: 0;
     private property <string> edit_text;
     private property <bool> copied: false;
+    private property <int> opt_speed_kbps;
+    private property <int> opt_connections;
+    private property <int> opt_ua_mode;
+    private property <string> opt_ua_custom;
+    private property <bool> opt_category;
 
     private property <bool> running: root.item.state == DownloadState.Active || root.item.state == DownloadState.Queued;
     private property <bool> paused: root.item.state == DownloadState.Paused;
@@ -186,6 +196,20 @@ export component DownloadOptionsSheet inherits Rectangle {
                     commands: "M3 7a2 2 0 0 1 2 -2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2H5a2 2 0 0 1 -2 -2z";
                     clicked => { root.action(ItemAction.ChangeFolder, ""); }
                 }
+                OptionRow {
+                    label: @tr("Download options");
+                    detail: (root.item.options.speed_kbps > 0 ? Math.round(root.item.options.speed_kbps / 102.4) / 10 + " MB/s · " : @tr("No limit") + " · ")
+                        + @tr("{n} connection" | "{n} connections" % root.item.options.connections);
+                    commands: "M4 6h16M4 12h16M4 18h16M8 4v4M16 10v4M10 16v4";
+                    clicked => {
+                        root.opt_speed_kbps = root.item.options.speed_kbps;
+                        root.opt_connections = root.item.options.connections;
+                        root.opt_ua_mode = root.item.options.ua_mode;
+                        root.opt_ua_custom = root.item.options.ua_custom;
+                        root.opt_category = root.item.options.category;
+                        root.editing = 3;
+                    }
+                }
                 if root.can_refresh: OptionRow {
                     label: @tr("Refresh link");
                     detail: @tr("Paste a new link if this one expired");
@@ -219,8 +243,54 @@ export component DownloadOptionsSheet inherits Rectangle {
                 }
             }
 
+            // This download's options.
+            if root.editing == 3: VerticalLayout {
+                spacing: 10px;
+                padding-top: 4px;
+                DownloadOptionsEditor {
+                    compact: true;
+                    speed_kbps <=> root.opt_speed_kbps;
+                    connections <=> root.opt_connections;
+                    ua_mode <=> root.opt_ua_mode;
+                    ua_custom <=> root.opt_ua_custom;
+                    category <=> root.opt_category;
+                }
+                if root.running: Text {
+                    text: @tr("Saving restarts the download with these, carrying on from where it got to.");
+                    font-size: 12px;
+                    color: ThemeSettings.text_color.transparentize(35%);
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    padding-top: 4px;
+                    spacing: 12px;
+                    ActionButton {
+                        text: @tr("Back");
+                        horizontal-stretch: 1;
+                        height: 48px;
+                        clicked => { root.editing = 0; }
+                    }
+                    ActionButton {
+                        text: @tr("Save");
+                        primary: true;
+                        horizontal-stretch: 1;
+                        height: 48px;
+                        clicked => {
+                            root.options_changed({
+                                speed_kbps: root.opt_speed_kbps,
+                                connections: root.opt_connections,
+                                ua_mode: root.opt_ua_mode,
+                                ua_custom: root.opt_ua_custom,
+                                category: root.opt_category,
+                            });
+                            root.editing = 0;
+                        }
+                    }
+                }
+            }
+
             // Renaming, or pasting a new link.
-            if root.editing != 0: VerticalLayout {
+            if root.editing == 1 || root.editing == 2: VerticalLayout {
                 spacing: 10px;
                 padding-top: 4px;
 

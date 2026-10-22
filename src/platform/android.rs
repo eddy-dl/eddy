@@ -438,7 +438,9 @@ pub fn start_download(request: &crate::downloader::DownloadRequest) -> Result<()
         let filename = env.new_string(&request.filename)?;
         let select_files = env.new_string(&request.select_files)?;
         let folder = env.new_string(&request.folder)?;
-        let settings = env.new_string(serde_json::to_string(&request.settings).unwrap_or_default())?;
+        // The whole request, record id included (a resumed download keeps
+        // its place in the lists); the other arguments are for reading logs.
+        let settings = env.new_string(serde_json::to_string(request).unwrap_or_default())?;
         env.call_method(
             activity,
             jni_str!("startDownload"),
@@ -480,9 +482,14 @@ pub extern "system" fn Java_dev_pah_eddy_EddyNative_startDownload<'caller>(
                 filename: filename.try_to_string(env)?,
                 select_files: select_files.try_to_string(env)?,
                 folder: folder.try_to_string(env)?,
-                // JSON (DownloadSettings); the usual settings if it's not.
-                settings: serde_json::from_str(&settings.try_to_string(env)?).unwrap_or_default(),
+                settings: Default::default(),
+                id: 0,
             }))
+            // The whole request as JSON, when it's there.
+            .map(|request| {
+                let full = settings.try_to_string(env).ok().and_then(|json| serde_json::from_str::<crate::downloader::DownloadRequest>(&json).ok());
+                full.or(request)
+            })
         })
         .resolve::<LogErrorAndDefault>();
     let Some(request) = request else {
