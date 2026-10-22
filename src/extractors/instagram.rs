@@ -152,10 +152,35 @@ async fn fetch_raw_media(url: &str, shortcode: &str) -> Result<Vec<RawMedia>, St
 
 // --- SnapSave ---
 
-/// SnapSave obfuscates its answer behind an eval(); running it through Deno
-/// (on Android, YTDLnis's Deno helper app) gives the real HTML. Without Deno
-/// the raw answer is used, which sometimes still has the links.
-async fn deobfuscate_with_deno(raw_js: &str) -> String {
+/// The fallback when Deno isn't there (or fails): SnapSave hides its answer
+/// in an eval() of a packed string: groups of digits in base `e`, written
+/// with the alphabet `n` and split by `n[e]`, each a character code plus
+/// `t`; the characters are UTF-8 bytes.
+fn unpack_snapsave(raw_js: &str) -> Option<String> {
+    static PACKED: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"\}\("([^"]*)",\s*\d+,\s*"([^"]*)",\s*(\d+),\s*(\d+),\s*\d+\)\)"#).unwrap()
+    });
+    let caps = PACKED.captures(raw_js)?;
+    let (packed, alphabet) = (&caps[1], caps[2].chars().collect::<Vec<char>>());
+    let offset: u32 = caps[3].parse().ok()?;
+    let base: u32 = caps[4].parse().ok()?;
+    let separator = *alphabet.get(base as usize)?;
+    let mut bytes = Vec::new();
+    for group in packed.split(separator).filter(|g| !g.is_empty()) {
+        let mut value: u32 = 0;
+        for c in group.chars() {
+            let digit = alphabet.iter().position(|&a| a == c)? as u32;
+            value = value.checked_mul(base)?.checked_add(digit)?;
+        }
+        bytes.push(u8::try_from(value.checked_sub(offset)?).ok()?);
+    }
+    Some(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// SnapSave's real answer, by running its script through Deno (on Android,
+/// YTDLnis's Deno helper app) with eval() caught, so whatever SnapSave
+/// changes in its packing still works. None without Deno, or if it failed.
+async fn deobfuscate_with_deno(raw_js: &str) -> Option<String> {
     let script = format!(
         r#"
     const raw = {};
@@ -165,37 +190,30 @@ async fn deobfuscate_with_deno(raw_js: &str) -> String {
         const fn = new Function('fakeEvalHolder', patched);
         fn(fakeEvalHolder);
     }} catch (e) {{}}
-    const output = fakeEvalHolder.val || raw;
+    const output = fakeEvalHolder.val;
     Deno.stdout.writeSync(new TextEncoder().encode(output));
     "#,
         serde_json::to_string(raw_js).unwrap_or_default()
     );
-    let raw = raw_js.to_string();
     tokio::task::spawn_blocking(move || {
         use std::io::Write;
-        let Some(mut deno) = crate::platform::deno_command() else {
-            return raw;
-        };
-        let mut child = match deno
+        let mut child = crate::platform::deno_command()?
             .args(["run", "-"])
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
             .spawn()
-        {
-            Ok(c) => c,
-            Err(_) => return raw,
-        };
+            .ok()?;
         if let Some(mut stdin) = child.stdin.take() {
             let _ = stdin.write_all(script.as_bytes());
         }
-        match child.wait_with_output() {
-            Ok(out) if out.status.success() => String::from_utf8(out.stdout).unwrap_or(raw),
-            _ => raw,
-        }
+        let out = child.wait_with_output().ok()?;
+        let text = String::from_utf8(out.stdout).ok()?;
+        (out.status.success() && !text.is_empty()).then_some(text)
     })
     .await
-    .unwrap_or_default()
+    .ok()
+    .flatten()
 }
 
 fn parse_download_html(html: &str) -> Vec<RawMedia> {
@@ -204,7 +222,7 @@ fn parse_download_html(html: &str) -> Vec<RawMedia> {
     let mut seen = std::collections::HashSet::new();
 
     let video_re = Regex::new(r#"href=\\?["'](https?://[^"'\\]+/v2\?token=[^"'\\]+|[^"'\\]+\.mp4[^"'\\]*)"#).unwrap();
-    let videos: Vec<String> = video_re
+    let links: Vec<String> = video_re
         .captures_iter(html)
         .map(|c| unescape(&c[1]))
         .filter(|u| !u.is_empty() && seen.insert(u.clone()))
@@ -212,11 +230,11 @@ fn parse_download_html(html: &str) -> Vec<RawMedia> {
     let thumb_re = Regex::new(r#"src=\\?["'](https?://[^"'\\]+/thumb\?token=[^"'\\]+|[^"'\\]+\.jpg[^"'\\]*)"#).unwrap();
     let thumbs: Vec<String> = thumb_re.captures_iter(html).map(|c| unescape(&c[1])).filter(|u| !u.is_empty()).collect();
 
-    if !videos.is_empty() {
-        for (i, url) in videos.into_iter().enumerate() {
+    if !links.is_empty() {
+        for (i, url) in links.into_iter().enumerate() {
             results.push(RawMedia {
                 caption: String::new(),
-                kind: MediaKind::Video,
+                kind: snapsave_kind(&url),
                 thumbnail_url: thumbs.get(i).cloned().unwrap_or_else(|| url.clone()),
                 source_url: url,
             });
@@ -240,6 +258,22 @@ fn parse_download_html(html: &str) -> Vec<RawMedia> {
         }
     }
     results
+}
+
+/// Whether a SnapSave download link is a video or an image. Its /v2 links
+/// carry a JWT whose payload names the file ("….jpg" for an image post).
+fn snapsave_kind(url: &str) -> MediaKind {
+    let filename = url
+        .split_once("token=")
+        .and_then(|(_, token)| token.split(['&', '#']).next())
+        .and_then(|token| token.split('.').nth(1))
+        .and_then(|payload| URL_SAFE_NO_PAD.decode(payload.trim_end_matches('=')).ok())
+        .and_then(|json| serde_json::from_slice::<Value>(&json).ok())
+        .and_then(|claims| claims.get("filename").and_then(|f| f.as_str()).map(str::to_lowercase));
+    match filename {
+        Some(name) if [".jpg", ".jpeg", ".png", ".webp", ".heic"].iter().any(|ext| name.ends_with(ext)) => MediaKind::Image,
+        _ => MediaKind::Video,
+    }
 }
 
 async fn try_snapsave(url: &str) -> Result<Vec<RawMedia>, String> {
@@ -267,7 +301,14 @@ async fn try_snapsave(url: &str) -> Result<Vec<RawMedia>, String> {
         .text()
         .await
         .map_err(|e| e.to_string())?;
-    let decoded = if raw.contains("eval(") { deobfuscate_with_deno(&raw).await } else { raw };
+    let decoded = if raw.contains("eval(") {
+        match deobfuscate_with_deno(&raw).await {
+            Some(html) => html,
+            None => unpack_snapsave(&raw).unwrap_or(raw),
+        }
+    } else {
+        raw
+    };
     if decoded.contains("Unable to connect") || decoded.contains("error_api") {
         return Err("SnapSave: Instagram blocked the request".to_string());
     }
