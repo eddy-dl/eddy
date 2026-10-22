@@ -36,6 +36,27 @@ export global AppSettings {
     // from that screen).
     callback storage_access_check();
 
+    // The cookies.txt Eddy uses for sites that need a login (yt-dlp, TikTok,
+    // Instagram). `cookies_count` is 0 without one; `cookies_sites` lists a
+    // few of its sites; `cookies_error` says why the last file was refused:
+    // 0 it wasn't, 1 couldn't read it, 2 not a cookies.txt, 3 couldn't save it.
+    in property <int> cookies_count: 0;
+    in property <string> cookies_sites: "";
+    in property <int> cookies_error: 0;
+    // Settings → Advanced: the download cache (thumbnails, link info,
+    // installers, temporary files). `cache_refresh` measures it; clearing is
+    // off while downloads run (`downloads_running`), as some may be in use.
+    in property <string> cache_size: "";
+    in property <bool> cache_empty: true;
+    in property <bool> cache_busy: false;
+    in property <bool> downloads_running: false;
+    callback cache_refresh();
+    callback cache_clear();
+
+    // Picks a cookies.txt and keeps a copy of it.
+    callback cookies_add();
+    callback cookies_remove();
+
     // yt-dlp and friends. Android: YTDLnis's helper apps, which Eddy never
     // installs itself: it downloads one when asked (after a confirmation)
     // and opens Android's installer. Desktop ("ytdlp", "ffmpeg", "deno"):

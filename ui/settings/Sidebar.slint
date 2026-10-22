@@ -103,6 +103,7 @@ export component Sidebar inherits Rectangle {
     out property <SettingsTab> appearance_tab: SettingsTab.Appearance;
     out property <SettingsTab> download_tab: SettingsTab.Download;
     out property <SettingsTab> general_tab: SettingsTab.General;
+    out property <SettingsTab> advanced_tab: SettingsTab.Advanced;
 
     callback item_selected(SettingsTab);
 
@@ -155,7 +156,7 @@ export component Sidebar inherits Rectangle {
             SidebarItem {
                 width: 100%;
                 text: @tr("Downloads");
-                subtitle: @tr("Folder for files, threads per download");
+                subtitle: @tr("Folder, cookies, yt-dlp packages");
                 icon: @image-url("../icons/download.svg");
                 active: root.active_tab == download_tab || root.active_tab == SettingsTab.Packages;
                 is_landscape: root.is_landscape;
@@ -164,6 +165,21 @@ export component Sidebar inherits Rectangle {
                 clicked => {
                     root.active_tab = download_tab;
                     root.item_selected(download_tab);
+                }
+            }
+
+            SidebarItem {
+                width: 100%;
+                text: @tr("Advanced");
+                subtitle: @tr("Download cache");
+                icon: @image-url("../icons/tune.svg");
+                active: root.active_tab == advanced_tab;
+                is_landscape: root.is_landscape;
+                icon_bg_color: #c8d3ff;
+                text_color: root.text_color;
+                clicked => {
+                    root.active_tab = advanced_tab;
+                    root.item_selected(advanced_tab);
                 }
             }
         }

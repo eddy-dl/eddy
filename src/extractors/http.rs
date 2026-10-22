@@ -59,6 +59,17 @@ impl CookieJar {
         self.0.is_empty()
     }
 
+    pub fn get(&self, name: &str) -> Option<&str> {
+        self.0.get(name).map(String::as_str)
+    }
+
+    /// Adds `other`'s cookies, replacing ones of the same name.
+    pub fn merge(&mut self, other: &CookieJar) {
+        for (name, value) in &other.0 {
+            self.set(name, value);
+        }
+    }
+
     /// The Cookie header value.
     pub fn header(&self) -> String {
         self.0.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join("; ")

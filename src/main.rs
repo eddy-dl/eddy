@@ -43,6 +43,8 @@ fn main() -> Result<(), slint::PlatformError> {
     eddy::selection::install(&ui);
     eddy::components_desktop::install(&ui);
     eddy::desktop_notify::install(&ui);
+    eddy::cookies::install(&ui);
+    eddy::cache::install(&ui);
     ui.window().set_size(slint::PhysicalSize::new(800, 600));
     ui.run()
 }

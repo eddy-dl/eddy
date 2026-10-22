@@ -100,8 +100,8 @@ msgstr "Archives"
 msgid "Change themes & accent color"
 msgstr "Thème et couleur d’accent"
 
-msgid "Folder for files, threads per download"
-msgstr "Dossier des fichiers, connexions par téléchargement"
+msgid "Folder, cookies, yt-dlp packages"
+msgstr "Dossier, cookies, paquets yt-dlp"
 
 msgid "Theme Mode"
 msgstr "Thème"
@@ -432,3 +432,50 @@ msgstr "Python et yt-dlp, FFmpeg, Deno"
 
 msgid "yt-dlp, FFmpeg, Deno"
 msgstr "yt-dlp, FFmpeg, Deno"
+
+msgid "Cookies"
+msgstr "Cookies"
+
+msgid "Couldn't read that file"
+msgstr "Impossible de lire ce fichier"
+
+msgid "That isn't a cookies.txt (Netscape format)"
+msgstr "Ce n'est pas un cookies.txt (format Netscape)"
+
+msgid "Couldn't save the cookies"
+msgstr "Impossible d'enregistrer les cookies"
+
+msgid "Add a cookies.txt exported from your browser, for sites that need you logged in."
+msgstr "Ajoutez un cookies.txt exporté depuis votre navigateur, pour les sites où il faut être connecté."
+
+msgid "{n} cookie"
+msgid_plural "{n} cookies"
+msgstr[0] "{n} cookie"
+msgstr[1] "{n} cookies"
+
+msgid "Remove"
+msgstr "Retirer"
+
+msgid "Advanced"
+msgstr "Avancé"
+
+msgid "Download cache"
+msgstr "Cache des téléchargements"
+
+msgid "Link previews' thumbnails and info, downloaded installers, temporary files. Your downloads stay."
+msgstr "Miniatures et infos des aperçus de liens, installateurs téléchargés, fichiers temporaires. Vos téléchargements restent."
+
+msgid "Link previews' thumbnails and info, temporary files. Your downloads stay."
+msgstr "Miniatures et infos des aperçus de liens, fichiers temporaires. Vos téléchargements restent."
+
+msgid "Clearing…"
+msgstr "Nettoyage…"
+
+msgid "Measuring…"
+msgstr "Calcul…"
+
+msgid "{} · can be cleared once downloads finish"
+msgstr "{} · vidable une fois les téléchargements terminés"
+
+msgid "Clear"
+msgstr "Vider"

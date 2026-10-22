@@ -1,0 +1,98 @@
+import { AppSettings } from "../../globals/AppSettings.slint";
+import { ThemeSettings } from "../../themes/theme.slint";
+
+// Settings → Advanced.
+export component AdvancedSettings inherits Rectangle {
+    in property <color> text_color: #FFFFFF;
+    // True once the content has scrolled away from the top; tints the settings header.
+    out property <bool> scrolled: scroller.content-y < 0;
+
+    private property <bool> can_clear: !AppSettings.cache_empty && !AppSettings.cache_busy && !AppSettings.downloads_running;
+
+    TouchArea { }
+
+    scroller := Flickable {
+        width: 100%;
+        height: 100%;
+        content-height: advanced_layout.preferred-height;
+
+        advanced_layout := VerticalLayout {
+            spacing: 24px;
+            alignment: start;
+            padding-left: 12px;
+            padding-right: 12px;
+            padding-top: 8px;
+
+            // Clear download cache: files Eddy can make again.
+            Rectangle {
+                border-radius: 8px;
+
+                HorizontalLayout {
+                    padding: 8px;
+                    spacing: 16px;
+
+                    VerticalLayout {
+                        alignment: center;
+                        Image {
+                            source: @image-url("../../icons/delete_sweep.svg");
+                            width: 24px;
+                            height: 24px;
+                            colorize: root.text_color;
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        horizontal-stretch: 1;
+
+                        Text {
+                            text: @tr("Download cache");
+                            font-size: 18px;
+                            font-weight: 600;
+                            color: root.text_color;
+                        }
+                        Text {
+                            text: AppSettings.is_mobile
+                                ? @tr("Link previews' thumbnails and info, downloaded installers, temporary files. Your downloads stay.")
+                                : @tr("Link previews' thumbnails and info, temporary files. Your downloads stay.");
+                            font-size: 13px;
+                            color: root.text_color.transparentize(40%);
+                            wrap: word-wrap;
+                        }
+                        Text {
+                            text: AppSettings.cache_busy ? @tr("Clearing…")
+                                : AppSettings.cache_size == "" ? @tr("Measuring…")
+                                : AppSettings.downloads_running ? @tr("{} · can be cleared once downloads finish", AppSettings.cache_size)
+                                : AppSettings.cache_size;
+                            font-size: 13px;
+                            color: ThemeSettings.primary_accent.transparentize(30%);
+                            wrap: word-wrap;
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: clear_label.preferred-width + 24px;
+                            height: 32px;
+                            border-radius: 16px;
+                            background: root.can_clear ? ThemeSettings.primary_accent : root.text_color.transparentize(85%);
+                            clear_label := Text {
+                                text: @tr("Clear");
+                                font-size: 13px;
+                                font-weight: 600;
+                                color: root.can_clear ? #ffffff : root.text_color.transparentize(50%);
+                                vertical-alignment: center;
+                            }
+                            TouchArea {
+                                enabled: root.can_clear;
+                                clicked => { AppSettings.cache_clear(); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

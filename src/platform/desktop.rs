@@ -92,6 +92,22 @@ where
     }
 }
 
+/// Lets the user pick a cookies.txt (Settings → Downloads → Cookies).
+pub fn pick_cookies_file<F>(on_picked: F)
+where
+    F: FnOnce(String, String) + Send + 'static,
+{
+    if let Some(path) = rfd::FileDialog::new()
+        .set_title("Add cookies.txt")
+        .add_filter("cookies.txt", &["txt"])
+        .add_filter("All files", &["*"])
+        .pick_file()
+    {
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        on_picked(path.to_string_lossy().into_owned(), name);
+    }
+}
+
 /// Desktop apps stay running while they download, so downloads start
 /// straight away.
 pub fn start_download(request: &crate::downloader::DownloadRequest) -> Result<(), String> {

@@ -1,4 +1,6 @@
+pub mod cache;
 pub mod components;
+pub mod cookies;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod components_desktop;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -134,6 +136,8 @@ fn android_main(app: AndroidApp) {
     links::install_main(&ui);
     selection::install(&ui);
     components::install(&ui);
+    cookies::install(&ui);
+    cache::install(&ui);
     ui.run().expect("Failed to run Slint app");
     platform::deinit();
 }

@@ -393,6 +393,18 @@ where
     }
 }
 
+/// Lets the user pick a cookies.txt (same picker). The picker's copy in the
+/// cache goes once `on_picked` has read it: cookies are private.
+pub fn pick_cookies_file<F>(on_picked: F)
+where
+    F: FnOnce(String, String) + Send + 'static,
+{
+    pick_link_file(move |path, name| {
+        on_picked(path.clone(), name);
+        let _ = std::fs::remove_file(&path);
+    });
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pah_eddy_MainActivity_onFilePicked<'caller>(
     mut unowned_env: EnvUnowned<'caller>,

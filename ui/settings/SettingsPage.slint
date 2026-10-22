@@ -3,6 +3,7 @@ import { Sidebar } from "Sidebar.slint";
 import { GeneralSettings } from "pages/GeneralSettings.slint";
 import { DownloadSettings } from "pages/DownloadSettings.slint";
 import { PackageSettings } from "pages/PackageSettings.slint";
+import { AdvancedSettings } from "pages/AdvancedSettings.slint";
 import { AppSettings } from "../globals/AppSettings.slint";
 import { ThemeSettings } from "../themes/theme.slint"; 
 import { AppearanceSettings } from "pages/AppearanceSettings.slint";
@@ -30,6 +31,13 @@ export component SettingsPage inherits Rectangle {
     changed packages_tab_is_active => {
         if (self.packages_tab_is_active) {
             AppSettings.helpers_check();
+        }
+    }
+    out property <bool> advanced_tab_is_active: root.active_tab == SettingsTab.Advanced;
+    // Opening Advanced measures the download cache.
+    changed advanced_tab_is_active => {
+        if (self.advanced_tab_is_active) {
+            AppSettings.cache_refresh();
         }
     }
     private property <string> packages_title: AppSettings.is_mobile ? @tr("yt-dlp packages") : @tr("Media tools");
@@ -68,7 +76,8 @@ export component SettingsPage inherits Rectangle {
         root.appearance_tab_is_active ? appearance_page.scrolled : (
         root.general_tab_is_active ? general_page.scrolled : (
         root.download_tab_is_active ? download_page.scrolled : (
-        root.packages_tab_is_active ? packages_page.scrolled : false)));
+        root.packages_tab_is_active ? packages_page.scrolled : (
+        root.advanced_tab_is_active ? advanced_page.scrolled : false))));
     private property <bool> sidebar_scrolled: sidebar.scrolled;
     private property <bool> left_header_tinted: root.is_landscape ? root.sidebar_scrolled : (root.no_active_tab ? root.sidebar_scrolled : root.page_scrolled);
     private property <bool> right_header_tinted: root.page_scrolled;
@@ -166,6 +175,7 @@ export component SettingsPage inherits Rectangle {
                     text: root.is_landscape ? @tr("Settings") : (
                         root.general_tab_is_active ? @tr("General") : (
                         root.download_tab_is_active ? @tr("Downloads") : root.packages_tab_is_active ? root.packages_title
+                        : root.advanced_tab_is_active ? @tr("Advanced")
                         : root.appearance_tab_is_active ? @tr("Appearance") : @tr("Settings")));
                     font-size: 22px;
                     font-weight: 700;
@@ -190,6 +200,7 @@ export component SettingsPage inherits Rectangle {
                     Text {
                         text: root.general_tab_is_active ? @tr("General") : (
                             root.download_tab_is_active ? @tr("Downloads") : root.packages_tab_is_active ? root.packages_title
+                            : root.advanced_tab_is_active ? @tr("Advanced")
                             : root.appearance_tab_is_active ? @tr("Appearance") : "");
                         font-size: 22px;
                         font-weight: 700;
@@ -360,6 +371,36 @@ export component SettingsPage inherits Rectangle {
                             window_width: root.width;
                             window_height: root.height;
                             popup_back_pressed => { root.navigate_back(); }
+                        }
+                    }
+                }
+
+                // Advanced Settings Page Wrapper
+                Rectangle {
+                    width: 100%;
+                    height: 100%;
+
+                    x: root.advanced_tab_is_active ? 0px : parent.width;
+                    opacity: root.advanced_tab_is_active ? 1.0 : 0.0;
+
+                    animate x {
+                        duration: 300ms;
+                        easing: ease-out;
+                    }
+                    animate opacity {
+                        duration: 200ms;
+                        easing: ease-out-quad;
+                    }
+
+                    HorizontalLayout {
+                        padding-left: root.is_landscape ? 12px : 0px;
+                        width: 100%;
+                        height: 100%;
+
+                        advanced_page := AdvancedSettings {
+                            horizontal-stretch: 1;
+                            height: 100%;
+                            text_color: root.text_color;
                         }
                     }
                 }

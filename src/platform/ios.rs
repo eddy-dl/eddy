@@ -29,6 +29,12 @@ where
 {
 }
 
+pub fn pick_cookies_file<F>(_on_picked: F)
+where
+    F: FnOnce(String, String) + Send + 'static,
+{
+}
+
 pub fn start_download(_request: &crate::downloader::DownloadRequest) -> Result<(), String> {
     Err("Downloads aren't supported on iOS yet".to_string())
 }
