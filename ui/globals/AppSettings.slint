@@ -43,6 +43,13 @@ export global AppSettings {
     in property <int> cookies_count: 0;
     in property <string> cookies_sites: "";
     in property <int> cookies_error: 0;
+    // Settings → Downloads → Books: how a book is saved unless the preview
+    // says otherwise.
+    in-out property <bool> novel_author_notes: true;
+    in-out property <bool> novel_images: true;
+    in-out property <bool> novel_author_note_images: false;
+    in-out property <bool> novel_small_images: false;
+
     // Settings → Advanced: the download cache (thumbnails, link info,
     // installers, temporary files). `cache_refresh` measures it; clearing is
     // off while downloads run (`downloads_running`), as some may be in use.

@@ -1,0 +1,70 @@
+import { ModernSwitch } from "Buttons.slint";
+import { ThemeSettings } from "../themes/theme.slint";
+
+// A setting that's on or off: title, an optional explanation, and a switch.
+// The whole row toggles it. `compact` is for sheets (smaller text).
+export component SwitchRow inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <bool> compact: false;
+    in property <bool> enabled: true;
+    in property <color> text_color: ThemeSettings.text_color;
+    in-out property <bool> checked;
+    callback toggled();
+
+    border-radius: 8px;
+    background: ta.has-hover && root.enabled ? ThemeSettings.hover_color : transparent;
+    opacity: root.enabled ? 1.0 : 0.45;
+
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled();
+        }
+    }
+
+    HorizontalLayout {
+        padding: root.compact ? 4px : 8px;
+        spacing: 16px;
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            horizontal-stretch: 1;
+
+            Text {
+                text: root.title;
+                font-size: root.compact ? 15px : 18px;
+                font-weight: root.compact ? 500 : 600;
+                color: root.text_color;
+                wrap: word-wrap;
+            }
+            if root.subtitle != "": Text {
+                text: root.subtitle;
+                font-size: root.compact ? 12px : 13px;
+                color: root.text_color.transparentize(40%);
+                wrap: word-wrap;
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            // Over the switch, so a tap on it goes through the row's handler.
+            Rectangle {
+                width: switch.width;
+                height: switch.height;
+                switch := ModernSwitch {
+                    checked: root.checked;
+                }
+                TouchArea {
+                    enabled: root.enabled;
+                    clicked => {
+                        root.checked = !root.checked;
+                        root.toggled();
+                    }
+                }
+            }
+        }
+    }
+}

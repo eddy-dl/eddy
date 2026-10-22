@@ -9,6 +9,7 @@ pub mod db;
 pub mod downloader;
 pub mod extractors;
 pub mod links;
+pub mod novels;
 pub mod platform;
 pub mod preferences;
 pub mod selection;

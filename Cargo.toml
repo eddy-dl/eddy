@@ -36,13 +36,18 @@ slint = { version = "1.17.1" }
 sys-locale = "0.3"
 tokio = { version = "1.30", features = ["rt-multi-thread", "macros", "time", "sync", "fs", "io-util"] }
 url = "2"
+# Novels: reading sites' HTML, and packing the EPUB (also unpacks the
+# desktop tools).
+scraper = "0.24"
+# Walking scraper's parsed tree (its node type).
+ego-tree = "0.10"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 # Unpacking yt-dlp, ffmpeg and Deno (Settings → Downloads); pure Rust.
 lzma-rs = "0.3"
 rfd = "0.14"
 tar = "0.4"
-zip = { version = "2", default-features = false, features = ["deflate"] }
 system-theme = { version = "0.3", default-features = false }
 webbrowser = "1.0"
 # Finished / failed download notifications.

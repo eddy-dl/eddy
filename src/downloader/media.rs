@@ -1,7 +1,7 @@
 //! Downloading a page's media: yt-dlp for its sites, and the native
 //! extractors' files (fetched here with the headers the site wants, through
 //! ffmpeg for HLS streams and for converting to audio). Each download is a
-//! job with live progress for the notification.
+//! job with live progress for the notification (books use the same jobs).
 
 use super::{Deliver, DownloadRequest, finished, runtime};
 use crate::extractors::{self, Fetch, MediaRequest, Service};
@@ -27,13 +27,13 @@ fn with_jobs<T>(f: impl FnOnce(&mut HashMap<u64, Job>) -> T) -> T {
     f(jobs.get_or_insert_with(HashMap::new))
 }
 
-fn begin(label: &str) -> u64 {
+pub(super) fn begin(label: &str) -> u64 {
     let id = NEXT_JOB.fetch_add(1, Ordering::SeqCst);
     with_jobs(|jobs| jobs.insert(id, Job { label: label.to_string(), done: 0, total: 0 }));
     id
 }
 
-fn progress(id: u64, done: u64, total: u64) {
+pub(super) fn progress(id: u64, done: u64, total: u64) {
     with_jobs(|jobs| {
         if let Some(job) = jobs.get_mut(&id) {
             job.done = done;
@@ -42,7 +42,7 @@ fn progress(id: u64, done: u64, total: u64) {
     });
 }
 
-fn end(id: u64) {
+pub(super) fn end(id: u64) {
     with_jobs(|jobs| jobs.remove(&id));
 }
 

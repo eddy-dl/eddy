@@ -100,8 +100,8 @@ msgstr "Archives"
 msgid "Change themes & accent color"
 msgstr "Thème et couleur d’accent"
 
-msgid "Folder, cookies, yt-dlp packages"
-msgstr "Dossier, cookies, paquets yt-dlp"
+msgid "Folder, cookies, books, yt-dlp packages"
+msgstr "Dossier, cookies, livres, paquets yt-dlp"
 
 msgid "Theme Mode"
 msgstr "Thème"
@@ -479,3 +479,53 @@ msgstr "{} · vidable une fois les téléchargements terminés"
 
 msgid "Clear"
 msgstr "Vider"
+
+msgid "Books"
+msgstr "Livres"
+
+msgid "Book"
+msgstr "Livre"
+
+msgid "Web novels saved as EPUB: author notes, images"
+msgstr "Romans web enregistrés en EPUB : notes d'auteur, images"
+
+msgid "Books are saved as EPUB, read by most e-book apps. These are the starting choices; each book's preview can change them."
+msgstr "Les livres sont enregistrés en EPUB, lu par la plupart des liseuses. Ce sont les choix de départ ; l'aperçu de chaque livre peut les changer."
+
+msgid "Author notes"
+msgstr "Notes d'auteur"
+
+msgid "The author's notes before or after a chapter."
+msgstr "Les notes de l'auteur avant ou après un chapitre."
+
+msgid "Pictures in chapters. Without them, books are smaller."
+msgstr "Les images des chapitres. Sans elles, les livres sont plus légers."
+
+msgid "Images in author notes"
+msgstr "Images des notes d'auteur"
+
+msgid "Banners and buttons in the notes, usually not worth keeping."
+msgstr "Bannières et boutons des notes, rarement utiles."
+
+msgid "Small images"
+msgstr "Petites images"
+
+msgid "Asks for smaller versions where the site has them. Animated GIFs are saved as a still either way, as e-book apps don't play them."
+msgstr "Demande des versions plus petites quand le site en a. Les GIF animés sont de toute façon enregistrés en image fixe, les liseuses ne les animent pas."
+
+msgid "Chapters"
+msgstr "Chapitres"
+
+msgid "{} · {} locked, not saved"
+msgstr "{} · {} verrouillés, non enregistrés"
+
+msgid "From"
+msgstr "De"
+
+msgid "to"
+msgstr "à"
+
+msgid "{n} chapter"
+msgid_plural "{n} chapters"
+msgstr[0] "{n} chapitre"
+msgstr[1] "{n} chapitres"

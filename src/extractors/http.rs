@@ -14,6 +14,9 @@ fn build(redirects: bool) -> reqwest::Client {
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(30))
         .user_agent(UA_DESKTOP)
+        // As browsers write them on HTTP/1.1; Cloudflare (Royal Road)
+        // turns lowercase header names away.
+        .http1_title_case_headers()
         .redirect(if redirects { reqwest::redirect::Policy::limited(10) } else { reqwest::redirect::Policy::none() })
         .build()
         .expect("failed to build the HTTP client")

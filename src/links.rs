@@ -55,6 +55,7 @@ where
         let backend = match backend {
             LinkBackend::Torrent => Backend::Torrent,
             LinkBackend::Media => Backend::Media,
+            LinkBackend::Book => Backend::Book,
             _ => Backend::Direct,
         };
         start_link(id, backend, format.to_string(), filename.to_string());
@@ -94,8 +95,11 @@ where
         let links: Vec<PendingLink> = PENDING.with(|m| m.iter().collect());
         for link in links {
             let torrent = link.backends.row_data(0) == Some(LinkBackend::Torrent);
+            let book = link.backends.row_data(0) == Some(LinkBackend::Book);
             let backend = match choice {
                 _ if torrent => Backend::Torrent,
+                // Books stay books, with the Books defaults.
+                _ if book => Backend::Book,
                 QuickBackend::Direct => Backend::Direct,
                 QuickBackend::Media => Backend::Media,
                 _ => Backend::Auto,
@@ -282,6 +286,7 @@ fn push_torrent(url: &str, meta: &TorrentMeta, name: &str) -> i32 {
             thumbnail: slint::Image::default(),
             media_kind: 0,
             audio_formats: ModelRc::new(VecModel::default()),
+            ..Default::default()
         })
     });
     id
@@ -345,11 +350,12 @@ fn start_link(id: i32, backend: Backend, format: String, filename: String) {
     } else {
         String::new()
     };
-    // Media downloads hand the extractor's details over as JSON.
-    let format = if backend == Backend::Media {
-        serde_json::to_string(&media_request(id, &link, &format)).unwrap_or_default()
-    } else {
-        format
+    // Media downloads hand the extractor's details over as JSON; books their
+    // options.
+    let format = match backend {
+        Backend::Media => serde_json::to_string(&media_request(id, &link, &format)).unwrap_or_default(),
+        Backend::Book => serde_json::to_string(&book_options(&format)).unwrap_or_default(),
+        _ => format,
     };
     let request = DownloadRequest {
         url: link.url.to_string(),
@@ -467,6 +473,7 @@ fn initial_link(id: i32, url: &str) -> PendingLink {
         thumbnail: slint::Image::default(),
         media_kind: 0,
         audio_formats: ModelRc::new(VecModel::default()),
+        ..Default::default()
     }
 }
 
@@ -495,6 +502,16 @@ struct Probe {
     files: Vec<(usize, String, u64)>,
     /// What an extractor found, for media links.
     media: Option<MediaMeta>,
+    /// A web novel's chapter counts, for book links.
+    book: Option<BookMeta>,
+}
+
+#[derive(Clone, Debug)]
+struct BookMeta {
+    site: crate::novels::Site,
+    chapters: usize,
+    locked: usize,
+    cover: Option<PathBuf>,
 }
 
 /// A media link's extras: who found it, what it is, and what's needed to
@@ -567,6 +584,19 @@ fn apply_probe(id: i32, result: Result<Probe, String>) {
                     }
                     MEDIA.with(|m| m.borrow_mut().insert(id, media));
                 }
+                if let Some(book) = probe.book {
+                    let defaults = crate::preferences::novel_defaults();
+                    link.service = book.site.label().into();
+                    link.book_chapters = book.chapters as i32;
+                    link.book_locked = book.locked as i32;
+                    link.book_notes = defaults.author_notes;
+                    link.book_images = defaults.images;
+                    link.book_note_images = defaults.author_note_images;
+                    link.book_small_images = defaults.small_images;
+                    if let Some(thumb) = book.cover.as_deref().and_then(|p| slint::Image::load_from_path(p).ok()) {
+                        link.thumbnail = thumb;
+                    }
+                }
             }
             Err(error) => {
                 link.state = ProbeState::Failed;
@@ -587,10 +617,13 @@ pub async fn pick_backend(url: &str) -> (Backend, String) {
             let backend = match probe.backends.first() {
                 Some(LinkBackend::Torrent) => Backend::Torrent,
                 Some(LinkBackend::Media) => Backend::Media,
+                Some(LinkBackend::Book) => Backend::Book,
                 _ => Backend::Direct,
             };
             // Best quality; music stays audio.
             let format = match (backend, &probe.media) {
+                // Every chapter, with the Books defaults.
+                (Backend::Book, _) => serde_json::to_string(&crate::preferences::novel_defaults()).unwrap_or_default(),
                 (Backend::Media, Some(media)) => serde_json::to_string(&MediaRequest {
                     service: Some(media.service),
                     info_json: media.info_json.clone(),
@@ -632,6 +665,28 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
             formats: Vec::new(),
             files: files.into_iter().map(|f| (f.index, f.path, f.length)).collect(),
             media: None,
+            book: None,
+        });
+    }
+
+    // A web novel on a reading site Eddy knows: saved as a book.
+    if crate::novels::site_for(url).is_some() {
+        let book = crate::novels::book(url).await?;
+        let locked = book.chapters.iter().filter(|c| c.locked).count();
+        // The smallest cover is plenty for the banner.
+        let cover = match book.covers.last() {
+            Some(cover) => fetch_thumbnail(cover).await,
+            None => None,
+        };
+        return Ok(Probe {
+            filename: crate::novels::default_name(&book),
+            file_type: FileType::Document,
+            size: String::new(),
+            backends: vec![LinkBackend::Book],
+            formats: Vec::new(),
+            files: Vec::new(),
+            media: None,
+            book: Some(BookMeta { site: book.site, chapters: book.chapters.len(), locked, cover }),
         });
     }
 
@@ -653,6 +708,7 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
                 formats: Vec::new(),
                 files: Vec::new(),
                 media: None,
+                book: None,
             });
         }
         return Err(format!("Unsupported link type ({scheme})"));
@@ -702,6 +758,7 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
                 formats: Vec::new(),
                 files: Vec::new(),
                 media: None,
+                book: None,
             });
         }
     }
@@ -733,6 +790,7 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
         formats: Vec::new(),
         files: Vec::new(),
         media: None,
+        book: None,
     })
 }
 
@@ -766,6 +824,7 @@ async fn probe_torrent_link(url: &str, filename: &str) -> Result<Probe, String> 
         formats: Vec::new(),
         files,
         media: None,
+        book: None,
     })
 }
 
@@ -1006,6 +1065,7 @@ async fn media_probe(info: MediaInfo) -> Probe {
             thumbnail,
             info_json: info.info_json,
         }),
+        book: None,
     }
 }
 
@@ -1032,6 +1092,22 @@ async fn fetch_thumbnail(url: &str) -> Option<PathBuf> {
     let path = dir.join(format!("{:016x}.{ext}", hasher.finish()));
     std::fs::write(&path, &data).ok()?;
     Some(path)
+}
+
+/// The preview's book options, "book|<from>|<to>|<notes>|<images>|<note
+/// images>|<small images>" (numbers, 1/0 switches), as NovelOptions.
+fn book_options(format: &str) -> crate::novels::NovelOptions {
+    let mut options = crate::preferences::novel_defaults();
+    let parts: Vec<&str> = format.split('|').collect();
+    if let ["book", from, to, notes, images, note_images, small] = parts.as_slice() {
+        options.from = from.parse().unwrap_or(1);
+        options.to = to.parse().unwrap_or(0);
+        options.author_notes = *notes == "1";
+        options.images = *images == "1";
+        options.author_note_images = *note_images == "1";
+        options.small_images = *small == "1";
+    }
+    options
 }
 
 /// What a media download asks the downloader for: the extractor, the

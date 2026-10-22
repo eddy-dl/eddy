@@ -9,6 +9,11 @@ const HAPTIC_FEEDBACK_KEY: &str = "enable_haptic_feedback";
 const THEME_MODE_KEY: &str = "theme_mode";
 const TOP_NAVIGATION_BAR_KEY: &str = "top_navigation_bar";
 const LANGUAGE_KEY: &str = "language";
+// Settings → Downloads → Books: the preview's starting options.
+const NOVEL_NOTES_KEY: &str = "novel_author_notes";
+const NOVEL_IMAGES_KEY: &str = "novel_images";
+const NOVEL_NOTE_IMAGES_KEY: &str = "novel_author_note_images";
+const NOVEL_SMALL_IMAGES_KEY: &str = "novel_small_images";
 
 // Locales with a bundled translation (English is the source language).
 const BUNDLED_LANGUAGES: &[&str] = &["en", "fr"];
@@ -113,6 +118,27 @@ pub fn load_preferences(ui_weak: slint::Weak<DownloaderApp>) {
         theme_settings.set_amoled_dark(amoled);
         app_settings.set_haptic_feedback(enable_haptic_feedback);
         app_settings.set_current_download_path(download_dir_display.into());
+        let novel = novel_defaults();
+        app_settings.set_novel_author_notes(novel.author_notes);
+        app_settings.set_novel_images(novel.images);
+        app_settings.set_novel_author_note_images(novel.author_note_images);
+        app_settings.set_novel_small_images(novel.small_images);
+    }
+}
+
+/// The Books defaults (every chapter, with these options). Read from the
+/// saved preferences, so the share popup's process gets them too.
+pub fn novel_defaults() -> crate::novels::NovelOptions {
+    let flag = |key: &str, default: bool| {
+        platform::get_pref(key, &default.to_string()).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+    };
+    let base = crate::novels::NovelOptions::default();
+    crate::novels::NovelOptions {
+        author_notes: flag(NOVEL_NOTES_KEY, base.author_notes),
+        images: flag(NOVEL_IMAGES_KEY, base.images),
+        author_note_images: flag(NOVEL_NOTE_IMAGES_KEY, base.author_note_images),
+        small_images: flag(NOVEL_SMALL_IMAGES_KEY, base.small_images),
+        ..base
     }
 }
 
@@ -157,6 +183,17 @@ pub fn save_preferences(ui_weak: slint::Weak<DownloaderApp>) {
 
         if let Err(e) = platform::save_pref(LANGUAGE_KEY, &app_settings.get_language()) {
             eprintln!("failed to save language preference: {e}");
+        }
+
+        for (key, value) in [
+            (NOVEL_NOTES_KEY, app_settings.get_novel_author_notes()),
+            (NOVEL_IMAGES_KEY, app_settings.get_novel_images()),
+            (NOVEL_NOTE_IMAGES_KEY, app_settings.get_novel_author_note_images()),
+            (NOVEL_SMALL_IMAGES_KEY, app_settings.get_novel_small_images()),
+        ] {
+            if let Err(e) = platform::save_pref(key, &value.to_string()) {
+                eprintln!("failed to save {key}: {e}");
+            }
         }
     }
 }

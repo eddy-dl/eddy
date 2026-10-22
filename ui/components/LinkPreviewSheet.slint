@@ -2,6 +2,7 @@ import { LineEdit, Spinner } from "std-widgets.slint";
 import { ThemeSettings } from "../themes/theme.slint";
 import { FileTypeIcon } from "FileTypeIcon.slint";
 import { ActionButton } from "Buttons.slint";
+import { SwitchRow } from "SwitchRow.slint";
 import { Chip, SectionLabel } from "Chips.slint";
 import { LinkBackend, LinkFormat, Links, PendingLink, ProbeState, TorrentFile } from "../globals/Links.slint";
 
@@ -157,6 +158,7 @@ export component LinkPreviewSheet inherits Rectangle {
         root.audio_mode = false;
         root.filename_text = root.link.filename;
         root.name_edited = false;
+        root.reset_book();
     }
     // The name arrives once the link has been checked; take it unless the
     // user already typed one.
@@ -167,6 +169,31 @@ export component LinkPreviewSheet inherits Rectangle {
             root.filename_text = root.suggested_name;
         }
     }
+
+    // Books: the chapter range and options, from the Books defaults once the
+    // link has been checked.
+    private property <bool> is_book: root.backend == LinkBackend.Book;
+    private property <string> book_from: "1";
+    private property <string> book_to: "";
+    private property <bool> book_notes: true;
+    private property <bool> book_images: true;
+    private property <bool> book_note_images: false;
+    private property <bool> book_small_images: false;
+    private property <int> book_chapters: root.link.book_chapters;
+    changed book_chapters => { root.reset_book(); }
+    init => { root.reset_book(); }
+    function reset_book() {
+        root.book_from = "1";
+        root.book_to = root.link.book_chapters > 0 ? "" + root.link.book_chapters : "";
+        root.book_notes = root.link.book_notes;
+        root.book_images = root.link.book_images;
+        root.book_note_images = root.link.book_note_images;
+        root.book_small_images = root.link.book_small_images;
+    }
+    // "book|<from>|<to>|<notes>|<images>|<note images>|<small images>"
+    private property <string> book_format: "book|" + Math.max(1, root.book_from.to-float()) + "|" + Math.max(0, root.book_to.to-float())
+        + "|" + (root.book_notes ? "1" : "0") + "|" + (root.book_images ? "1" : "0")
+        + "|" + (root.book_note_images ? "1" : "0") + "|" + (root.book_small_images ? "1" : "0");
 
     private property <LinkBackend> backend: root.link.backends.length > 0
         ? root.link.backends[Math.min(root.backend_index, root.link.backends.length - 1)] : LinkBackend.Direct;
@@ -278,6 +305,7 @@ export component LinkPreviewSheet inherits Rectangle {
                             Text {
                                 text: root.link.state == ProbeState.Probing ? @tr("Checking link…")
                                     : root.link.state == ProbeState.Failed ? root.link.error
+                                    : root.link.book_chapters > 0 ? root.link.source + " · " + @tr("{n} chapter" | "{n} chapters" % root.link.book_chapters)
                                     : root.link.size != "" ? root.link.source + " · " + root.link.size
                                     : root.link.source + " · " + @tr("Size unknown");
                                 font-size: 12px;
@@ -296,6 +324,7 @@ export component LinkPreviewSheet inherits Rectangle {
                     spacing: 8px;
                     for backend[i] in root.link.backends: Chip {
                         text: backend == LinkBackend.Media ? (root.link.service.is-empty ? @tr("Media") : root.link.service)
+                            : backend == LinkBackend.Book ? (root.link.service.is-empty ? @tr("Book") : root.link.service)
                             : backend == LinkBackend.Torrent ? @tr("Torrent")
                             : @tr("Direct");
                         selected: root.backend == backend;
@@ -303,6 +332,75 @@ export component LinkPreviewSheet inherits Rectangle {
                             root.backend_index = i;
                             root.format_index = 0;
                         }
+                    }
+                }
+
+                // Books: which chapters, and how.
+                if root.is_book: HorizontalLayout {
+                    spacing: 8px;
+                    SectionLabel {
+                        text: @tr("Chapters");
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: root.link.book_locked > 0
+                            ? @tr("{} · {} locked, not saved", root.link.book_chapters, root.link.book_locked)
+                            : "" + root.link.book_chapters;
+                        font-size: 12px;
+                        color: ThemeSettings.text_color.transparentize(35%);
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                }
+                if root.is_book: HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: @tr("From");
+                        font-size: 14px;
+                        color: ThemeSettings.text_color;
+                        vertical-alignment: center;
+                    }
+                    LineEdit {
+                        text <=> root.book_from;
+                        input-type: InputType.number;
+                        horizontal-stretch: 1;
+                        font-size: 14px;
+                    }
+                    Text {
+                        text: @tr("to");
+                        font-size: 14px;
+                        color: ThemeSettings.text_color;
+                        vertical-alignment: center;
+                    }
+                    LineEdit {
+                        text <=> root.book_to;
+                        input-type: InputType.number;
+                        horizontal-stretch: 1;
+                        font-size: 14px;
+                    }
+                }
+                if root.is_book: VerticalLayout {
+                    SwitchRow {
+                        compact: true;
+                        title: @tr("Author notes");
+                        checked <=> root.book_notes;
+                    }
+                    SwitchRow {
+                        compact: true;
+                        title: @tr("Images");
+                        checked <=> root.book_images;
+                    }
+                    SwitchRow {
+                        compact: true;
+                        title: @tr("Images in author notes");
+                        enabled: root.book_images && root.book_notes;
+                        checked <=> root.book_note_images;
+                    }
+                    SwitchRow {
+                        compact: true;
+                        title: @tr("Small images");
+                        enabled: root.book_images;
+                        checked <=> root.book_small_images;
                     }
                 }
 
@@ -488,7 +586,8 @@ export component LinkPreviewSheet inherits Rectangle {
                     if (root.can_download) {
                         root.download(root.backend,
                             // Audio: "audio|<kbps>|<codec>"; otherwise the quality's key.
-                            root.as_audio
+                            root.is_book ? root.book_format
+                            : root.as_audio
                                 ? "audio|" + (root.qualities.length > 0 ? root.qualities[Math.min(root.format_index, root.qualities.length - 1)].selector : "0")
                                     + "|" + (root.codec_index == 1 ? "mp3" : "m4a")
                                 : root.show_formats ? root.qualities[Math.min(root.format_index, root.qualities.length - 1)].selector : "",

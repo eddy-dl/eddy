@@ -9,6 +9,8 @@ export component DownloadSettings inherits Rectangle {
 
     // Opens the yt-dlp packages page.
     callback open_packages();
+    // Opens the Books page.
+    callback open_books();
 
     TouchArea { }
 
@@ -184,6 +186,60 @@ export component DownloadSettings inherits Rectangle {
                             remove_ta := TouchArea {
                                 clicked => { AppSettings.cookies_remove(); }
                             }
+                        }
+                    }
+                }
+            }
+
+            // How web novels are saved, on a page of their own.
+            Rectangle {
+                border-radius: 8px;
+                background: books_ta.has-hover ? ThemeSettings.hover_color : transparent;
+
+                books_ta := TouchArea {
+                    clicked => { root.open_books(); }
+                }
+
+                HorizontalLayout {
+                    padding: 8px;
+                    spacing: 16px;
+
+                    VerticalLayout {
+                        alignment: center;
+                        Image {
+                            source: @image-url("../../icons/menu_book.svg");
+                            width: 24px;
+                            height: 24px;
+                            colorize: root.text_color;
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        horizontal-stretch: 1;
+
+                        Text {
+                            text: @tr("Books");
+                            font-size: 18px;
+                            font-weight: 600;
+                            color: root.text_color;
+                        }
+                        Text {
+                            text: @tr("Web novels saved as EPUB: author notes, images");
+                            font-size: 13px;
+                            color: root.text_color.transparentize(40%);
+                            wrap: word-wrap;
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        Image {
+                            source: @image-url("../../icons/arrow_right.svg");
+                            width: 16px;
+                            height: 16px;
+                            colorize: root.text_color.transparentize(40%);
                         }
                     }
                 }

@@ -1,4 +1,5 @@
 pub mod aria2;
+pub mod book;
 pub mod media;
 
 use aria2::AriaEngineClient;
@@ -19,6 +20,8 @@ pub enum Backend {
     Media,
     /// Check the link first and use whatever suits it best.
     Auto,
+    /// A web novel saved as an EPUB; `format` is a novels::NovelOptions.
+    Book,
 }
 
 impl Backend {
@@ -27,6 +30,7 @@ impl Backend {
             1 => Backend::Torrent,
             2 => Backend::Media,
             3 => Backend::Auto,
+            4 => Backend::Book,
             _ => Backend::Direct,
         }
     }
@@ -36,6 +40,7 @@ impl Backend {
             Backend::Torrent => 1,
             Backend::Media => 2,
             Backend::Auto => 3,
+            Backend::Book => 4,
         }
     }
 }
@@ -253,6 +258,7 @@ pub fn start(request: &DownloadRequest) -> Result<(), String> {
             watch(engine().start_download(&request.url, &dir, name.as_deref(), None)?);
         }
         Backend::Media => media::start(request, &dir, name, deliver.clone())?,
+        Backend::Book => book::start(request, &dir, name, deliver.clone())?,
         Backend::Auto => {
             CHOOSING.fetch_add(1, Ordering::SeqCst);
             let mut request = request.clone();

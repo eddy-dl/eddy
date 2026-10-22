@@ -5,6 +5,7 @@ export enum LinkBackend {
     Direct, // plain HTTP/FTP file, through aria2
     Torrent, // magnet or .torrent, through aria2's BitTorrent
     Media, // a page's video / audio / images, through an extractor (yt-dlp or a native one)
+    Book, // a web novel from a reading site, saved as an EPUB
 }
 
 export enum ProbeState { Probing, Ready, Failed }
@@ -53,6 +54,15 @@ export struct PendingLink {
     media_kind: int, // 0 = not media, 1 = video, 2 = audio, 3 = image
     // Bitrates for saving as audio (selector: kbps, e.g. "128").
     audio_formats: [LinkFormat],
+    // Books (LinkBackend.Book): how many chapters, how many of them locked
+    // (paid early access, never saved), and the preview's starting options
+    // (Settings → Downloads → Books).
+    book_chapters: int,
+    book_locked: int,
+    book_notes: bool,
+    book_images: bool,
+    book_note_images: bool,
+    book_small_images: bool,
 }
 
 export global Links {
