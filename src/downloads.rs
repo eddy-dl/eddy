@@ -186,6 +186,11 @@ pub fn ended(id: i64, handle: Option<&Handle>, name: &str, ok: bool, message: &s
                     path = Some(new);
                 }
             }
+            // What it came to on disk (books counted chapters until now).
+            if let Some(size) = path.as_ref().and_then(|p| std::fs::metadata(p).ok()).filter(|m| m.is_file()).map(|m| m.len()) {
+                entry.saved.total = size;
+                entry.saved.done = size;
+            }
             entry.saved.path = path.map(|p| p.to_string_lossy().into_owned());
             entry.saved.done = entry.saved.done.max(entry.saved.total);
         }
@@ -516,6 +521,8 @@ fn measured_speed(entry: &mut Entry, done: u64) -> f64 {
 fn view(entry: &Entry, state: State) -> DownloadItem {
     let saved = &entry.saved;
     let running = state == State::Active;
+    // An unfinished book's progress is in chapters, not bytes.
+    let counts_chapters = saved.request.backend == Backend::Book && state != State::Completed;
     let progress = if saved.total > 0 { (saved.done as f64 / saved.total as f64).min(1.0) as f32 } else { 0.0 };
     let eta = if running && entry.speed > 1.0 && saved.total > saved.done {
         duration(((saved.total - saved.done) as f64 / entry.speed) as u64)
@@ -535,9 +542,17 @@ fn view(entry: &Entry, state: State) -> DownloadItem {
             State::Completed => DownloadState::Completed,
         },
         progress: if state == State::Completed { 1.0 } else { progress },
-        downloaded: crate::links::format_size(saved.done).into(),
-        size: if saved.total > 0 { crate::links::format_size(saved.total).into() } else { "".into() },
-        speed: if running && entry.speed > 0.0 { format!("{}/s", crate::links::format_size(entry.speed as u64)).into() } else { "".into() },
+        downloaded: if counts_chapters { saved.done.to_string().into() } else { crate::links::format_size(saved.done).into() },
+        size: match saved.total {
+            0 => "".into(),
+            n if counts_chapters => format!("{n} chapters").into(),
+            n => crate::links::format_size(n).into(),
+        },
+        speed: if running && entry.speed > 0.0 && !counts_chapters {
+            format!("{}/s", crate::links::format_size(entry.speed as u64)).into()
+        } else {
+            "".into()
+        },
         eta: eta.into(),
         date: short_date(if saved.ended > 0 { saved.ended } else { saved.added }).into(),
         url: saved.request.url.clone().into(),
@@ -624,7 +639,7 @@ fn folder_display(request: &DownloadRequest) -> String {
     let base = if request.folder.is_empty() {
         crate::links::usual_folder_display()
     } else {
-        crate::storage::tree_uri_to_path(&request.folder).unwrap_or_else(|| request.folder.clone())
+        crate::storage::tree_uri_to_path(&request.folder).unwrap_or_else(|| crate::folders::display(std::path::Path::new(&request.folder)))
     };
     if request.settings.subfolder.is_empty() { base } else { format!("{base}/{}", request.settings.subfolder) }
 }

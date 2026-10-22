@@ -3,6 +3,8 @@ import { ThemeSettings } from "themes/theme.slint";
 import { Links } from "globals/Links.slint";
 import { LinkPreviewSheet } from "components/LinkPreviewSheet.slint";
 import { QuickDownloadSheet } from "components/QuickDownloadSheet.slint";
+import { FolderBrowser } from "globals/FolderBrowser.slint";
+import { FolderBrowserSheet } from "components/FolderBrowserSheet.slint";
 
 // The share popup on Android: a sheet at the bottom of the screen, over
 // whatever app the links were shared from. The window covers the whole
@@ -38,6 +40,10 @@ export component PreviewApp inherits Window {
     scope := FocusScope {
         key-pressed(event) => {
             if (event.text == Key.Back || event.text == Key.Escape) {
+                if (FolderBrowser.open) {
+                    FolderBrowser.cancel();
+                    return accept;
+                }
                 root.close_requested();
                 return accept;
             }
@@ -76,6 +82,8 @@ export component PreviewApp inherits Window {
 
             preview := LinkPreviewSheet {
                 visible: root.mode == 2 && Links.pending.length > 0;
+                window_width: root.width;
+                window_height: root.height;
                 y: 0;
                 width: parent.width;
                 height: root.preview_height;
@@ -88,5 +96,13 @@ export component PreviewApp inherits Window {
                 download(backend, format, filename, options) => { Links.start(self.link.id, backend, format, filename, options); }
             }
         }
+    }
+
+    // Eddy's own folder browser, over the whole window (see folders.rs).
+    if FolderBrowser.open: FolderBrowserSheet {
+        width: 100%;
+        height: 100%;
+        safe_top: root.safe-area-insets.top;
+        safe_bottom: root.safe-area-insets.bottom;
     }
 }

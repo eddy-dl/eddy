@@ -329,6 +329,14 @@ pub fn pick_download_folder<F>(on_picked: F)
 where
     F: Fn(String, String) + Send + 'static,
 {
+    // With "All files access", Eddy's own browser: Android's picker refuses
+    // the top of internal storage and of Download.
+    if has_all_files_access() {
+        let current = crate::db::raw_download_path().filter(|p| p.starts_with('/'));
+        crate::folders::browse(current.as_deref(), on_picked);
+        return;
+    }
+
     // Store the callback
     if let Ok(mut guard) = FOLDER_PICKER_CALLBACK.lock() {
         *guard = Some(Box::new(on_picked));

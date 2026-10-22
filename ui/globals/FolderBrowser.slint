@@ -1,0 +1,21 @@
+// Eddy's own folder browser (Android with "All files access", where
+// Android's picker refuses folders like Download itself). Rust fills it
+// in and does what the callbacks ask; see folders.rs.
+export global FolderBrowser {
+    in property <bool> open: false;
+    // The folder being looked at, as shown ("Internal storage/Download").
+    in property <string> path: "";
+    // Its folders.
+    in property <[string]> folders: [];
+    // Whether there's a folder above (not at internal storage's top).
+    in property <bool> can_up: false;
+    // Why the last action didn't work (e.g. a new folder's name was taken).
+    in property <string> error: "";
+
+    callback enter(string);
+    callback up();
+    // Picks the folder being looked at.
+    callback choose();
+    callback cancel();
+    callback create(string);
+}

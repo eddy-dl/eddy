@@ -15,6 +15,8 @@ import { LinkPreviewSheet } from "components/LinkPreviewSheet.slint";
 import { SelectionAction, SelectionActionBar, DeleteConfirmSheet } from "components/SelectionActions.slint";
 import { DownloadOptionsSheet, ItemAction } from "components/DownloadOptionsSheet.slint";
 import { Links, LinkBackend, LinkOptions } from "globals/Links.slint";
+import { FolderBrowser } from "globals/FolderBrowser.slint";
+import { FolderBrowserSheet } from "components/FolderBrowserSheet.slint";
 import { ScrollHint } from "components/ScrollHint.slint";
 import { TabSwipe } from "globals/TabSwipe.slint";
 import { DownloadItem, DownloadState, FileType, DownloadingCard, QueuedCard, ListHeader, StoppedCard, CompletedCard } from "components/DownloadCards.slint";
@@ -32,6 +34,7 @@ export { ItemAction } from "components/DownloadOptionsSheet.slint";
 // The Android share popup's window. Exported before DownloaderApp so the
 // viewer (which shows the last component) still opens the main app.
 export { PreviewApp } from "popup.slint";
+export { FolderBrowser } from "globals/FolderBrowser.slint";
 export { Links, LinkBackend, LinkFormat, LinkOptions, PendingLink, ProbeState, QuickBackend, TorrentFile } from "globals/Links.slint";
 
 export component DownloaderApp inherits Window {
@@ -325,6 +328,10 @@ export component DownloaderApp inherits Window {
         }
         key-pressed(event) => {
             if (event.text == Key.Back || event.text == Key.Escape) {
+                if (FolderBrowser.open) {
+                    FolderBrowser.cancel();
+                    return accept;
+                }
                 if (root.show_settings) {
                     st_page.navigate_back();
                     return accept;
@@ -1090,6 +1097,8 @@ export component DownloaderApp inherits Window {
 
             if Links.pending.length > 0: LinkPreviewSheet {
                 link: Links.pending[0];
+                window_width: root.width;
+                window_height: root.height;
                 position: 1;
                 total: Links.pending.length;
                 available_height: parent.sheet_bottom - Math.max(24px, root.safe-area-insets.top) - 12px;
@@ -1216,5 +1225,13 @@ export component DownloaderApp inherits Window {
                 changed active_tab => { back_scope.focus(); }
             }
         }
+    }
+
+    // Eddy's own folder browser, over everything (see folders.rs).
+    if FolderBrowser.open: FolderBrowserSheet {
+        width: 100%;
+        height: 100%;
+        safe_top: root.safe-area-insets.top;
+        safe_bottom: root.safe-area-insets.bottom;
     }
 }

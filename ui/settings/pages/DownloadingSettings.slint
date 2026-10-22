@@ -1,0 +1,36 @@
+import { AppSettings } from "../../globals/AppSettings.slint";
+import { DownloadOptionsEditor } from "../../components/DownloadOptionsEditor.slint";
+
+// Settings → Downloads → Downloading: every download's defaults (a
+// download's preview or options sheet can change them for it).
+export component DownloadingSettings inherits Rectangle {
+    in property <color> text_color: #FFFFFF;
+    // True once the content has scrolled away from the top; tints the settings header.
+    out property <bool> scrolled: scroller.content-y < 0;
+
+    TouchArea { }
+
+    scroller := Flickable {
+        width: 100%;
+        height: 100%;
+        content-height: downloading_layout.preferred-height;
+
+        downloading_layout := VerticalLayout {
+            alignment: start;
+            padding-left: 20px;
+            padding-right: 20px;
+            padding-top: 8px;
+            padding-bottom: 16px;
+
+            DownloadOptionsEditor {
+                text_color: root.text_color;
+                speed_kbps <=> AppSettings.dl_speed_kbps;
+                connections <=> AppSettings.dl_connections;
+                ua_mode <=> AppSettings.dl_ua_mode;
+                ua_custom <=> AppSettings.dl_ua_custom;
+                category <=> AppSettings.dl_category_folders;
+                changed => { AppSettings.preferences_changed(); }
+            }
+        }
+    }
+}

@@ -251,14 +251,12 @@ pub fn download_args(
             .iter()
             .map(|s| s.to_string())
             .collect();
-    // Speed limit, fragments at once (HLS/DASH), user agent.
+    // Speed limit, fragments at once (HLS/DASH). The user agent is left to
+    // yt-dlp, which knows what each site wants.
     if settings.max_speed > 0 {
         args.extend(["--limit-rate".to_string(), settings.max_speed.to_string()]);
     }
     args.extend(["--concurrent-fragments".to_string(), settings.connections().min(8).to_string()]);
-    if !settings.user_agent.trim().is_empty() {
-        args.extend(["--user-agent".to_string(), settings.user_agent.trim().to_string()]);
-    }
     let several = request.items.len() > 1;
     let template = match name {
         Some(name) if !several => format!("{dir}/{name}.%(ext)s"),

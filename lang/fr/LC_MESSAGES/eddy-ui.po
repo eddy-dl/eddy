@@ -427,11 +427,7 @@ msgstr "Outils média"
 msgid "Media from most sites needs these. Eddy can install them in its own folder; copies you already have are used too."
 msgstr "Les médias de la plupart des sites en ont besoin. Eddy peut les installer dans son propre dossier ; ceux déjà installés sont aussi utilisés."
 
-msgid "Python & yt-dlp, FFmpeg, Deno"
-msgstr "Python et yt-dlp, FFmpeg, Deno"
 
-msgid "yt-dlp, FFmpeg, Deno"
-msgstr "yt-dlp, FFmpeg, Deno"
 
 msgid "Cookies"
 msgstr "Cookies"
@@ -486,11 +482,7 @@ msgstr "Livres"
 msgid "Book"
 msgstr "Livre"
 
-msgid "Web novels saved as EPUB: author notes, images"
-msgstr "Romans web enregistrés en EPUB : notes d'auteur, images"
 
-msgid "Books are saved as EPUB, read by most e-book apps. These are the starting choices; each book's preview can change them."
-msgstr "Les livres sont enregistrés en EPUB, lu par la plupart des liseuses. Ce sont les choix de départ ; l'aperçu de chaque livre peut les changer."
 
 msgid "Author notes"
 msgstr "Notes d'auteur"
@@ -530,8 +522,6 @@ msgid_plural "{n} chapters"
 msgstr[0] "{n} chapitre"
 msgstr[1] "{n} chapitres"
 
-msgid "How downloads go about it, unless a download's preview says otherwise."
-msgstr "Comment les téléchargements se font, sauf si l'aperçu d'un téléchargement en décide autrement."
 
 msgid "Speed limit"
 msgstr "Limite de vitesse"
@@ -554,8 +544,6 @@ msgstr "Navigateur"
 msgid "Custom"
 msgstr "Personnalisé"
 
-msgid "What downloads say they are. Some sites only serve browsers; yt-dlp keeps its own unless it's Custom."
-msgstr "Ce que les téléchargements disent être. Certains sites ne servent que les navigateurs ; yt-dlp garde le sien sauf en Personnalisé."
 
 msgid "Category folders"
 msgstr "Dossiers par catégorie"
@@ -573,3 +561,42 @@ msgstr[1] "{n} connexions"
 
 msgid "Saving restarts the download with these, carrying on from where it got to."
 msgstr "Enregistrer relance le téléchargement avec ces réglages, en reprenant là où il en était."
+
+msgid "Default download settings"
+msgstr "Réglages de téléchargement par défaut"
+
+msgid "Only used by direct downloads."
+msgstr "Utilisé seulement par les téléchargements directs."
+
+msgid "Books are saved as EPUB, read by most e-book apps."
+msgstr "Les livres sont enregistrés en EPUB, lu par la plupart des liseuses."
+
+msgid "Web novel download options"
+msgstr "Options de téléchargement des romans web"
+
+msgid "Manage yt-dlp packages"
+msgstr "Gérer les paquets yt-dlp"
+
+msgid "Manage media tools"
+msgstr "Gérer les outils média"
+
+msgid "Choose a folder"
+msgstr "Choisir un dossier"
+
+msgid "Up"
+msgstr "Remonter"
+
+msgid "No folders here"
+msgstr "Aucun dossier ici"
+
+msgid "New folder's name"
+msgstr "Nom du nouveau dossier"
+
+msgid "Create"
+msgstr "Créer"
+
+msgid "New folder"
+msgstr "Nouveau dossier"
+
+msgid "Use this folder"
+msgstr "Utiliser ce dossier"

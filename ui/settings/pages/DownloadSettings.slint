@@ -1,7 +1,6 @@
 import { ModernSwitch } from "../../components/Buttons.slint";
 import { AppSettings } from "../../globals/AppSettings.slint";
 import { ThemeSettings } from "../../themes/theme.slint";
-import { DownloadOptionsEditor } from "../../components/DownloadOptionsEditor.slint";
 
 export component DownloadSettings inherits Rectangle {
     in property <color> text_color: #FFFFFF;
@@ -12,6 +11,8 @@ export component DownloadSettings inherits Rectangle {
     callback open_packages();
     // Opens the Books page.
     callback open_books();
+    // Opens the Downloading page (every download's defaults).
+    callback open_downloading();
 
     TouchArea { }
 
@@ -119,31 +120,57 @@ export component DownloadSettings inherits Rectangle {
                 }
             }
 
-            // Every download's defaults; each preview can change them.
-            VerticalLayout {
-                padding-left: 8px;
-                padding-right: 8px;
-                spacing: 8px;
-                Text {
-                    text: @tr("Downloading");
-                    font-size: 18px;
-                    font-weight: 600;
-                    color: root.text_color;
+            // Every download's defaults, on a page of their own.
+            Rectangle {
+                border-radius: 8px;
+                background: downloading_ta.has-hover ? ThemeSettings.hover_color : transparent;
+
+                downloading_ta := TouchArea {
+                    clicked => { root.open_downloading(); }
                 }
-                Text {
-                    text: @tr("How downloads go about it, unless a download's preview says otherwise.");
-                    font-size: 13px;
-                    color: root.text_color.transparentize(40%);
-                    wrap: word-wrap;
-                }
-                DownloadOptionsEditor {
-                    text_color: root.text_color;
-                    speed_kbps <=> AppSettings.dl_speed_kbps;
-                    connections <=> AppSettings.dl_connections;
-                    ua_mode <=> AppSettings.dl_ua_mode;
-                    ua_custom <=> AppSettings.dl_ua_custom;
-                    category <=> AppSettings.dl_category_folders;
-                    changed => { AppSettings.preferences_changed(); }
+
+                HorizontalLayout {
+                    padding: 8px;
+                    spacing: 16px;
+
+                    VerticalLayout {
+                        alignment: center;
+                        Image {
+                            source: @image-url("../../icons/speed.svg");
+                            width: 24px;
+                            height: 24px;
+                            colorize: root.text_color;
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        horizontal-stretch: 1;
+
+                        Text {
+                            text: @tr("Downloading");
+                            font-size: 18px;
+                            font-weight: 600;
+                            color: root.text_color;
+                        }
+                        Text {
+                            text: @tr("Default download settings");
+                            font-size: 13px;
+                            color: root.text_color.transparentize(40%);
+                            wrap: word-wrap;
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        Image {
+                            source: @image-url("../../icons/arrow_right.svg");
+                            width: 16px;
+                            height: 16px;
+                            colorize: root.text_color.transparentize(40%);
+                        }
+                    }
                 }
             }
 
@@ -255,7 +282,7 @@ export component DownloadSettings inherits Rectangle {
                             color: root.text_color;
                         }
                         Text {
-                            text: @tr("Web novels saved as EPUB: author notes, images");
+                            text: @tr("Web novel download options");
                             font-size: 13px;
                             color: root.text_color.transparentize(40%);
                             wrap: word-wrap;
@@ -309,7 +336,7 @@ export component DownloadSettings inherits Rectangle {
                             color: root.text_color;
                         }
                         Text {
-                            text: AppSettings.is_mobile ? @tr("Python & yt-dlp, FFmpeg, Deno") : @tr("yt-dlp, FFmpeg, Deno");
+                            text: AppSettings.is_mobile ? @tr("Manage yt-dlp packages") : @tr("Manage media tools");
                             font-size: 13px;
                             color: root.text_color.transparentize(40%);
                             wrap: word-wrap;

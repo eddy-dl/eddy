@@ -100,7 +100,7 @@ export component DownloadOptionsEditor inherits VerticalLayout {
         edited => { root.changed(); }
     }
     Text {
-        text: @tr("What downloads say they are. Some sites only serve browsers; yt-dlp keeps its own unless it's Custom.");
+        text: @tr("Only used by direct downloads.");
         font-size: root.label_size;
         color: root.text_color.transparentize(40%);
         wrap: word-wrap;

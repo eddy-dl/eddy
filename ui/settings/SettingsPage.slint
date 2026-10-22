@@ -5,6 +5,7 @@ import { DownloadSettings } from "pages/DownloadSettings.slint";
 import { PackageSettings } from "pages/PackageSettings.slint";
 import { AdvancedSettings } from "pages/AdvancedSettings.slint";
 import { BookSettings } from "pages/BookSettings.slint";
+import { DownloadingSettings } from "pages/DownloadingSettings.slint";
 import { AppSettings } from "../globals/AppSettings.slint";
 import { ThemeSettings } from "../themes/theme.slint"; 
 import { AppearanceSettings } from "pages/AppearanceSettings.slint";
@@ -36,6 +37,9 @@ export component SettingsPage inherits Rectangle {
     }
     out property <bool> advanced_tab_is_active: root.active_tab == SettingsTab.Advanced;
     out property <bool> books_tab_is_active: root.active_tab == SettingsTab.Books;
+    out property <bool> downloading_tab_is_active: root.active_tab == SettingsTab.Downloading;
+    // Inner pages of Downloads, which Back returns to.
+    private property <bool> inner_download_page: root.packages_tab_is_active || root.books_tab_is_active || root.downloading_tab_is_active;
     // Opening Advanced measures the download cache.
     changed advanced_tab_is_active => {
         if (self.advanced_tab_is_active) {
@@ -63,7 +67,7 @@ export component SettingsPage inherits Rectangle {
             general_page.dismiss_popup();
         } else if (packages_page.popup_open) {
             packages_page.dismiss_popup();
-        } else if (root.packages_tab_is_active || root.books_tab_is_active) {
+        } else if (root.inner_download_page) {
             root.active_tab = SettingsTab.Download;
         } else if (!root.no_active_tab) {
             root.active_tab = SettingsTab.InActive;
@@ -80,7 +84,8 @@ export component SettingsPage inherits Rectangle {
         root.download_tab_is_active ? download_page.scrolled : (
         root.packages_tab_is_active ? packages_page.scrolled : (
         root.advanced_tab_is_active ? advanced_page.scrolled : (
-        root.books_tab_is_active ? books_page.scrolled : false)))));
+        root.books_tab_is_active ? books_page.scrolled : (
+        root.downloading_tab_is_active ? downloading_page.scrolled : false))))));
     private property <bool> sidebar_scrolled: sidebar.scrolled;
     private property <bool> left_header_tinted: root.is_landscape ? root.sidebar_scrolled : (root.no_active_tab ? root.sidebar_scrolled : root.page_scrolled);
     private property <bool> right_header_tinted: root.page_scrolled;
@@ -179,6 +184,7 @@ export component SettingsPage inherits Rectangle {
                         root.general_tab_is_active ? @tr("General") : (
                         root.download_tab_is_active ? @tr("Downloads") : root.packages_tab_is_active ? root.packages_title
                         : root.advanced_tab_is_active ? @tr("Advanced") : root.books_tab_is_active ? @tr("Books")
+                        : root.downloading_tab_is_active ? @tr("Downloading")
                         : root.appearance_tab_is_active ? @tr("Appearance") : @tr("Settings")));
                     font-size: 22px;
                     font-weight: 700;
@@ -204,6 +210,7 @@ export component SettingsPage inherits Rectangle {
                         text: root.general_tab_is_active ? @tr("General") : (
                             root.download_tab_is_active ? @tr("Downloads") : root.packages_tab_is_active ? root.packages_title
                             : root.advanced_tab_is_active ? @tr("Advanced") : root.books_tab_is_active ? @tr("Books")
+                            : root.downloading_tab_is_active ? @tr("Downloading")
                             : root.appearance_tab_is_active ? @tr("Appearance") : "");
                         font-size: 22px;
                         font-weight: 700;
@@ -319,7 +326,7 @@ export component SettingsPage inherits Rectangle {
                     height: 100%;
 
                     // Slides off to the left when its packages page opens.
-                    x: root.download_tab_is_active ? 0px : (root.packages_tab_is_active || root.books_tab_is_active ? -parent.width : parent.width);
+                    x: root.download_tab_is_active ? 0px : (root.inner_download_page ? -parent.width : parent.width);
                     opacity: root.download_tab_is_active ? 1.0 : 0.0;
 
                     animate x {
@@ -342,6 +349,7 @@ export component SettingsPage inherits Rectangle {
                             text_color: root.text_color;
                             open_packages => { root.active_tab = SettingsTab.Packages; }
                             open_books => { root.active_tab = SettingsTab.Books; }
+                            open_downloading => { root.active_tab = SettingsTab.Downloading; }
                         }
                     }
                 }
@@ -402,6 +410,36 @@ export component SettingsPage inherits Rectangle {
                         height: 100%;
 
                         books_page := BookSettings {
+                            horizontal-stretch: 1;
+                            height: 100%;
+                            text_color: root.text_color;
+                        }
+                    }
+                }
+
+                // Downloading Page Wrapper (inner page of Downloads)
+                Rectangle {
+                    width: 100%;
+                    height: 100%;
+
+                    x: root.downloading_tab_is_active ? 0px : parent.width;
+                    opacity: root.downloading_tab_is_active ? 1.0 : 0.0;
+
+                    animate x {
+                        duration: 300ms;
+                        easing: ease-out;
+                    }
+                    animate opacity {
+                        duration: 200ms;
+                        easing: ease-out-quad;
+                    }
+
+                    HorizontalLayout {
+                        padding-left: root.is_landscape ? 12px : 0px;
+                        width: 100%;
+                        height: 100%;
+
+                        downloading_page := DownloadingSettings {
                             horizontal-stretch: 1;
                             height: 100%;
                             text_color: root.text_color;

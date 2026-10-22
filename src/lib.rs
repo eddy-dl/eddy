@@ -9,6 +9,7 @@ pub mod db;
 pub mod downloader;
 pub mod downloads;
 pub mod extractors;
+pub mod folders;
 pub mod links;
 pub mod novels;
 pub mod platform;
@@ -138,6 +139,7 @@ fn android_main(app: AndroidApp) {
     links::install_main(&ui);
     selection::install(&ui);
     downloads::install(&ui);
+    folders::install(&ui);
     components::install(&ui);
     cookies::install(&ui);
     cache::install(&ui);
@@ -164,6 +166,7 @@ fn run_share_popup() {
     };
     preferences::load_theme(&ui);
     preferences::apply_download_defaults(&ui.global::<AppSettings>());
+    folders::install(&ui);
     ui.set_mode(mode);
     links::install(&ui);
 

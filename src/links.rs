@@ -707,8 +707,8 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
     if crate::novels::site_for(url).is_some() {
         let book = crate::novels::book(url).await?;
         let locked = book.chapters.iter().filter(|c| c.locked).count();
-        // The smallest cover is plenty for the banner.
-        let cover = match book.covers.last() {
+        // The largest cover: tapping the banner shows all of it.
+        let cover = match book.covers.first() {
             Some(cover) => fetch_thumbnail(cover).await,
             None => None,
         };

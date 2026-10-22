@@ -73,10 +73,10 @@ pub struct DownloadRequest {
     pub settings: DownloadSettings,
 }
 
-/// How a download goes about it. Each backend uses what it can: aria2 all
-/// of it; yt-dlp the speed, fragments at once and user agent; the native
-/// extractors the speed (their sites need their own user agents); books
-/// none of it but the folder.
+/// How a download goes about it. Each backend uses what it can: aria2
+/// (direct downloads, torrents) all of it; yt-dlp the speed and fragments at
+/// once; the native extractors the speed; books none of it but the folder.
+/// The user agent is only aria2's: the extractors' sites need their own.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct DownloadSettings {
