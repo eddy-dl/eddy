@@ -97,9 +97,9 @@ class MainActivity : GameActivity() {
 
     // Called from Rust: hands a download to the download service.
     @Keep
-    fun startDownload(url: String, backend: Int, format: String, filename: String, selectFiles: String, folder: String) {
+    fun startDownload(url: String, backend: Int, format: String, filename: String, selectFiles: String, folder: String, settings: String) {
         runOnUiThread {
-            DownloadService.start(this, url, backend, format, filename, selectFiles, folder)
+            DownloadService.start(this, url, backend, format, filename, selectFiles, folder, settings)
         }
     }
 

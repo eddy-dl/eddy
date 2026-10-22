@@ -43,6 +43,14 @@ export global AppSettings {
     in property <int> cookies_count: 0;
     in property <string> cookies_sites: "";
     in property <int> cookies_error: 0;
+    // Settings → Downloads → Downloading: every download's defaults (see
+    // Links' LinkOptions).
+    in-out property <int> dl_speed_kbps: 0;
+    in-out property <int> dl_connections: 16;
+    in-out property <int> dl_ua_mode: 0;
+    in-out property <string> dl_ua_custom: "";
+    in-out property <bool> dl_category_folders: false;
+
     // Settings → Downloads → Books: how a book is saved unless the preview
     // says otherwise.
     in-out property <bool> novel_author_notes: true;

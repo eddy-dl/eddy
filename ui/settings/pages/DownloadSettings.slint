@@ -1,6 +1,7 @@
 import { ModernSwitch } from "../../components/Buttons.slint";
 import { AppSettings } from "../../globals/AppSettings.slint";
 import { ThemeSettings } from "../../themes/theme.slint";
+import { DownloadOptionsEditor } from "../../components/DownloadOptionsEditor.slint";
 
 export component DownloadSettings inherits Rectangle {
     in property <color> text_color: #FFFFFF;
@@ -115,6 +116,34 @@ export component DownloadSettings inherits Rectangle {
                             }
                         }
                     }
+                }
+            }
+
+            // Every download's defaults; each preview can change them.
+            VerticalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: 8px;
+                Text {
+                    text: @tr("Downloading");
+                    font-size: 18px;
+                    font-weight: 600;
+                    color: root.text_color;
+                }
+                Text {
+                    text: @tr("How downloads go about it, unless a download's preview says otherwise.");
+                    font-size: 13px;
+                    color: root.text_color.transparentize(40%);
+                    wrap: word-wrap;
+                }
+                DownloadOptionsEditor {
+                    text_color: root.text_color;
+                    speed_kbps <=> AppSettings.dl_speed_kbps;
+                    connections <=> AppSettings.dl_connections;
+                    ua_mode <=> AppSettings.dl_ua_mode;
+                    ua_custom <=> AppSettings.dl_ua_custom;
+                    category <=> AppSettings.dl_category_folders;
+                    changed => { AppSettings.preferences_changed(); }
                 }
             }
 

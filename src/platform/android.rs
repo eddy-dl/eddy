@@ -438,10 +438,11 @@ pub fn start_download(request: &crate::downloader::DownloadRequest) -> Result<()
         let filename = env.new_string(&request.filename)?;
         let select_files = env.new_string(&request.select_files)?;
         let folder = env.new_string(&request.folder)?;
+        let settings = env.new_string(serde_json::to_string(&request.settings).unwrap_or_default())?;
         env.call_method(
             activity,
             jni_str!("startDownload"),
-            jni_sig!("(Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V"),
+            jni_sig!("(Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V"),
             &[
                 JValue::Object(&url),
                 JValue::Int(request.backend.index()),
@@ -449,6 +450,7 @@ pub fn start_download(request: &crate::downloader::DownloadRequest) -> Result<()
                 JValue::Object(&filename),
                 JValue::Object(&select_files),
                 JValue::Object(&folder),
+                JValue::Object(&settings),
             ],
         )?;
         Ok(())
@@ -467,6 +469,7 @@ pub extern "system" fn Java_dev_pah_eddy_EddyNative_startDownload<'caller>(
     filename: JString<'caller>,
     select_files: JString<'caller>,
     folder: JString<'caller>,
+    settings: JString<'caller>,
 ) -> jboolean {
     let request = unowned_env
         .with_env(|env| -> jni::errors::Result<_> {
@@ -477,6 +480,8 @@ pub extern "system" fn Java_dev_pah_eddy_EddyNative_startDownload<'caller>(
                 filename: filename.try_to_string(env)?,
                 select_files: select_files.try_to_string(env)?,
                 folder: folder.try_to_string(env)?,
+                // JSON (DownloadSettings); the usual settings if it's not.
+                settings: serde_json::from_str(&settings.try_to_string(env)?).unwrap_or_default(),
             }))
         })
         .resolve::<LogErrorAndDefault>();

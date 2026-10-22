@@ -17,7 +17,8 @@ object EddyNative {
     // a torrent's files to fetch ("1,3", 1-based), "" for all. Returns false
     // if it couldn't be started.
     // folder is a tree URI picked for this download, "" for the usual one.
-    @JvmStatic external fun startDownload(url: String, backend: Int, format: String, filename: String, selectFiles: String, folder: String): Boolean
+    // `settings`: speed, connections, user agent, category folder, as JSON.
+    @JvmStatic external fun startDownload(url: String, backend: Int, format: String, filename: String, selectFiles: String, folder: String, settings: String): Boolean
 
     // A folder was picked (FolderPickerActivity's result): its tree URI and
     // how to show it.

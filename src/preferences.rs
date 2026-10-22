@@ -14,6 +14,12 @@ const NOVEL_NOTES_KEY: &str = "novel_author_notes";
 const NOVEL_IMAGES_KEY: &str = "novel_images";
 const NOVEL_NOTE_IMAGES_KEY: &str = "novel_author_note_images";
 const NOVEL_SMALL_IMAGES_KEY: &str = "novel_small_images";
+// Settings → Downloads → Downloading: every download's defaults.
+const DL_SPEED_KEY: &str = "download_max_speed_kbps";
+const DL_CONNECTIONS_KEY: &str = "download_connections";
+const DL_UA_MODE_KEY: &str = "download_user_agent_mode";
+const DL_UA_CUSTOM_KEY: &str = "download_user_agent_custom";
+const DL_CATEGORY_KEY: &str = "download_category_folders";
 
 // Locales with a bundled translation (English is the source language).
 const BUNDLED_LANGUAGES: &[&str] = &["en", "fr"];
@@ -118,11 +124,35 @@ pub fn load_preferences(ui_weak: slint::Weak<DownloaderApp>) {
         theme_settings.set_amoled_dark(amoled);
         app_settings.set_haptic_feedback(enable_haptic_feedback);
         app_settings.set_current_download_path(download_dir_display.into());
+        apply_download_defaults(&app_settings);
         let novel = novel_defaults();
         app_settings.set_novel_author_notes(novel.author_notes);
         app_settings.set_novel_images(novel.images);
         app_settings.set_novel_author_note_images(novel.author_note_images);
         app_settings.set_novel_small_images(novel.small_images);
+    }
+}
+
+/// Settings → Downloads → Downloading, into AppSettings (the app's, or the
+/// share popup's).
+pub fn apply_download_defaults(settings: &AppSettings) {
+    let number = |key: &str, default: i32| platform::get_pref(key, &default.to_string()).ok().and_then(|v| v.parse().ok()).unwrap_or(default);
+    settings.set_dl_speed_kbps(number(DL_SPEED_KEY, 0));
+    settings.set_dl_connections(number(DL_CONNECTIONS_KEY, 16));
+    settings.set_dl_ua_mode(number(DL_UA_MODE_KEY, 0));
+    settings.set_dl_ua_custom(platform::get_pref(DL_UA_CUSTOM_KEY, "").unwrap_or_default().into());
+    settings.set_dl_category_folders(platform::get_pref(DL_CATEGORY_KEY, "false").ok().is_some_and(|v| v == "true"));
+}
+
+/// The Downloading defaults as a link's options ("Download now", Auto).
+pub fn link_option_defaults() -> crate::LinkOptions {
+    let number = |key: &str, default: i32| platform::get_pref(key, &default.to_string()).ok().and_then(|v| v.parse().ok()).unwrap_or(default);
+    crate::LinkOptions {
+        speed_kbps: number(DL_SPEED_KEY, 0),
+        connections: number(DL_CONNECTIONS_KEY, 16),
+        ua_mode: number(DL_UA_MODE_KEY, 0),
+        ua_custom: platform::get_pref(DL_UA_CUSTOM_KEY, "").unwrap_or_default().into(),
+        category: platform::get_pref(DL_CATEGORY_KEY, "false").ok().is_some_and(|v| v == "true"),
     }
 }
 
@@ -185,6 +215,17 @@ pub fn save_preferences(ui_weak: slint::Weak<DownloaderApp>) {
             eprintln!("failed to save language preference: {e}");
         }
 
+        for (key, value) in [
+            (DL_SPEED_KEY, app_settings.get_dl_speed_kbps().max(0).to_string()),
+            (DL_CONNECTIONS_KEY, app_settings.get_dl_connections().clamp(1, 16).to_string()),
+            (DL_UA_MODE_KEY, app_settings.get_dl_ua_mode().to_string()),
+            (DL_UA_CUSTOM_KEY, app_settings.get_dl_ua_custom().to_string()),
+            (DL_CATEGORY_KEY, app_settings.get_dl_category_folders().to_string()),
+        ] {
+            if let Err(e) = platform::save_pref(key, &value) {
+                eprintln!("failed to save {key}: {e}");
+            }
+        }
         for (key, value) in [
             (NOVEL_NOTES_KEY, app_settings.get_novel_author_notes()),
             (NOVEL_IMAGES_KEY, app_settings.get_novel_images()),

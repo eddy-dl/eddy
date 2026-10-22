@@ -38,7 +38,7 @@ class DownloadService : Service() {
 
         // Hands a download to the service, starting it if needed. Works from
         // any process (the share popup runs in its own).
-        fun start(activity: Activity, url: String, backend: Int, format: String, filename: String, selectFiles: String, folder: String) {
+        fun start(activity: Activity, url: String, backend: Int, format: String, filename: String, selectFiles: String, folder: String, settings: String) {
             askForNotifications(activity)
             val intent = Intent(activity, DownloadService::class.java).apply {
                 putExtra("url", url)
@@ -47,6 +47,7 @@ class DownloadService : Service() {
                 putExtra("filename", filename)
                 putExtra("select_files", selectFiles)
                 putExtra("folder", folder)
+                putExtra("settings", settings)
             }
             ContextCompat.startForegroundService(activity, intent)
         }
@@ -140,6 +141,7 @@ class DownloadService : Service() {
                 intent.getStringExtra("filename") ?: "",
                 intent.getStringExtra("select_files") ?: "",
                 intent.getStringExtra("folder") ?: "",
+                intent.getStringExtra("settings") ?: "",
             )
             // Also shows the download arrived when notifications are off.
             val message = if (started) R.string.download_started else R.string.download_failed

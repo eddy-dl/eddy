@@ -51,14 +51,14 @@ where
         }
     });
 
-    links.on_start(|id, backend, format, filename| {
+    links.on_start(|id, backend, format, filename, options| {
         let backend = match backend {
             LinkBackend::Torrent => Backend::Torrent,
             LinkBackend::Media => Backend::Media,
             LinkBackend::Book => Backend::Book,
             _ => Backend::Direct,
         };
-        start_link(id, backend, format.to_string(), filename.to_string());
+        start_link(id, backend, format.to_string(), filename.to_string(), &options);
     });
 
     links.on_pick_folder(|id| {
@@ -107,7 +107,7 @@ where
             // Names are only known once the check is done; otherwise the
             // backend names the file.
             let filename = if link.state == ProbeState::Ready { link.filename.to_string() } else { String::new() };
-            start_link(link.id, backend, String::new(), filename);
+            start_link(link.id, backend, String::new(), filename, &crate::preferences::link_option_defaults());
         }
     });
 }
@@ -335,7 +335,7 @@ pub fn bring_to_front(ids: &[i32]) {
 }
 
 /// Hands a pending link to the downloader and drops it from the list.
-fn start_link(id: i32, backend: Backend, format: String, filename: String) {
+fn start_link(id: i32, backend: Backend, format: String, filename: String, options: &crate::LinkOptions) {
     let Some(link) = PENDING.with(|m| m.iter().find(|l| l.id == id)) else {
         return;
     };
@@ -364,6 +364,7 @@ fn start_link(id: i32, backend: Backend, format: String, filename: String) {
         filename,
         select_files,
         folder: link.folder_uri.to_string(),
+        settings: download_settings(options, &link),
     };
     match crate::platform::start_download(&request) {
         Ok(()) => {
@@ -371,6 +372,38 @@ fn start_link(id: i32, backend: Backend, format: String, filename: String) {
             crate::db::remove_pending(&request.url);
         }
         Err(e) => crate::platform::show_toast(&format!("Couldn't start the download: {e}")),
+    }
+}
+
+/// The preview's options as the downloader's settings.
+fn download_settings(options: &crate::LinkOptions, link: &PendingLink) -> crate::downloader::DownloadSettings {
+    crate::downloader::DownloadSettings {
+        max_speed: options.speed_kbps.max(0) as u64 * 1024,
+        connections: options.connections.clamp(1, 16) as u16,
+        user_agent: match options.ua_mode {
+            1 => "aria2/1.37.0".to_string(),
+            2 => options.ua_custom.trim().to_string(),
+            _ => String::new(),
+        },
+        subfolder: match options.category {
+            false => String::new(),
+            true if link.backends.row_data(0) == Some(LinkBackend::Book) => "Books".to_string(),
+            true => category_folder(link.file_type).to_string(),
+        },
+    }
+}
+
+/// The folder a category's downloads go in, with "Category folders" on.
+pub fn category_folder(file_type: FileType) -> &'static str {
+    match file_type {
+        FileType::Video => "Video",
+        FileType::Audio => "Music",
+        FileType::Image => "Pictures",
+        FileType::Document => "Documents",
+        FileType::Archive => "Compressed",
+        FileType::DiskImage | FileType::Program => "Programs",
+        FileType::Torrent => "Torrents",
+        _ => "Other",
     }
 }
 

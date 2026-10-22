@@ -138,6 +138,7 @@ impl AriaEngineClient {
         save_dir: &str,
         out: Option<&str>,
         select_files: Option<&str>,
+        settings: &super::DownloadSettings,
     ) -> Result<String, String> {
         let gid = self.group_man.next_available_gid();
 
@@ -146,8 +147,7 @@ impl AriaEngineClient {
         options.out = out.map(str::to_string);
         options.select_file = select_files.map(str::to_string);
         options.continue_download = true;
-        options.max_connection_per_server = Some(16);
-        options.split = Some(16);
+        apply(&mut options, settings);
 
         let group = Arc::new(std::sync::RwLock::new(RequestGroup::new(
             gid,
@@ -319,6 +319,7 @@ impl AriaEngineClient {
         torrent: Vec<u8>,
         save_dir: &str,
         select_files: Option<&str>,
+        settings: &super::DownloadSettings,
     ) -> Result<String, String> {
         let gid = self.group_man.next_available_gid();
 
@@ -326,6 +327,7 @@ impl AriaEngineClient {
         options.dir = Some(save_dir.to_string());
         options.select_file = select_files.map(str::to_string);
         options.continue_download = true;
+        apply(&mut options, settings);
 
         // Same steps aria2-core's own add_torrent takes: a bt:// placeholder
         // URI, with the file list and pieces read from the torrent.
@@ -409,4 +411,13 @@ impl AriaEngineClient {
             .send(EngineCommand::Pause { gid })
             .map_err(|e| e.to_string())
     }
+}
+
+/// Speed, connections and user agent for a download.
+fn apply(options: &mut DownloadOptions, settings: &super::DownloadSettings) {
+    let connections = settings.connections();
+    options.max_connection_per_server = Some(connections);
+    options.split = Some(connections);
+    options.max_download_limit = (settings.max_speed > 0).then_some(settings.max_speed);
+    options.user_agent = Some(settings.user_agent().to_string());
 }

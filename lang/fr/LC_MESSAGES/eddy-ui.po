@@ -529,3 +529,44 @@ msgid "{n} chapter"
 msgid_plural "{n} chapters"
 msgstr[0] "{n} chapitre"
 msgstr[1] "{n} chapitres"
+
+msgid "How downloads go about it, unless a download's preview says otherwise."
+msgstr "Comment les téléchargements se font, sauf si l'aperçu d'un téléchargement en décide autrement."
+
+msgid "Speed limit"
+msgstr "Limite de vitesse"
+
+msgid "No limit"
+msgstr "Aucune limite"
+
+msgid "Connections per download"
+msgstr "Connexions par téléchargement"
+
+msgid "More can be faster; some servers refuse more than one or two."
+msgstr "Plus peut aller plus vite ; certains serveurs en refusent plus d'une ou deux."
+
+msgid "User agent"
+msgstr "Agent utilisateur"
+
+msgid "Browser"
+msgstr "Navigateur"
+
+msgid "Custom"
+msgstr "Personnalisé"
+
+msgid "What downloads say they are. Some sites only serve browsers; yt-dlp keeps its own unless it's Custom."
+msgstr "Ce que les téléchargements disent être. Certains sites ne servent que les navigateurs ; yt-dlp garde le sien sauf en Personnalisé."
+
+msgid "Category folders"
+msgstr "Dossiers par catégorie"
+
+msgid "Into Video, Music, Pictures, Documents… folders inside the save folder."
+msgstr "Dans des dossiers Video, Music, Pictures, Documents… du dossier d'enregistrement."
+
+msgid "Download options"
+msgstr "Options de téléchargement"
+
+msgid "{n} connection"
+msgid_plural "{n} connections"
+msgstr[0] "{n} connexion"
+msgstr[1] "{n} connexions"

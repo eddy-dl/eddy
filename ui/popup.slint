@@ -85,7 +85,7 @@ export component PreviewApp inherits Window {
                 total: Links.pending.length;
                 available_height: root.preview_height;
                 skip => { Links.skip(self.link.id); }
-                download(backend, format, filename) => { Links.start(self.link.id, backend, format, filename); }
+                download(backend, format, filename, options) => { Links.start(self.link.id, backend, format, filename, options); }
             }
         }
     }

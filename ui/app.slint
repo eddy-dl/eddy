@@ -32,7 +32,7 @@ export { ItemAction } from "components/DownloadOptionsSheet.slint";
 // The Android share popup's window. Exported before DownloaderApp so the
 // viewer (which shows the last component) still opens the main app.
 export { PreviewApp } from "popup.slint";
-export { Links, LinkBackend, LinkFormat, PendingLink, ProbeState, QuickBackend, TorrentFile } from "globals/Links.slint";
+export { Links, LinkBackend, LinkFormat, LinkOptions, PendingLink, ProbeState, QuickBackend, TorrentFile } from "globals/Links.slint";
 
 export component DownloaderApp inherits Window {
     title: "Eddy";
@@ -1099,7 +1099,7 @@ export component DownloaderApp inherits Window {
                 animate y, opacity { duration: 250ms; easing: ease-out-quad; }
 
                 skip => { Links.skip(self.link.id); }
-                download(backend, format, filename) => { Links.start(self.link.id, backend, format, filename); }
+                download(backend, format, filename, options) => { Links.start(self.link.id, backend, format, filename, options); }
             }
         }
 

@@ -61,12 +61,13 @@ pub fn start(request: &DownloadRequest, dir: &str, name: Option<String>, deliver
     let service = media.service.or_else(|| extractors::native_service(&request.url)).unwrap_or(Service::YtDlp);
     let label = super::label_for(request);
     match service {
-        Service::YtDlp => start_ytdlp(&request.url, &media, dir, name, label, deliver),
+        Service::YtDlp => start_ytdlp(&request.url, &media, dir, name, label, deliver, &request.settings),
         native => {
             let job = begin(&label);
             let (url, dir) = (request.url.clone(), PathBuf::from(dir));
+            let max_speed = request.settings.max_speed;
             runtime().spawn(async move {
-                let result = download_native(job, native, &url, &media, &dir, name.as_deref()).await;
+                let result = download_native(job, native, &url, &media, &dir, name.as_deref(), max_speed).await;
                 end(job);
                 match result {
                     Ok(files) => finished(saved_name(&files, label), true, String::new(), deliver),
@@ -85,9 +86,10 @@ fn start_ytdlp(
     name: Option<String>,
     label: String,
     deliver: Option<Deliver>,
+    settings: &super::DownloadSettings,
 ) -> Result<(), String> {
     use std::io::BufRead;
-    let args = extractors::ytdlp::download_args(url, media, dir, name.as_deref());
+    let args = extractors::ytdlp::download_args(url, media, dir, name.as_deref(), settings);
     let mut child = crate::platform::ytdlp_command()
         .ok_or("yt-dlp isn't available")?
         .args(&args)
@@ -150,6 +152,7 @@ async fn download_native(
     media: &MediaRequest,
     dir: &Path,
     name: Option<&str>,
+    max_speed: u64,
 ) -> Result<Vec<PathBuf>, String> {
     let fetches = extractors::resolve(service, url, media).await?;
     if fetches.is_empty() {
@@ -174,7 +177,7 @@ async fn download_native(
         if fetch.hls {
             save_hls(fetch, &path).await?;
         } else {
-            save(job, fetch, &path).await?;
+            save(job, fetch, &path, max_speed).await?;
         }
         if !media.audio_codec.is_empty() && fetch.kind != extractors::MediaKind::Image {
             files.push(to_audio(&path, &media.audio_codec, media.audio_kbps).await?);
@@ -186,7 +189,8 @@ async fn download_native(
 }
 
 /// Streams a file to `path`, reporting progress.
-async fn save(job: u64, fetch: &Fetch, path: &Path) -> Result<(), String> {
+/// `max_speed`: bytes per second, 0 for no limit.
+async fn save(job: u64, fetch: &Fetch, path: &Path, max_speed: u64) -> Result<(), String> {
     use tokio::io::AsyncWriteExt;
     let mut response = extractors::http::get_following(&fetch.url, &fetch.headers, None)
         .await?
@@ -195,10 +199,19 @@ async fn save(job: u64, fetch: &Fetch, path: &Path) -> Result<(), String> {
     let total = response.content_length().unwrap_or(0);
     let mut file = tokio::fs::File::create(path).await.map_err(|e| e.to_string())?;
     let mut done = 0u64;
+    let started = std::time::Instant::now();
     while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
         file.write_all(&chunk).await.map_err(|e| e.to_string())?;
         done += chunk.len() as u64;
         progress(job, done, total);
+        // Ahead of the limit: wait until the average is back down to it.
+        if max_speed > 0 {
+            let due = std::time::Duration::from_secs_f64(done as f64 / max_speed as f64);
+            let elapsed = started.elapsed();
+            if due > elapsed {
+                tokio::time::sleep(due - elapsed).await;
+            }
+        }
     }
     file.flush().await.map_err(|e| e.to_string())?;
     if done == 0 {

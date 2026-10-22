@@ -3,8 +3,10 @@ import { ThemeSettings } from "../themes/theme.slint";
 import { FileTypeIcon } from "FileTypeIcon.slint";
 import { ActionButton } from "Buttons.slint";
 import { SwitchRow } from "SwitchRow.slint";
+import { DownloadOptionsEditor } from "DownloadOptionsEditor.slint";
+import { AppSettings } from "../globals/AppSettings.slint";
 import { Chip, SectionLabel } from "Chips.slint";
-import { LinkBackend, LinkFormat, Links, PendingLink, ProbeState, TorrentFile } from "../globals/Links.slint";
+import { LinkBackend, LinkFormat, LinkOptions, Links, PendingLink, ProbeState, TorrentFile } from "../globals/Links.slint";
 
 // One quality option for a yt-dlp link: radio dot, label, detail on the right.
 component FormatRow inherits Rectangle {
@@ -144,7 +146,7 @@ export component LinkPreviewSheet inherits Rectangle {
     // The height everything needs without scrolling.
     out property <length> content_height: layout.preferred-height + footer.preferred-height;
 
-    callback download(backend: LinkBackend, format: string, filename: string);
+    callback download(backend: LinkBackend, format: string, filename: string, options: LinkOptions);
     callback skip();
 
     // The user's choices, reset whenever a different link is shown.
@@ -159,6 +161,23 @@ export component LinkPreviewSheet inherits Rectangle {
         root.filename_text = root.link.filename;
         root.name_edited = false;
         root.reset_book();
+        root.reset_options();
+    }
+
+    // This download's options, from Settings → Downloads → Downloading.
+    private property <bool> options_open: false;
+    private property <int> opt_speed_kbps;
+    private property <int> opt_connections;
+    private property <int> opt_ua_mode;
+    private property <string> opt_ua_custom;
+    private property <bool> opt_category;
+    function reset_options() {
+        root.options_open = false;
+        root.opt_speed_kbps = AppSettings.dl_speed_kbps;
+        root.opt_connections = AppSettings.dl_connections;
+        root.opt_ua_mode = AppSettings.dl_ua_mode;
+        root.opt_ua_custom = AppSettings.dl_ua_custom;
+        root.opt_category = AppSettings.dl_category_folders;
     }
     // The name arrives once the link has been checked; take it unless the
     // user already typed one.
@@ -181,7 +200,10 @@ export component LinkPreviewSheet inherits Rectangle {
     private property <bool> book_small_images: false;
     private property <int> book_chapters: root.link.book_chapters;
     changed book_chapters => { root.reset_book(); }
-    init => { root.reset_book(); }
+    init => {
+        root.reset_book();
+        root.reset_options();
+    }
     function reset_book() {
         root.book_from = "1";
         root.book_to = root.link.book_chapters > 0 ? "" + root.link.book_chapters : "";
@@ -511,6 +533,46 @@ export component LinkPreviewSheet inherits Rectangle {
                     }
                 }
 
+                // This download's speed, connections, user agent, folder.
+                Rectangle {
+                    height: 40px;
+                    border-radius: 8px;
+                    background: ta_options.pressed ? ThemeSettings.text_color.transparentize(92%) : transparent;
+                    ta_options := TouchArea {
+                        clicked => { root.options_open = !root.options_open; }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        SectionLabel {
+                            text: @tr("Download options");
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: (root.opt_speed_kbps > 0 ? Math.round(root.opt_speed_kbps / 102.4) / 10 + " MB/s · " : "")
+                                + @tr("{n} connection" | "{n} connections" % root.opt_connections);
+                            font-size: 12px;
+                            color: ThemeSettings.text_color.transparentize(35%);
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: root.options_open ? "▲" : "▼";
+                            font-size: 12px;
+                            color: ThemeSettings.text_color.transparentize(35%);
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                if root.options_open: DownloadOptionsEditor {
+                    compact: true;
+                    speed_kbps <=> root.opt_speed_kbps;
+                    connections <=> root.opt_connections;
+                    ua_mode <=> root.opt_ua_mode;
+                    ua_custom <=> root.opt_ua_custom;
+                    category <=> root.opt_category;
+                }
+
                 SectionLabel { text: @tr("Save to"); }
 
                 // Tap to pick a different folder for just this download.
@@ -591,7 +653,14 @@ export component LinkPreviewSheet inherits Rectangle {
                                 ? "audio|" + (root.qualities.length > 0 ? root.qualities[Math.min(root.format_index, root.qualities.length - 1)].selector : "0")
                                     + "|" + (root.codec_index == 1 ? "mp3" : "m4a")
                                 : root.show_formats ? root.qualities[Math.min(root.format_index, root.qualities.length - 1)].selector : "",
-                            root.torrent_file_direct && !root.filename_text.is-empty ? root.filename_text + ".torrent" : root.filename_text);
+                            root.torrent_file_direct && !root.filename_text.is-empty ? root.filename_text + ".torrent" : root.filename_text,
+                            {
+                                speed_kbps: root.opt_speed_kbps,
+                                connections: root.opt_connections,
+                                ua_mode: root.opt_ua_mode,
+                                ua_custom: root.opt_ua_custom,
+                                category: root.opt_category,
+                            });
                     }
                 }
             }

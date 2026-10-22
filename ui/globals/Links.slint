@@ -29,6 +29,16 @@ export struct TorrentFile {
     selected: bool,
 }
 
+// How one download goes about it (the preview's options; Settings →
+// Downloads → Downloading by default).
+export struct LinkOptions {
+    speed_kbps: int, // 0 = no limit
+    connections: int, // 1–16
+    ua_mode: int, // 0 = a browser's, 1 = aria2's, 2 = ua_custom
+    ua_custom: string,
+    category: bool, // into a Video / Music / Documents… folder
+}
+
 // A link found in the Add links text, waiting for the user to look at it.
 // The Rust side fills in the details as it checks the link.
 export struct PendingLink {
@@ -110,7 +120,7 @@ export global Links {
     callback process_text(string);
     // Download a pending link (and drop it from `pending`). `format` is a
     // LinkFormat selector for yt-dlp, otherwise "".
-    callback start(id: int, backend: LinkBackend, format: string, filename: string);
+    callback start(id: int, backend: LinkBackend, format: string, filename: string, options: LinkOptions);
     // Drop a pending link without downloading it.
     callback skip(id: int);
     // Pick a different folder for one link (it starts out with the usual one).

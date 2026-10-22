@@ -1,0 +1,118 @@
+import { LineEdit } from "std-widgets.slint";
+import { ThemeSettings } from "../themes/theme.slint";
+import { Chip, SectionLabel } from "Chips.slint";
+import { SwitchRow } from "SwitchRow.slint";
+
+// How a download goes about it: speed limit, connections, user agent,
+// category folders. Settings → Downloads edits the defaults with it; the
+// preview edits one download's (`compact`).
+export component DownloadOptionsEditor inherits VerticalLayout {
+    in property <bool> compact: false;
+    in property <color> text_color: ThemeSettings.text_color;
+    in-out property <int> speed_kbps; // 0 = no limit
+    in-out property <int> connections; // 1–16
+    in-out property <int> ua_mode; // 0 browser, 1 aria2, 2 custom
+    in-out property <string> ua_custom;
+    in-out property <bool> category;
+    // Something was changed (settings save it).
+    callback changed();
+
+    // The limit in MB/s as typed; "" for none.
+    private property <string> speed_text: root.speed_kbps > 0 ? "" + Math.round(root.speed_kbps / 102.4) / 10 : "";
+    private property <length> label_size: root.compact ? 12px : 13px;
+
+    spacing: root.compact ? 8px : 10px;
+
+    SectionLabel { text: @tr("Speed limit"); }
+    HorizontalLayout {
+        spacing: 8px;
+        LineEdit {
+            text: root.speed_text;
+            input-type: InputType.decimal;
+            placeholder-text: @tr("No limit");
+            horizontal-stretch: 1;
+            font-size: 14px;
+            edited(text) => {
+                root.speed_kbps = Math.max(0, Math.round(text.to-float() * 1024));
+                root.changed();
+            }
+        }
+        Text {
+            text: "MB/s";
+            font-size: 14px;
+            color: root.text_color.transparentize(35%);
+            vertical-alignment: center;
+        }
+    }
+
+    SectionLabel { text: @tr("Connections per download"); }
+    HorizontalLayout {
+        spacing: 8px;
+        for n in [1, 2, 4, 8, 16]: Chip {
+            text: n;
+            selected: root.connections == n;
+            clicked => {
+                root.connections = n;
+                root.changed();
+            }
+        }
+    }
+    Text {
+        text: @tr("More can be faster; some servers refuse more than one or two.");
+        font-size: root.label_size;
+        color: root.text_color.transparentize(40%);
+        wrap: word-wrap;
+    }
+
+    SectionLabel { text: @tr("User agent"); }
+    HorizontalLayout {
+        spacing: 8px;
+        Chip {
+            text: @tr("Browser");
+            selected: root.ua_mode == 0;
+            clicked => {
+                root.ua_mode = 0;
+                root.changed();
+            }
+        }
+        Chip {
+            text: "aria2";
+            selected: root.ua_mode == 1;
+            clicked => {
+                root.ua_mode = 1;
+                root.changed();
+            }
+        }
+        Chip {
+            text: @tr("Custom");
+            selected: root.ua_mode == 2;
+            clicked => {
+                root.ua_mode = 2;
+                root.changed();
+            }
+        }
+    }
+    if root.ua_mode == 2: LineEdit {
+        text <=> root.ua_custom;
+        placeholder-text: "Mozilla/5.0 (…)";
+        font-size: 14px;
+        input-method-hints: { capitalization: CapitalizationMode.none, auto-correct: false, auto-complete: false };
+        edited => { root.changed(); }
+    }
+    Text {
+        text: @tr("What downloads say they are. Some sites only serve browsers; yt-dlp keeps its own unless it's Custom.");
+        font-size: root.label_size;
+        color: root.text_color.transparentize(40%);
+        wrap: word-wrap;
+    }
+
+    SwitchRow {
+        compact: root.compact;
+        flush: true;
+        title: @tr("Category folders");
+        subtitle: @tr("Into Video, Music, Pictures, Documents… folders inside the save folder.");
+        text_color: root.text_color;
+        checked <=> root.category;
+        toggled => { root.changed(); }
+    }
+}

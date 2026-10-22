@@ -161,6 +161,7 @@ fn run_share_popup() {
         }
     };
     preferences::load_theme(&ui);
+    preferences::apply_download_defaults(&ui.global::<AppSettings>());
     ui.set_mode(mode);
     links::install(&ui);
 

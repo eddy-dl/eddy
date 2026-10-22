@@ -62,6 +62,37 @@ pub struct DownloadRequest {
     /// Where to save: a folder picked for this download (Android tree URI or
     /// desktop path), or "" for the usual one. See storage::resolve.
     pub folder: String,
+    /// Speed, connections, user agent and category folder (Settings →
+    /// Downloads, or the preview's options for this one).
+    pub settings: DownloadSettings,
+}
+
+/// How a download goes about it. Each backend uses what it can: aria2 all
+/// of it; yt-dlp the speed, fragments at once and user agent; the native
+/// extractors the speed (their sites need their own user agents); books
+/// none of it but the folder.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct DownloadSettings {
+    /// Bytes per second; 0 for no limit.
+    pub max_speed: u64,
+    /// Connections at once (1–16); 0 for the usual 16.
+    pub connections: u16,
+    /// "" for a browser's (Eddy's usual one).
+    pub user_agent: String,
+    /// A folder inside the save folder for the file's category ("Video"…);
+    /// "" for none.
+    pub subfolder: String,
+}
+
+impl DownloadSettings {
+    pub fn connections(&self) -> u16 {
+        if self.connections == 0 { 16 } else { self.connections.clamp(1, 16) }
+    }
+
+    pub fn user_agent(&self) -> &str {
+        if self.user_agent.trim().is_empty() { crate::extractors::http::UA_DESKTOP } else { self.user_agent.trim() }
+    }
 }
 
 /// The runtime background work runs on: the aria2 engine and link checks.
@@ -230,7 +261,17 @@ pub fn start(request: &DownloadRequest) -> Result<(), String> {
         }
         crate::storage::SaveTarget::Dir(_) => None,
     };
-    let dir = target.write_dir().to_string_lossy().into_owned();
+    // The category's folder, inside whichever folder it's saved to (a
+    // picked folder gets the staging copy's folders too).
+    let subfolder = crate::novels::clean::safe_file_name(&request.settings.subfolder);
+    let dir = if request.settings.subfolder.trim().is_empty() {
+        target.write_dir().to_path_buf()
+    } else {
+        let dir = target.write_dir().join(subfolder);
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        dir
+    };
+    let dir = dir.to_string_lossy().into_owned();
     log::info!("starting {:?} download of {} into {dir} ({target:?})", request.backend, request.url);
     let label = label_for(request);
     let watch = |gid: String| {
@@ -246,16 +287,16 @@ pub fn start(request: &DownloadRequest) -> Result<(), String> {
         Backend::Torrent if !request.url.contains(':') || request.url.starts_with('/') => {
             // A saved .torrent file.
             let torrent = std::fs::read(&request.url).map_err(|e| e.to_string())?;
-            watch(engine().start_torrent(torrent, &dir, select)?);
+            watch(engine().start_torrent(torrent, &dir, select, &request.settings)?);
         }
         // A magnet, or a .torrent link aria2 fetches and then follows: the
         // files take their names from the torrent.
         Backend::Torrent => {
-            watch(engine().start_download(&request.url, &dir, None, select)?);
+            watch(engine().start_download(&request.url, &dir, None, select, &request.settings)?);
         }
         // Direct on a .torrent link saves the .torrent file itself.
         Backend::Direct => {
-            watch(engine().start_download(&request.url, &dir, name.as_deref(), None)?);
+            watch(engine().start_download(&request.url, &dir, name.as_deref(), None, &request.settings)?);
         }
         Backend::Media => media::start(request, &dir, name, deliver.clone())?,
         Backend::Book => book::start(request, &dir, name, deliver.clone())?,

@@ -7,6 +7,8 @@ export component SwitchRow inherits Rectangle {
     in property <string> title;
     in property <string> subtitle;
     in property <bool> compact: false;
+    // No inset at the sides: for rows inside an already padded layout.
+    in property <bool> flush: false;
     in property <bool> enabled: true;
     in property <color> text_color: ThemeSettings.text_color;
     in-out property <bool> checked;
@@ -26,6 +28,8 @@ export component SwitchRow inherits Rectangle {
 
     HorizontalLayout {
         padding: root.compact ? 4px : 8px;
+        padding-left: root.flush ? 0px : self.padding;
+        padding-right: root.flush ? 0px : self.padding;
         spacing: 16px;
 
         VerticalLayout {

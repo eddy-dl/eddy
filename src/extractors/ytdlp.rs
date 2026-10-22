@@ -237,7 +237,13 @@ pub const SAVED_PREFIX: &str = "eddyfile:";
 
 /// The arguments for downloading `request` into `dir` (the URL or saved
 /// info last). `name` names a single item's file (no extension).
-pub fn download_args(url: &str, request: &MediaRequest, dir: &str, name: Option<&str>) -> Vec<String> {
+pub fn download_args(
+    url: &str,
+    request: &MediaRequest,
+    dir: &str,
+    name: Option<&str>,
+    settings: &crate::downloader::DownloadSettings,
+) -> Vec<String> {
     // --print makes yt-dlp quiet; --progress keeps the progress lines.
     let saved = format!("after_move:{SAVED_PREFIX}%(filepath)s");
     let mut args: Vec<String> =
@@ -245,6 +251,14 @@ pub fn download_args(url: &str, request: &MediaRequest, dir: &str, name: Option<
             .iter()
             .map(|s| s.to_string())
             .collect();
+    // Speed limit, fragments at once (HLS/DASH), user agent.
+    if settings.max_speed > 0 {
+        args.extend(["--limit-rate".to_string(), settings.max_speed.to_string()]);
+    }
+    args.extend(["--concurrent-fragments".to_string(), settings.connections().min(8).to_string()]);
+    if !settings.user_agent.trim().is_empty() {
+        args.extend(["--user-agent".to_string(), settings.user_agent.trim().to_string()]);
+    }
     let several = request.items.len() > 1;
     let template = match name {
         Some(name) if !several => format!("{dir}/{name}.%(ext)s"),
