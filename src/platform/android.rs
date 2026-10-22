@@ -503,7 +503,8 @@ pub extern "system" fn Java_dev_pah_eddy_EddyNative_takeFinished<'caller>(
     _class: JClass<'caller>,
 ) -> JString<'caller> {
     let clean = |s: &str| s.replace(['\t', '\n'], " ");
-    let text: Vec<String> = crate::downloader::take_finished()
+    let finished = crate::downloader::take_finished();
+    let text: Vec<String> = finished
         .iter()
         .map(|f| {
             let (staging, tree) = match &f.deliver {
@@ -514,9 +515,15 @@ pub extern "system" fn Java_dev_pah_eddy_EddyNative_takeFinished<'caller>(
         })
         .collect();
     let text = text.join("\n");
-    unowned_env
+    let text = unowned_env
         .with_env(|env| -> jni::errors::Result<_> { env.new_string(text) })
-        .resolve::<LogErrorAndDefault>()
+        .resolve::<LogErrorAndDefault>();
+    // Kotlin gets null then (and skips this round); the results wait for
+    // the next one rather than being lost.
+    if text.is_null() {
+        crate::downloader::return_finished(finished);
+    }
+    text
 }
 
 /// How many downloads are still going, so the service knows when to stop.

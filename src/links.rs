@@ -608,7 +608,17 @@ pub async fn pick_backend(url: &str) -> (Backend, String) {
     }
 }
 
+/// One link is checked at a time: sites (and yt-dlp) turn away a burst of
+/// requests, which made most of a batch of shared links fail. The others
+/// wait their turn, in the order they were added.
+static PROBING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 async fn probe(url: &str) -> Result<Probe, String> {
+    let _turn = PROBING.lock().await;
+    probe_now(url).await
+}
+
+async fn probe_now(url: &str) -> Result<Probe, String> {
     if is_magnet(url) {
         // aria2 fetches the torrent's metadata from peers, which can take up
         // to a minute.

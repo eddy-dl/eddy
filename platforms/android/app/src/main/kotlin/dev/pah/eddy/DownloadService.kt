@@ -163,7 +163,10 @@ class DownloadService : Service() {
 
     // (active downloads, first one's name, progress in thousandths or -1)
     private fun status(): Triple<Int, String, Int> {
-        val parts = EddyNative.status().split('\t')
+        val parts = EddyNative.status()?.split('\t')
+            // Rust couldn't say (it logs why): keep the count right at least,
+            // so the service doesn't stop under a running download.
+            ?: return Triple(EddyNative.activeDownloads(), "", -1)
         return Triple(
             parts.getOrNull(0)?.toIntOrNull() ?: 0,
             parts.getOrNull(1) ?: "",
@@ -201,7 +204,8 @@ class DownloadService : Service() {
 
     // One notification per download that finished or failed since last time.
     private fun postResults() {
-        for (line in EddyNative.takeFinished().split('\n')) {
+        val finished = EddyNative.takeFinished() ?: return
+        for (line in finished.split('\n')) {
             val parts = line.split('\t')
             if (parts.size < 2) continue
             val ok = parts[0] == "1"

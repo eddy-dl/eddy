@@ -31,13 +31,16 @@ object EddyNative {
     @JvmStatic external fun activeDownloads(): Int
 
     // For the notification: "count\tfirst name\tprogress" (progress in
-    // thousandths, -1 when unknown).
-    @JvmStatic external fun status(): String
+    // thousandths, -1 when unknown). Null if Rust couldn't make the string
+    // (it logs why).
+    @JvmStatic external fun status(): String?
 
     // Downloads that ended since the last call, one per line:
     // "1 or 0 (succeeded)\tname\tmessage\tstaging folder\tpicked folder's tree URI"
     // (the last two set when the files still need copying into that folder).
-    @JvmStatic external fun takeFinished(): String
+    // Null if Rust couldn't make the string (it logs why, and keeps them for
+    // the next call).
+    @JvmStatic external fun takeFinished(): String?
 
     // Saves shared text, or a shared file's links, as pending. Returns how
     // many links were added.

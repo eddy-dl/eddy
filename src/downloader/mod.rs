@@ -178,6 +178,14 @@ pub fn take_finished() -> Vec<Finished> {
     std::mem::take(&mut *FINISHED.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
+/// Puts results back for the next take_finished (they couldn't be handed
+/// over this time).
+pub fn return_finished(mut results: Vec<Finished>) {
+    let mut finished = FINISHED.lock().unwrap_or_else(|e| e.into_inner());
+    results.append(&mut finished);
+    *finished = results;
+}
+
 /// What's downloading right now, for the notification: how many, the first
 /// one's name, and overall progress (0..1, or None when sizes are unknown).
 pub fn summary() -> (usize, String, Option<f64>) {
