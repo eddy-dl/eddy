@@ -231,13 +231,20 @@ fn parse_entry(index: usize, entry: &Value, url: &str) -> MediaItem {
 pub const PROGRESS_TEMPLATE: &str =
     "download:eddy %(progress.downloaded_bytes)s %(progress.total_bytes)s %(progress.total_bytes_estimate)s";
 
+/// Printed once per file yt-dlp saved, with its final path (after merging
+/// or converting), so the notification can name the file it made.
+pub const SAVED_PREFIX: &str = "eddyfile:";
+
 /// The arguments for downloading `request` into `dir` (the URL or saved
 /// info last). `name` names a single item's file (no extension).
 pub fn download_args(url: &str, request: &MediaRequest, dir: &str, name: Option<&str>) -> Vec<String> {
-    let mut args: Vec<String> = ["--newline", "--no-warnings", "--progress-template", PROGRESS_TEMPLATE]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+    // --print makes yt-dlp quiet; --progress keeps the progress lines.
+    let saved = format!("after_move:{SAVED_PREFIX}%(filepath)s");
+    let mut args: Vec<String> =
+        ["--newline", "--no-warnings", "--progress", "--progress-template", PROGRESS_TEMPLATE, "--print", &saved]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
     let several = request.items.len() > 1;
     let template = match name {
         Some(name) if !several => format!("{dir}/{name}.%(ext)s"),

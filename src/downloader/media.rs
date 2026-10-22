@@ -69,7 +69,7 @@ pub fn start(request: &DownloadRequest, dir: &str, name: Option<String>, deliver
                 let result = download_native(job, native, &url, &media, &dir, name.as_deref()).await;
                 end(job);
                 match result {
-                    Ok(()) => finished(label, true, String::new(), deliver),
+                    Ok(files) => finished(saved_name(&files, label), true, String::new(), deliver),
                     Err(e) => finished(label, false, e, None),
                 }
             });
@@ -99,9 +99,12 @@ fn start_ytdlp(
     let job = begin(&label);
     let stdout = child.stdout.take();
     std::thread::spawn(move || {
+        let mut files = Vec::new();
         if let Some(stdout) = stdout {
             for line in std::io::BufReader::new(stdout).lines().map_while(Result::ok) {
-                if let Some((done, total)) = extractors::ytdlp::parse_progress(&line) {
+                if let Some(path) = line.strip_prefix(extractors::ytdlp::SAVED_PREFIX) {
+                    files.push(PathBuf::from(path.trim()));
+                } else if let Some((done, total)) = extractors::ytdlp::parse_progress(&line) {
                     progress(job, done, total);
                 }
             }
@@ -109,7 +112,7 @@ fn start_ytdlp(
         let result = child.wait_with_output();
         end(job);
         match result {
-            Ok(output) if output.status.success() => finished(label, true, String::new(), deliver),
+            Ok(output) if output.status.success() => finished(saved_name(&files, label), true, String::new(), deliver),
             Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 let last = stderr.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("yt-dlp failed");
@@ -119,6 +122,15 @@ fn start_ytdlp(
         }
     });
     Ok(())
+}
+
+/// What the notification calls a finished download: the file's name, with
+/// its extension, when it made one file; otherwise the download's label.
+fn saved_name(files: &[PathBuf], label: String) -> String {
+    match files {
+        [file] => file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(label),
+        _ => label,
+    }
 }
 
 /// A file name that's safe on every filesystem.
@@ -138,12 +150,13 @@ async fn download_native(
     media: &MediaRequest,
     dir: &Path,
     name: Option<&str>,
-) -> Result<(), String> {
+) -> Result<Vec<PathBuf>, String> {
     let fetches = extractors::resolve(service, url, media).await?;
     if fetches.is_empty() {
         return Err("Nothing to download".to_string());
     }
     let several = fetches.len() > 1;
+    let mut files = Vec::new();
     for fetch in &fetches {
         let base = match (name, several) {
             (Some(name), false) => safe_name(name),
@@ -164,10 +177,12 @@ async fn download_native(
             save(job, fetch, &path).await?;
         }
         if !media.audio_codec.is_empty() && fetch.kind != extractors::MediaKind::Image {
-            to_audio(&path, &media.audio_codec, media.audio_kbps).await?;
+            files.push(to_audio(&path, &media.audio_codec, media.audio_kbps).await?);
+        } else {
+            files.push(path);
         }
     }
-    Ok(())
+    Ok(files)
 }
 
 /// Streams a file to `path`, reporting progress.
@@ -226,7 +241,8 @@ async fn save_hls(fetch: &Fetch, path: &Path) -> Result<(), String> {
 }
 
 /// Replaces a downloaded video with its audio, as mp3 or m4a.
-async fn to_audio(path: &Path, codec: &str, kbps: u32) -> Result<(), String> {
+/// Returns the audio file's path.
+async fn to_audio(path: &Path, codec: &str, kbps: u32) -> Result<PathBuf, String> {
     let (encoder, ext) = match codec {
         "mp3" => ("libmp3lame", "mp3"),
         _ => ("aac", "m4a"),
@@ -245,5 +261,5 @@ async fn to_audio(path: &Path, codec: &str, kbps: u32) -> Result<(), String> {
     if out != target {
         tokio::fs::rename(&out, &target).await.map_err(|e| e.to_string())?;
     }
-    Ok(())
+    Ok(target)
 }
