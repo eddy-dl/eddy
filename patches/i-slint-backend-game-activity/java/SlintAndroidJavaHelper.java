@@ -200,6 +200,41 @@ class SlintInputView extends View {
                 }
                 return super.endBatchEdit();
             }
+
+            // eddy patch: a selection-only change (Gboard's |< and >|, its
+            // selection keys) doesn't go through replace(), so Slint never
+            // heard of it.
+            @Override
+            public boolean setSelection(int start, int end) {
+                boolean result = super.setSelection(start, end);
+                if (mInBatch == 0) {
+                    mEditable.update();
+                } else {
+                    mPending = true;
+                }
+                return result;
+            }
+
+            // eddy patch: the keyboard's cut / copy / paste / select all,
+            // through the same actions as the selection menu (its ids are
+            // the ones popupMenuAction expects).
+            @Override
+            public boolean performContextMenuAction(int id) {
+                int action;
+                if (id == android.R.id.cut) {
+                    action = 0;
+                } else if (id == android.R.id.copy) {
+                    action = 1;
+                } else if (id == android.R.id.paste) {
+                    action = 2;
+                } else if (id == android.R.id.selectAll) {
+                    action = 3;
+                } else {
+                    return super.performContextMenuAction(id);
+                }
+                SlintAndroidJavaHelper.popupMenuAction(action);
+                return true;
+            }
         };
     }
 

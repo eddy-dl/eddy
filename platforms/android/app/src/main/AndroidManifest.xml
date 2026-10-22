@@ -93,6 +93,7 @@
             android:name=".SharePopupActivity"
             android:process=":popup"
             android:theme="@style/Theme.Eddy.Popup"
+            android:resizeableActivity="false"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard|smallestScreenSize|density|uiMode"
             android:windowSoftInputMode="stateHidden|adjustPan"
             android:excludeFromRecents="true"
