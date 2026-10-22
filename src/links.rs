@@ -633,6 +633,7 @@ fn apply_probe(id: i32, result: Result<Probe, String>) {
                 }
             }
             Err(error) => {
+                log::warn!("couldn't check {}: {error}", link.url);
                 link.state = ProbeState::Failed;
                 link.error = error.into();
             }

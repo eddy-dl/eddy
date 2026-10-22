@@ -5,6 +5,7 @@ use eddy::{AppSettings, ThemeSettings, links, platform, preferences};
 use slint::ComponentHandle;
 
 fn main() -> Result<(), slint::PlatformError> {
+    eddy::logs::init();
     if let Err(e) = eddy::db::init(platform::get_app_data_dir()) {
         eprintln!("Failed to initialize database: {e}");
     }

@@ -23,6 +23,10 @@ base64 = "0.21"
 dirs = "5.0"
 linkify = "0.11"
 log = "0.4"
+# aria2-core reports through tracing; its warnings and errors go to
+# logs/aria2.log (see logs.rs).
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }
 percent-encoding = "2"
 rand = "0.8"
 regex = "1"

@@ -240,6 +240,9 @@ pub fn take_finished() -> Vec<Finished> {
             }
             Some(p) if p.status == "error" || p.status == "removed" => {
                 let message = engine.error_message(&w.gid).unwrap_or_else(|| p.status.clone());
+                if p.status == "error" {
+                    log::error!(target: "aria2", "{}: {message}", w.label);
+                }
                 finished_by(w.id, Some(&Handle::Aria(w.gid.clone())), w.label.clone(), false, message, None, None);
                 false
             }
@@ -426,4 +429,38 @@ pub fn progress(handle: &Handle) -> Option<(crate::downloads::Live, u64, u64, f6
 pub fn active_count() -> usize {
     let aria = ENGINE.get().map(|e| e.active_count()).unwrap_or(0);
     aria + media::jobs().len() + CHOOSING.load(Ordering::SeqCst)
+}
+
+/// Downloads `url` to `dir/out` with aria2 (several connections, retries),
+/// for Eddy's own files: the yt-dlp packages, desktop's tools. Not a user
+/// download, so it's not in the lists. `on_progress(done, total)` gets
+/// called as it goes.
+pub async fn fetch_file(url: &str, dir: &std::path::Path, out: &str, on_progress: impl Fn(u64, u64)) -> Result<PathBuf, String> {
+    tokio::fs::create_dir_all(dir).await.map_err(|e| e.to_string())?;
+    // Written under another name until it's whole (aria2 may allocate the
+    // full size up front).
+    let partial = format!("{out}.part");
+    let _ = tokio::fs::remove_file(dir.join(&partial)).await;
+    let _ = tokio::fs::remove_file(dir.join(format!("{partial}.aria2"))).await;
+    let engine = engine();
+    let gid = engine.start_download(url, &dir.to_string_lossy(), Some(&partial), None, &DownloadSettings::default())?;
+    loop {
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        let Some(p) = engine.get_progress(&gid) else {
+            continue; // not picked up yet
+        };
+        on_progress(p.completed_length, p.total_length);
+        match p.status.as_str() {
+            "complete" => break,
+            "error" | "removed" => {
+                let message = engine.error_message(&gid).unwrap_or(p.status);
+                log::error!(target: "aria2", "couldn't download {url}: {message}");
+                return Err(message);
+            }
+            _ => {}
+        }
+    }
+    let path = dir.join(out);
+    tokio::fs::rename(dir.join(&partial), &path).await.map_err(|e| e.to_string())?;
+    Ok(path)
 }

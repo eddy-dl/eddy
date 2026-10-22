@@ -2056,6 +2056,8 @@ dependencies = [
  "system-theme",
  "tar",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
  "url",
  "webbrowser",
  "windows",

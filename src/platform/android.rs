@@ -50,12 +50,8 @@ fn init_backend() {
     static BACKEND: Once = Once::new();
     BACKEND.call_once(|| {
         // android_main sets this up too, but the download service and share
-        // target run without it; init_once ignores the second call.
-        android_logger::init_once(
-            android_logger::Config::default()
-                .with_max_level(log::LevelFilter::Info)
-                .with_tag("eddy"),
-        );
+        // target run without it; it's set up once either way.
+        crate::logs::init();
 
         // HTTPS certificate checks (reqwest in aria2-core and the link checks)
         // go through Android's own verifier, which needs the app context to

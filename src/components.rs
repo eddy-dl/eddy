@@ -255,7 +255,6 @@ fn download(key: String) {
 }
 
 async fn fetch_apk(key: &str, release: &Release) -> Result<PathBuf, String> {
-    use tokio::io::AsyncWriteExt;
     let dir = apk_dir();
     tokio::fs::create_dir_all(&dir).await.map_err(|e| e.to_string())?;
     // Older downloads of this package go.
@@ -268,31 +267,20 @@ async fn fetch_apk(key: &str, release: &Release) -> Result<PathBuf, String> {
     }
 
     let path = apk_path(key, release);
-    let partial = path.with_extension("part");
-    let mut response = crate::extractors::http::client()
-        .get(&release.url)
-        .send()
-        .await
-        .and_then(|r| r.error_for_status())
-        .map_err(|e| e.to_string())?;
-    let total = response.content_length().unwrap_or(release.size).max(1);
-    let mut file = tokio::fs::File::create(&partial).await.map_err(|e| e.to_string())?;
-    let (mut done, mut shown) = (0u64, 0u32);
-    while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
-        file.write_all(&chunk).await.map_err(|e| e.to_string())?;
-        done += chunk.len() as u64;
+    let out = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    // With aria2: several connections, and it retries.
+    let shown = std::sync::atomic::AtomicU32::new(0);
+    crate::downloader::fetch_file(&release.url, &dir, &out, |done, total| {
+        let total = if total > 0 { total } else { release.size.max(1) };
         // Redraw the row once per percent.
         let percent = (done * 100 / total) as u32;
-        if percent != shown {
-            shown = percent;
+        if shown.swap(percent, std::sync::atomic::Ordering::Relaxed) != percent {
             set_downloading(key, Some(done as f32 / total as f32));
             let _ = slint::invoke_from_event_loop(refresh);
         }
-    }
-    file.flush().await.map_err(|e| e.to_string())?;
-    drop(file);
-    tokio::fs::rename(&partial, &path).await.map_err(|e| e.to_string())?;
-    Ok(path)
+    })
+    .await
+    .map(|_| path)
 }
 
 /// Opens the installer for an already downloaded APK.

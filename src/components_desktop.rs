@@ -282,29 +282,17 @@ fn start_install(key: String) {
 
 /// Streams `url` into a temporary file next to `dir`, reporting progress.
 async fn download(key: &str, url: &str, size: u64, dir: &Path) -> Result<PathBuf, String> {
-    use tokio::io::AsyncWriteExt;
-    tokio::fs::create_dir_all(dir).await.map_err(|e| e.to_string())?;
-    let path = dir.join(format!(".download-{key}"));
-    let mut response = crate::extractors::http::client()
-        .get(url)
-        .send()
-        .await
-        .and_then(|r| r.error_for_status())
-        .map_err(|e| e.to_string())?;
-    let total = response.content_length().unwrap_or(size).max(1);
-    let mut file = tokio::fs::File::create(&path).await.map_err(|e| e.to_string())?;
-    let (mut done, mut shown) = (0u64, 0u64);
-    while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
-        file.write_all(&chunk).await.map_err(|e| e.to_string())?;
-        done += chunk.len() as u64;
-        if done * 100 / total != shown {
-            shown = done * 100 / total;
+    // With aria2: several connections, and it retries.
+    let shown = std::sync::atomic::AtomicU64::new(0);
+    crate::downloader::fetch_file(url, dir, &format!(".download-{key}"), |done, total| {
+        let total = if total > 0 { total } else { size.max(1) };
+        let percent = done * 100 / total;
+        if shown.swap(percent, std::sync::atomic::Ordering::Relaxed) != percent {
             with_state(|s| s.working.insert(key.to_string(), Some(done as f32 / total as f32)));
             redraw();
         }
-    }
-    file.flush().await.map_err(|e| e.to_string())?;
-    Ok(path)
+    })
+    .await
 }
 
 fn make_executable(path: &Path) {

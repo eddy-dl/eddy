@@ -182,6 +182,7 @@ fn start_ytdlp(
             }
             Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr);
+                log_stderr(&label, &stderr);
                 let last = stderr.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("yt-dlp failed");
                 finished(record, label, false, last.trim_start_matches("ERROR: ").to_string(), None, None);
             }
@@ -189,6 +190,13 @@ fn start_ytdlp(
         }
     });
     Ok(job)
+}
+
+/// The end of what a failed yt-dlp run printed, into logs/ytdlp.log.
+pub fn log_stderr(what: &str, stderr: &str) {
+    let lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
+    let tail = &lines[lines.len().saturating_sub(30)..];
+    log::error!(target: "ytdlp", "{what} failed:\n    {}", tail.join("\n    "));
 }
 
 /// What the notification calls a finished download: the file's name, with

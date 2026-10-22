@@ -33,7 +33,10 @@ pub fn start(request: &DownloadRequest, dir: &str, name: Option<String>, deliver
                 let file = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(label);
                 finished(record, file, true, String::new(), deliver, Some(path));
             }
-            Err(e) => finished(record, label, false, e, None, None),
+            Err(e) => {
+                log::error!(target: "books", "{url}: {e}");
+                finished(record, label, false, e, None, None)
+            }
         }
     });
     media::set_task(job, task.abort_handle());

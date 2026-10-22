@@ -82,6 +82,7 @@ pub async fn get_info(url: &str) -> Result<MediaInfo, String> {
     .map_err(|e| format!("Couldn't run yt-dlp: {e}"))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
+        crate::downloader::media::log_stderr(&format!("checking {url}"), &stderr);
         let last = stderr.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("yt-dlp failed");
         return Err(last.trim_start_matches("ERROR: ").to_string());
     }

@@ -11,6 +11,7 @@ pub mod downloads;
 pub mod extractors;
 pub mod folders;
 pub mod links;
+pub mod logs;
 pub mod novels;
 pub mod platform;
 pub mod preferences;
@@ -29,14 +30,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 fn android_main(app: AndroidApp) {
-    use android_logger::Config;
-    use log::LevelFilter;
-
-    android_logger::init_once(
-        Config::default()
-            .with_max_level(LevelFilter::Info)
-            .with_tag("eddy"),
-    );
+    logs::init();
 
     log::info!("Starting Slint App on Android");
     platform::init(app.clone());
