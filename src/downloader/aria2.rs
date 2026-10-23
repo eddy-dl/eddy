@@ -471,6 +471,10 @@ fn apply(options: &mut DownloadOptions, settings: &super::DownloadSettings) {
     // aria2's own unless one was picked: some servers drop requests that
     // claim to be a browser.
     options.user_agent = settings.user_agent().map(str::to_string);
+    // A file already there: aria2 gives the new one a free name ("name.1"),
+    // or replaces it.
+    options.allow_overwrite = settings.replace_existing;
+    options.auto_file_renaming = !settings.replace_existing;
     // A moment between retries (aria2's default is none): a phone's network
     // drops out for seconds, and instant retries use them all up at once.
     options.retry_wait = 2;

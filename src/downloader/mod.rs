@@ -95,6 +95,24 @@ pub struct DownloadSettings {
     /// A folder inside the save folder for the file's category ("Video"…);
     /// "" for none.
     pub subfolder: String,
+    /// A file (or folder) of the same name already there: replaced, rather
+    /// than the new one getting a free name (Settings → Downloading).
+    pub replace_existing: bool,
+}
+
+/// `path`, or if something's there already, the first free "name (n).ext"
+/// ("name (n)" for a folder) beside it.
+pub fn free_path(path: &std::path::Path) -> PathBuf {
+    if !path.exists() {
+        return path.to_path_buf();
+    }
+    let stem = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+    let ext = path.extension().filter(|_| !path.is_dir()).map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    let (stem, ext) = if ext.is_empty() { (path.file_name().unwrap_or_default().to_string_lossy().into_owned(), ext) } else { (stem, ext) };
+    (1..)
+        .map(|n| path.with_file_name(format!("{stem} ({n}){ext}")))
+        .find(|p| !p.exists())
+        .unwrap_or_else(|| path.to_path_buf())
 }
 
 impl DownloadSettings {

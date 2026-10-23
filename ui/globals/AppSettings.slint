@@ -65,6 +65,8 @@ export global AppSettings {
     in-out property <int> dl_ua_mode: 0;
     in-out property <string> dl_ua_custom: "";
     in-out property <bool> dl_category_folders: false;
+    // A file already there: replace it (else the new one gets a free name).
+    in-out property <bool> dl_replace_existing: false;
     // How many downloads run at once, 0 for no limit; the rest are queued.
     // Not a per-download option.
     in-out property <int> dl_max_concurrent: 3;

@@ -22,6 +22,7 @@ const DL_CONNECTIONS_KEY: &str = "download_connections";
 const DL_UA_MODE_KEY: &str = "download_user_agent_mode";
 const DL_UA_CUSTOM_KEY: &str = "download_user_agent_custom";
 const DL_CATEGORY_KEY: &str = "download_category_folders";
+const DL_REPLACE_KEY: &str = "download_replace_existing";
 // How many downloads run at once (0: no limit); the rest wait their turn.
 const DL_MAX_CONCURRENT_KEY: &str = "download_max_concurrent";
 pub const DEFAULT_MAX_CONCURRENT: i32 = 3;
@@ -195,9 +196,16 @@ pub fn apply_download_defaults(settings: &AppSettings) {
     settings.set_dl_ua_mode(number(DL_UA_MODE_KEY, 0));
     settings.set_dl_ua_custom(platform::get_pref(DL_UA_CUSTOM_KEY, "").unwrap_or_default().into());
     settings.set_dl_category_folders(platform::get_pref(DL_CATEGORY_KEY, "false").ok().is_some_and(|v| v == "true"));
+    settings.set_dl_replace_existing(replace_existing());
     let max = number(DL_MAX_CONCURRENT_KEY, DEFAULT_MAX_CONCURRENT).max(0);
     settings.set_dl_max_concurrent(max);
     crate::downloads::set_max_concurrent(max as usize);
+}
+
+/// Settings → Downloading → If a file already exists: Replace (else Keep
+/// both). Read as each download starts.
+pub fn replace_existing() -> bool {
+    platform::get_pref(DL_REPLACE_KEY, "false").ok().is_some_and(|v| v == "true")
 }
 
 /// The Downloading defaults as a link's options ("Download now", Auto).
@@ -286,6 +294,7 @@ pub fn save_preferences(ui_weak: slint::Weak<DownloaderApp>) {
             (DL_UA_MODE_KEY, app_settings.get_dl_ua_mode().to_string()),
             (DL_UA_CUSTOM_KEY, app_settings.get_dl_ua_custom().to_string()),
             (DL_CATEGORY_KEY, app_settings.get_dl_category_folders().to_string()),
+            (DL_REPLACE_KEY, app_settings.get_dl_replace_existing().to_string()),
             (DL_MAX_CONCURRENT_KEY, app_settings.get_dl_max_concurrent().max(0).to_string()),
         ] {
             if let Err(e) = platform::save_pref(key, &value) {

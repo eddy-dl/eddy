@@ -752,3 +752,21 @@ msgstr "Partager les liens"
 
 msgid "Folders"
 msgstr "Dossiers"
+
+msgid "If a file already exists"
+msgstr "Si un fichier existe déjà"
+
+msgid "Keep both"
+msgstr "Garder les deux"
+
+msgid "Replace"
+msgstr "Remplacer"
+
+msgid "The old one is replaced by the new download."
+msgstr "L'ancien est remplacé par le nouveau téléchargement."
+
+msgid "The new one gets a number: \"name (1)\"."
+msgstr "Le nouveau reçoit un numéro : « nom (1) »."
+
+msgid "Other"
+msgstr "Autres"

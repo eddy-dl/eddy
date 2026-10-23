@@ -64,6 +64,34 @@ export component DownloadingSettings inherits Rectangle {
                 text_color: root.text_color;
             }
 
+            SectionLabel { text: @tr("If a file already exists"); }
+            HorizontalLayout {
+                spacing: 8px;
+                Chip {
+                    text: @tr("Keep both");
+                    selected: !AppSettings.dl_replace_existing;
+                    clicked => {
+                        AppSettings.dl_replace_existing = false;
+                        AppSettings.preferences_changed();
+                    }
+                }
+                Chip {
+                    text: @tr("Replace");
+                    selected: AppSettings.dl_replace_existing;
+                    clicked => {
+                        AppSettings.dl_replace_existing = true;
+                        AppSettings.preferences_changed();
+                    }
+                }
+            }
+            Note {
+                text: AppSettings.dl_replace_existing
+                    ? @tr("The old one is replaced by the new download.")
+                    : @tr("The new one gets a number: \"name (1)\".");
+                font_size: 13px;
+                text_color: root.text_color;
+            }
+
             DownloadOptionsEditor {
                 text_color: root.text_color;
                 speed_kbps <=> AppSettings.dl_speed_kbps;

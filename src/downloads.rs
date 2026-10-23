@@ -389,7 +389,8 @@ pub fn ended(id: i64, handle: Option<&Handle>, name: &str, ok: bool, message: &s
             let mut path = path.map(|p| top_item(&entry.saved, p));
             // Renamed while it downloaded.
             if let (Some(new_name), Some(old)) = (entry.saved.rename_to.take(), path.clone()) {
-                let new = renamed(&old, &new_name);
+                // A free name if that one's taken (rename(2) would replace it).
+                let new = downloader::free_path(&renamed(&old, &new_name));
                 if std::fs::rename(&old, &new).is_ok() {
                     entry.saved.name = new.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(new_name);
                     path = Some(new);
@@ -535,6 +536,18 @@ fn is_partial_suffix(rest: &str) -> bool {
     [".part", ".ytdl", ".temp", "-Frag"].iter().any(|p| rest.contains(p))
         || FORMAT_RE.is_match(rest)
         || matches!(rest, ".webp" | ".jpg" | ".png")
+}
+
+/// A multi-file download picked a free folder name (one of that name was
+/// there already): kept as its name, so resuming finds the same folder.
+pub fn set_folder_name(id: i64, name: &str) {
+    with_entries(|entries| {
+        if let Some(entry) = entries.iter_mut().find(|e| e.id == id) {
+            entry.saved.request.filename = name.to_string();
+            entry.saved.name = name.to_string();
+            save(entry);
+        }
+    });
 }
 
 /// A finished download's copy in its picked folder (Android: a document
@@ -812,6 +825,11 @@ fn rename(id: i64, name: &str) {
         };
         let old = std::path::PathBuf::from(&path);
         let new = renamed(&old, &name);
+        // rename(2) would quietly replace it.
+        if new != old && new.exists() {
+            crate::platform::show_toast("There's already a file with that name there");
+            return;
+        }
         match std::fs::rename(&old, &new) {
             Ok(()) => {
                 entry.saved.name = new.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(name);
@@ -858,6 +876,7 @@ fn change_options(id: i64, options: &crate::LinkOptions) {
                 true if book => "Books".to_string(),
                 true => crate::links::category_folder(file_type(entry.saved.file_type)).to_string(),
             },
+            replace_existing: entry.saved.request.settings.replace_existing,
         };
         if entry.saved.move_to.is_none() {
             entry.saved.folder = folder_display(&entry.saved.request);
@@ -993,8 +1012,9 @@ pub fn name_torrent_folder(id: i64, path: Option<std::path::PathBuf>, deliver: O
     if !top.is_dir() || inside.as_os_str().is_empty() || top.file_name().is_some_and(|n| n == name.as_str()) {
         return Some(path);
     }
-    let renamed = dir.join(&name);
-    if renamed.exists() || std::fs::rename(&top, &renamed).is_err() {
+    // A folder of that name there already: the first free "name (n)".
+    let renamed = downloader::free_path(&dir.join(&name));
+    if std::fs::rename(&top, &renamed).is_err() {
         log::warn!("couldn't rename {} to {name}", top.display());
         return Some(path);
     }
@@ -1303,6 +1323,7 @@ fn save_list_options(tab: i32, options: &TabListOptions) {
         FileFilter::Document => 4,
         FileFilter::Archive => 5,
         FileFilter::Folder => 6,
+        FileFilter::Other => 7,
         _ => 0,
     };
     let value = format!("{sort},{},{filter}", options.ascending as u8);
@@ -1332,6 +1353,7 @@ fn load_list_options(tab: i32) -> Option<TabListOptions> {
             4 => FileFilter::Document,
             5 => FileFilter::Archive,
             6 => FileFilter::Folder,
+            7 => FileFilter::Other,
             _ => FileFilter::All,
         },
     })
@@ -1347,6 +1369,8 @@ fn matches_filter(item: &DownloadItem, filter: FileFilter) -> bool {
         FileFilter::Archive => matches!(item.file_type, FileType::Archive | FileType::DiskImage),
         // A folder also shows under what's in it (a playlist under Video).
         FileFilter::Folder => item.is_folder,
+        // Not a folder, and none of the types above.
+        FileFilter::Other => !item.is_folder && matches!(item.file_type, FileType::Other | FileType::Program),
         _ => true,
     }
 }

@@ -1,4 +1,5 @@
 import { AppSettings } from "../../globals/AppSettings.slint";
+import { Note } from "../../components/Note.slint";
 import { ThemeSettings } from "../../themes/theme.slint";
 import { Wordmark } from "../../components/Wordmark.slint";
 import { SettingsCard, SettingsLayout } from "../SettingsCard.slint";
@@ -164,14 +165,14 @@ export component AboutSettings inherits Rectangle {
                 }
             }
 
-            VerticalLayout {
+            // With the "i" the app's other notes have.
+            HorizontalLayout {
                 padding-top: 12px;
-                Text {
+                alignment: center;
+                Note {
                     text: @tr("This app logo's font is Pacifico, under the SIL Open Font License.");
-                    font-size: 12px;
-                    color: root.text_color.transparentize(50%);
-                    horizontal-alignment: center;
-                    wrap: word-wrap;
+                    text_color: root.text_color;
+                    font_size: 12px;
                 }
             }
         }

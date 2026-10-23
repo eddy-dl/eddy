@@ -435,6 +435,7 @@ fn download_settings(options: &crate::LinkOptions, link: &PendingLink, audio: bo
             true if audio => category_folder(FileType::Audio).to_string(),
             true => category_folder(link.file_type).to_string(),
         },
+        replace_existing: crate::preferences::replace_existing(),
     }
 }
 

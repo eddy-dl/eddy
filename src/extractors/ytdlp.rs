@@ -452,6 +452,10 @@ fn run_args(
     if settings.max_speed > 0 {
         args.extend(["--limit-rate".to_string(), settings.max_speed.to_string()]);
     }
+    // Otherwise yt-dlp keeps a file it already has, and that's what's used.
+    if settings.replace_existing {
+        args.push("--force-overwrites".to_string());
+    }
     args.extend(["--concurrent-fragments".to_string(), settings.connections().min(8).to_string()]);
     let quality = if request.quality.is_empty() { "best" } else { request.quality.as_str() };
 

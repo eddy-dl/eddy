@@ -1,7 +1,8 @@
 export enum SortKey { DateAdded, Name, Size, Progress }
 
 // Folder: downloads saved as a folder of files (playlists, posts, torrents).
-export enum FileFilter { All, Video, Audio, Image, Document, Archive, Folder }
+// Other: files of no type Eddy knows (.bin and the like) and programs.
+export enum FileFilter { All, Video, Audio, Image, Document, Archive, Folder, Other }
 
 export struct TabListOptions {
     sort: SortKey,

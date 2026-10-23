@@ -190,7 +190,7 @@ pub fn start(request: &DownloadRequest, dir: &str, name: Option<String>, deliver
             let (url, dir) = (request.url.clone(), PathBuf::from(dir));
             let (settings, resume) = (request.settings.clone(), request.resume);
             let task = runtime().spawn(async move {
-                let result = download_native(job, native, &url, &media, &dir, name.as_deref(), &settings, resume).await;
+                let result = download_native(record, job, native, &url, &media, &dir, name.as_deref(), &settings, resume).await;
                 end(job);
                 if cancelled.load(Ordering::SeqCst) {
                     return;
@@ -335,7 +335,9 @@ fn safe_name(name: &str) -> String {
     cleaned.trim().chars().take(120).collect::<String>().trim().to_string()
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn download_native(
+    record: i64,
     job: u64,
     service: Service,
     url: &str,
@@ -358,6 +360,19 @@ async fn download_native(
         (false, _) => dir.to_path_buf(),
         (true, Some(name)) => dir.join(safe_name(name)),
         (true, None) => dir.join(caption.clone().unwrap_or_else(|| format!("{} post", service.label()))),
+    };
+    // A folder of that name already there (and not this download's own,
+    // being resumed): a free name for this one, unless replacing, and it's
+    // remembered so resuming finds it.
+    let in_use = |d: &Path| std::fs::read_dir(d).is_ok_and(|mut e| e.next().is_some());
+    let dir = if several && !resume && !settings.replace_existing && in_use(&dir) {
+        let free = super::free_path(&dir);
+        if let Some(folder) = free.file_name() {
+            crate::downloads::set_folder_name(record, &folder.to_string_lossy());
+        }
+        free
+    } else {
+        dir
     };
     if several {
         tokio::fs::create_dir_all(&dir).await.map_err(|e| format!("Couldn't make the folder: {e}"))?;
@@ -384,14 +399,18 @@ async fn download_native(
             files.push(finished);
             continue;
         }
-        if fetch.hls {
-            save_hls(job, fetch, &path).await?;
+        // Where it ends up: `path`, or with a clash a free name (or `path`
+        // replaced).
+        let saved = if fetch.hls {
+            let out = if resume || settings.replace_existing { path.clone() } else { super::free_path(&path) };
+            save_hls(job, fetch, &out).await?;
+            out
         } else {
             let mut fetch = fetch.clone();
             let mut refreshed = 0;
             loop {
                 match save(job, &fetch, &path, settings, resume || refreshed > 0).await {
-                    Ok(()) => break,
+                    Ok(saved) => break saved,
                     // Its link ran out (they're signed, and don't last):
                     // a fresh one, carrying on from what's saved.
                     Err(e) if refreshed < 2 && link_expired(&e) => {
@@ -403,13 +422,14 @@ async fn download_native(
                     Err(e) => return Err(e),
                 }
             }
-        }
+        };
+        wrote(job, &saved);
         if audio {
-            let audio = to_audio(job, &path, &media.audio_codec, media.audio_kbps).await?;
+            let audio = to_audio(job, &saved, &media.audio_codec, media.audio_kbps, settings.replace_existing).await?;
             wrote(job, &audio);
             files.push(audio);
         } else {
-            files.push(path);
+            files.push(saved);
         }
     }
     Ok(files)
@@ -423,11 +443,12 @@ fn part_path(path: &Path) -> PathBuf {
 }
 
 /// Downloads a file to `path` with aria2 (its connections, retries and
-/// speed limit from `settings`), through its .part, reporting progress.
+/// speed limit from `settings`), through its .part, reporting progress;
+/// returns where it ended up (see `settle`).
 /// A pause removes the aria2 download but keeps the .part and its .aria2,
 /// which `resume` carries on from, even from a fresh link. Otherwise any
 /// left from before are dropped first.
-async fn save(job: u64, fetch: &Fetch, path: &Path, settings: &super::DownloadSettings, resume: bool) -> Result<(), String> {
+async fn save(job: u64, fetch: &Fetch, path: &Path, settings: &super::DownloadSettings, resume: bool) -> Result<PathBuf, String> {
     let part = part_path(path);
     let control = part.with_file_name(format!("{}.aria2", part.file_name().unwrap_or_default().to_string_lossy()));
     if !resume {
@@ -457,7 +478,23 @@ async fn save(job: u64, fetch: &Fetch, path: &Path, settings: &super::DownloadSe
         let _ = tokio::fs::remove_file(&part).await;
         return Err("The site sent an empty file".to_string());
     }
-    tokio::fs::rename(&part, path).await.map_err(|e| e.to_string())
+    settle(&part, path, settings.replace_existing).await
+}
+
+/// Moves a finished `part` to `path`. Something already there (another
+/// download's file, an old copy) is replaced with `replace`; otherwise this
+/// one takes the first free "name (n)" beside it. Returns where it went.
+async fn settle(part: &Path, path: &Path, replace: bool) -> Result<PathBuf, String> {
+    let target = if replace {
+        if tokio::fs::metadata(path).await.is_ok_and(|m| m.is_file()) {
+            let _ = tokio::fs::remove_file(path).await;
+        }
+        path.to_path_buf()
+    } else {
+        super::free_path(path)
+    };
+    tokio::fs::rename(part, &target).await.map_err(|e| format!("Couldn't save it as {}: {e}", target.display()))?;
+    Ok(target)
 }
 
 /// An error that means the file's link has run out: the site refusing it
@@ -543,9 +580,12 @@ fn audio_path(path: &Path, codec: &str) -> PathBuf {
     path.with_extension(if codec == "mp3" { "mp3" } else { "m4a" })
 }
 
-async fn to_audio(job: u64, path: &Path, codec: &str, kbps: u32) -> Result<PathBuf, String> {
+/// Converts `path` to audio and removes it. An audio file of that name
+/// already there is replaced with `replace`, else this one gets a free name.
+async fn to_audio(job: u64, path: &Path, codec: &str, kbps: u32, replace: bool) -> Result<PathBuf, String> {
     let encoder = if codec == "mp3" { "libmp3lame" } else { "aac" };
     let target = audio_path(path, codec);
+    let target = if target != path && !replace { super::free_path(&target) } else { target };
     let ext = target.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
     // ffmpeg can't write over its own input (an .m4a kept as m4a).
     let out = if target == path { path.with_extension(format!("audio.{ext}")) } else { target.clone() };
