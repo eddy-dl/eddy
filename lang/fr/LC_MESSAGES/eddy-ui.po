@@ -629,8 +629,8 @@ msgstr "Code source"
 msgid "Slint {} · slint.dev"
 msgstr "Slint {} · slint.dev"
 
-msgid "The logo's font is Pacifico, under the SIL Open Font License."
-msgstr "La police du logo est Pacifico, sous licence SIL Open Font License."
+msgid "This app logo's font is Pacifico, under the SIL Open Font License."
+msgstr "La police du logo de l'application est Pacifico, sous licence SIL Open Font License."
 
 msgid "Font"
 msgstr "Police"
@@ -638,8 +638,8 @@ msgstr "Police"
 msgid "System font"
 msgstr "Police du système"
 
-msgid "The font your phone uses, from the next time Eddy opens."
-msgstr "La police de votre téléphone, dès la prochaine ouverture d'Eddy."
+msgid "The font your phone uses"
+msgstr "La police de votre téléphone"
 
 msgid "No cookies in that: paste a cookies.txt or a cookie extension's JSON export"
 msgstr "Aucun cookie là-dedans : collez un cookies.txt ou l'export JSON d'une extension de cookies"
@@ -697,3 +697,58 @@ msgstr "Baies"
 
 msgid "Dusk"
 msgstr "Crépuscule"
+
+msgid "{} of {} as audio"
+msgstr "{} sur {} en audio"
+
+msgid "Folder name"
+msgstr "Nom du dossier"
+
+msgid "The playlist's or post's name"
+msgstr "Le nom de la playlist ou de la publication"
+
+msgid "Bitrate for this one"
+msgstr "Débit pour celui-ci"
+
+msgid "Quality for this one"
+msgstr "Qualité pour celui-ci"
+
+msgid "Same as the others"
+msgstr "Comme les autres"
+
+msgid "Video quality"
+msgstr "Qualité vidéo"
+
+msgid "Audio quality"
+msgstr "Qualité audio"
+
+msgid "Starting…"
+msgstr "Démarrage…"
+
+msgid "Close"
+msgstr "Fermer"
+
+msgid "Missing"
+msgstr "Introuvable"
+
+msgid "{n} file"
+msgid_plural "{n} files"
+msgstr[0] "{n} fichier"
+msgstr[1] "{n} fichiers"
+
+msgid "{n} missing"
+msgid_plural "{n} missing"
+msgstr[0] "{n} introuvable"
+msgstr[1] "{n} introuvables"
+
+msgid "Open folder"
+msgstr "Ouvrir le dossier"
+
+msgid "Share files"
+msgstr "Partager les fichiers"
+
+msgid "Share links"
+msgstr "Partager les liens"
+
+msgid "Folders"
+msgstr "Dossiers"

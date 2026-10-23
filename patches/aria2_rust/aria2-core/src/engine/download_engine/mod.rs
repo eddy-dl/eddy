@@ -1,0 +1,513 @@
+mod lifecycle;
+mod progress;
+
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::{Mutex, oneshot};
+use tracing::info;
+
+#[cfg(feature = "bittorrent")]
+use super::bittorrent::registry::BtRegistry;
+use super::engine_command::{
+    EngineCommandQueueSnapshot, EngineCommandReceiver, EngineCommandSender, channel,
+};
+use crate::dns::dns_cache::DnsCache;
+use crate::engine::retry_policy::RetryPolicy;
+use crate::network::OutboundNetworkPolicy;
+use crate::rate_limiter::{RateLimiter, RateLimiterConfig};
+use crate::request::request_group_man::RequestGroupMan;
+use crate::retry::RetryStats;
+use crate::session::auto_save_coordinator::AutoSaveCoordinator;
+#[cfg(feature = "bittorrent")]
+use aria2_protocol::bittorrent::tracker::public_list::{PublicTrackerList, TrackerCatalogConfig};
+
+pub struct DownloadEngine {
+    /// Sender for structured engine communication commands.
+    pub(crate) engine_cmd_tx: EngineCommandSender,
+    pub(crate) engine_cmd_rx: Option<EngineCommandReceiver>,
+    pub(crate) shutdown_tx: Option<oneshot::Sender<()>>,
+    pub(crate) shutdown_rx: Option<oneshot::Receiver<()>>,
+    pub(crate) retry_policy: Arc<RetryPolicy>,
+    pub(crate) retry_stats: Arc<RetryStats>,
+    pub(crate) global_limiter: Option<RateLimiter>,
+    pub(crate) save_session_path: Option<PathBuf>,
+    pub(crate) save_session_interval: Option<Duration>,
+    pub(crate) auto_save_interval: Option<Duration>,
+    /// Maximum age of server statistics. `None` disables stale cleanup.
+    pub(crate) server_stat_max_age: Option<Duration>,
+    /// Optional input file loaded before the engine loop starts.
+    pub(crate) server_stat_input_path: Option<PathBuf>,
+    /// Optional output file written on configured intervals and shutdown.
+    pub(crate) server_stat_output_path: Option<PathBuf>,
+    /// Periodic server-stat save interval. `None` disables periodic saves.
+    pub(crate) server_stat_save_interval: Option<Duration>,
+    pub(crate) request_group_man: Option<Arc<RequestGroupMan>>,
+    pub(crate) auto_save: Option<Arc<Mutex<AutoSaveCoordinator>>>,
+    pub(crate) auto_save_dirty_signal: Option<Arc<std::sync::atomic::AtomicBool>>,
+    /// DNS resolution cache for avoiding repeated lookups.
+    /// Created during engine initialization and passed down via dependency injection.
+    pub(crate) dns_cache: Arc<Mutex<DnsCache>>,
+    /// Process-wide source-address policy for outgoing sockets.
+    pub(crate) outbound_network_policy: Arc<OutboundNetworkPolicy>,
+    /// When true, the engine stays alive even with no pending/running commands
+    /// (used for RPC listen mode). The loop only exits on shutdown signal.
+    pub(crate) keep_alive: bool,
+    /// BitTorrent registry -- maps GID to BtObject (DownloadContext,
+    /// etc.). In C++ aria2, this is a global singleton in DownloadEngine.
+    /// Here it is owned by the engine and accessible via `bt_registry()`.
+    /// Used for info-hash reverse lookup, peer blocklist, shared DHT status,
+    /// and BT component coordination across all active downloads.
+    #[cfg(feature = "bittorrent")]
+    pub(crate) bt_registry: Arc<std::sync::RwLock<BtRegistry>>,
+    /// Process-wide public tracker catalog shared by all BT downloads.
+    #[cfg(feature = "bittorrent")]
+    pub(crate) public_tracker_catalog: Arc<PublicTrackerList>,
+    /// Process-wide BitTorrent TCP listener and info-hash router.
+    #[cfg(feature = "bittorrent")]
+    pub(crate) bt_listener: Arc<crate::engine::bittorrent::peer::listener::BtPeerListenerManager>,
+    /// Process-wide Local Peer Discovery manager and receive loop.
+    #[cfg(feature = "bittorrent")]
+    pub(crate) lpd_manager: Arc<crate::engine::bittorrent::discovery::lpd::LpdManager>,
+    /// Download lifecycle event bus (shell hooks + observers).
+    ///
+    /// Defaults to the process-wide instance returned by
+    /// [`DownloadEventHooks::shared`], so a listener registered by the binary
+    /// crate before `run()` is observed by the engine loop as well as by
+    /// the group state transitions inside individual commands.
+    pub(crate) event_hooks: Arc<super::download_event_hooks::DownloadEventHooks>,
+}
+
+impl Default for DownloadEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DownloadEngine {
+    pub fn new() -> Self {
+        Self::with_retry_policy(RetryPolicy::default())
+    }
+
+    pub fn with_retry_policy(policy: RetryPolicy) -> Self {
+        #[cfg(feature = "bittorrent")]
+        {
+            Self::with_retry_policy_and_lpd_manager(
+                policy,
+                Arc::new(crate::engine::bittorrent::discovery::lpd::LpdManager::new()),
+            )
+        }
+
+        #[cfg(not(feature = "bittorrent"))]
+        Self::with_retry_policy_and_lpd_manager(policy)
+    }
+
+    /// Construct an engine with the process-wide LPD manager supplied by the
+    /// application layer.
+    #[cfg(feature = "bittorrent")]
+    pub fn with_lpd_manager(
+        lpd_manager: Arc<crate::engine::bittorrent::discovery::lpd::LpdManager>,
+    ) -> Self {
+        Self::with_retry_policy_and_lpd_manager(RetryPolicy::default(), lpd_manager)
+    }
+
+    fn with_retry_policy_and_lpd_manager(
+        policy: RetryPolicy,
+        #[cfg(feature = "bittorrent")] lpd_manager: Arc<
+            crate::engine::bittorrent::discovery::lpd::LpdManager,
+        >,
+    ) -> Self {
+        let (engine_cmd_tx, engine_cmd_rx) = channel();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+
+        let max_tries = policy.max_tries();
+
+        let engine = DownloadEngine {
+            engine_cmd_tx,
+            engine_cmd_rx: Some(engine_cmd_rx),
+            shutdown_tx: Some(shutdown_tx),
+            shutdown_rx: Some(shutdown_rx),
+            retry_policy: Arc::new(policy),
+            retry_stats: Arc::new(RetryStats::default()),
+            global_limiter: None,
+            save_session_path: None,
+            save_session_interval: None,
+            auto_save_interval: None,
+            server_stat_max_age: Some(Duration::from_secs(24 * 60 * 60)),
+            server_stat_input_path: None,
+            server_stat_output_path: None,
+            server_stat_save_interval: None,
+            request_group_man: None,
+            auto_save: None,
+            auto_save_dirty_signal: None,
+            dns_cache: Arc::new(Mutex::new(DnsCache::new())),
+            outbound_network_policy: Arc::new(OutboundNetworkPolicy::direct()),
+            keep_alive: false,
+            #[cfg(feature = "bittorrent")]
+            bt_registry: Arc::new(std::sync::RwLock::new(BtRegistry::new())),
+            #[cfg(feature = "bittorrent")]
+            public_tracker_catalog: Arc::new(PublicTrackerList::new()),
+            #[cfg(feature = "bittorrent")]
+            bt_listener: Arc::new(
+                crate::engine::bittorrent::peer::listener::BtPeerListenerManager::new(),
+            ),
+            #[cfg(feature = "bittorrent")]
+            lpd_manager,
+            event_hooks: Arc::clone(super::download_event_hooks::DownloadEventHooks::shared()),
+        };
+
+        info!(
+            "Download engine initialization complete, max retries: {}",
+            max_tries
+        );
+
+        engine
+    }
+
+    pub fn set_global_rate_limiter(&mut self, config: RateLimiterConfig) {
+        self.global_limiter = Some(RateLimiter::new(&config));
+        info!(
+            "Global speed limits set: download={:?}, upload={:?}",
+            config.download_rate(),
+            config.upload_rate()
+        );
+    }
+
+    pub fn global_rate_limiter(&self) -> Option<&RateLimiter> {
+        self.global_limiter.as_ref()
+    }
+
+    pub fn take_global_rate_limiter(&mut self) -> Option<RateLimiter> {
+        self.global_limiter.take()
+    }
+
+    pub fn set_request_group_man(&mut self, man: Arc<RequestGroupMan>) {
+        self.request_group_man = Some(Arc::clone(&man));
+        self.refresh_auto_save(man);
+    }
+
+    pub fn set_save_session(
+        &mut self,
+        path: PathBuf,
+        interval: Option<Duration>,
+        man: Arc<RequestGroupMan>,
+    ) {
+        self.save_session_path = Some(path.clone());
+        self.save_session_interval = interval;
+        self.request_group_man = Some(Arc::clone(&man));
+        self.refresh_auto_save(man);
+
+        if let Some(interval) = interval {
+            info!(
+                "Auto-save session enabled: path={}, interval={:.1}s",
+                path.display(),
+                interval.as_secs_f64()
+            );
+        } else {
+            info!("Manual save session enabled: path={}", path.display());
+        }
+    }
+
+    pub fn set_auto_save_interval(&mut self, interval: Option<Duration>) {
+        self.auto_save_interval = interval;
+        if let Some(man) = self.request_group_man.clone() {
+            self.refresh_auto_save(man);
+        }
+    }
+
+    /// Configure the server-stat freshness window. Zero means unlimited.
+    pub fn set_server_stat_timeout(&mut self, seconds: u64) {
+        self.server_stat_max_age = (seconds > 0).then_some(Duration::from_secs(seconds));
+    }
+
+    /// Configure server-stat input/output persistence owned by this engine.
+    pub fn set_server_stat_persistence(
+        &mut self,
+        input_path: Option<PathBuf>,
+        output_path: Option<PathBuf>,
+        interval: Option<Duration>,
+    ) {
+        self.server_stat_input_path = input_path;
+        self.server_stat_output_path = output_path;
+        self.server_stat_save_interval = interval.filter(|value| !value.is_zero());
+    }
+
+    pub fn server_stat_max_age(&self) -> Option<Duration> {
+        self.server_stat_max_age
+    }
+
+    pub fn server_stat_input_path(&self) -> Option<&PathBuf> {
+        self.server_stat_input_path.as_ref()
+    }
+
+    pub fn server_stat_output_path(&self) -> Option<&PathBuf> {
+        self.server_stat_output_path.as_ref()
+    }
+
+    pub fn server_stat_save_interval(&self) -> Option<Duration> {
+        self.server_stat_save_interval
+    }
+
+    fn refresh_auto_save(&mut self, man: Arc<RequestGroupMan>) {
+        let session = self
+            .save_session_path
+            .clone()
+            .zip(self.save_session_interval);
+        // Keep the coordinator even when both intervals are disabled. Its
+        // shutdown path still requests the final protocol-owned checkpoints,
+        // matching aria2's guarantee that stopping saves control files.
+        let coordinator = AutoSaveCoordinator::new(man, session, self.auto_save_interval);
+        self.auto_save_dirty_signal = Some(coordinator.dirty_signal());
+        self.auto_save = Some(Arc::new(Mutex::new(coordinator)));
+    }
+
+    pub fn mark_session_dirty(&self) {
+        if let Some(signal) = &self.auto_save_dirty_signal {
+            signal.store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
+
+    pub fn save_session_path(&self) -> Option<&PathBuf> {
+        self.save_session_path.as_ref()
+    }
+
+    pub fn retry_stats(&self) -> &RetryStats {
+        &self.retry_stats
+    }
+
+    pub fn retry_policy(&self) -> &RetryPolicy {
+        &self.retry_policy
+    }
+
+    /// Get a reference to the DNS cache for dependency injection.
+    pub fn dns_cache(&self) -> &Arc<Mutex<DnsCache>> {
+        &self.dns_cache
+    }
+
+    /// Configure the process-wide DNS lookup timeout before the engine starts.
+    pub fn set_dns_timeout(&mut self, timeout: Duration) {
+        self.set_dns_config(timeout, None);
+    }
+
+    /// Configure the process-wide DNS timeout and optional explicit nameservers.
+    pub fn set_dns_config(
+        &mut self,
+        timeout: Duration,
+        servers: Option<Vec<std::net::SocketAddr>>,
+    ) {
+        let cache = servers.map_or_else(
+            || DnsCache::with_dns_timeout(timeout),
+            |servers| DnsCache::with_dns_servers(timeout, servers),
+        );
+        self.dns_cache = Arc::new(Mutex::new(cache));
+    }
+
+    /// Configure the process-wide policy used by all outbound protocol adapters.
+    pub fn set_outbound_network_policy(&mut self, policy: Arc<OutboundNetworkPolicy>) {
+        self.outbound_network_policy = policy;
+    }
+
+    pub fn outbound_network_policy(&self) -> Arc<OutboundNetworkPolicy> {
+        Arc::clone(&self.outbound_network_policy)
+    }
+
+    /// Mark one connected address as bad while retaining other resolved
+    /// candidates for the same hostname.
+    pub async fn mark_bad_ip_address(&self, hostname: &str, address: std::net::SocketAddr) {
+        self.dns_cache.lock().await.mark_bad(hostname, address);
+    }
+
+    /// Remove cached addresses for a hostname, forcing the next connection to
+    /// resolve it again.
+    pub async fn remove_cached_ip_address(&self, hostname: &str, port: u16) {
+        self.dns_cache.lock().await.remove_cached(hostname, port);
+    }
+
+    /// Get a reference to the BitTorrent registry.
+    ///
+    /// The registry maps GID to [`BtObject`](super::bittorrent::registry::BtObject) and
+    /// supports info-hash reverse lookup, peer blocklist, and BT component
+    /// coordination across all active downloads. In C++ aria2, this is a global
+    /// singleton owned by `DownloadEngine`.
+    #[cfg(feature = "bittorrent")]
+    pub fn bt_registry(&self) -> &Arc<std::sync::RwLock<BtRegistry>> {
+        &self.bt_registry
+    }
+
+    /// Configure the process-wide public tracker catalog before `run()`.
+    #[cfg(feature = "bittorrent")]
+    pub fn set_public_tracker_config(&mut self, config: TrackerCatalogConfig) {
+        self.public_tracker_catalog.set_config_now(config);
+    }
+
+    /// Configure the process-wide Local Peer Discovery manager before `run()`.
+    #[cfg(feature = "bittorrent")]
+    pub fn set_lpd_manager(
+        &mut self,
+        manager: Arc<crate::engine::bittorrent::discovery::lpd::LpdManager>,
+    ) {
+        self.lpd_manager = manager;
+    }
+
+    /// Get the process-wide Local Peer Discovery manager.
+    #[cfg(feature = "bittorrent")]
+    pub fn lpd_manager(&self) -> &Arc<crate::engine::bittorrent::discovery::lpd::LpdManager> {
+        &self.lpd_manager
+    }
+
+    /// Get the shared public tracker catalog.
+    #[cfg(feature = "bittorrent")]
+    pub fn public_tracker_catalog(&self) -> &Arc<PublicTrackerList> {
+        &self.public_tracker_catalog
+    }
+
+    /// Enable/disable keep-alive mode. When true, the engine stays alive even
+    /// with no pending/running commands (used for RPC listen mode). The loop
+    /// only exits on shutdown signal.
+    pub fn set_keep_alive(&mut self, v: bool) {
+        self.keep_alive = v;
+    }
+
+    /// Clone the EngineCommand sender so external callers (e.g., RPC) can
+    /// submit structured download lifecycle commands.
+    ///
+    /// This is the engine interface for download management
+    /// (add/remove/pause/unpause/halt).
+    pub fn engine_command_sender(&self) -> EngineCommandSender {
+        self.engine_cmd_tx.clone()
+    }
+
+    pub fn engine_command_metrics(&self) -> EngineCommandQueueSnapshot {
+        self.engine_cmd_tx.snapshot()
+    }
+
+    /// Take the shutdown sender so an external task (e.g., Ctrl+C handler) can
+    /// signal the engine to stop. Must be called before `run()`.
+    pub fn take_shutdown_sender(&mut self) -> Option<oneshot::Sender<()>> {
+        self.shutdown_tx.take()
+    }
+
+    /// Access the download lifecycle event bus.
+    ///
+    /// Layers above `aria2-core` use this to install a
+    /// [`DownloadEventListener`](super::download_event_hooks::DownloadEventListener)
+    /// **before** `run()` consumes the engine. The listener receives lifecycle
+    /// events and, when metadata creates child download groups, the structured
+    /// `MetadataResolvedEvent` callback. The latter is a Rust-library event
+    /// and is not forwarded as a standard aria2 RPC notification.
+    pub fn event_hooks(&self) -> &Arc<super::download_event_hooks::DownloadEventHooks> {
+        &self.event_hooks
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(feature = "bittorrent")]
+    use super::DownloadEngine;
+    #[cfg(feature = "bittorrent")]
+    use std::sync::Arc;
+
+    #[cfg(feature = "bittorrent")]
+    /// Verify that the engine creates a BtRegistry and the accessor returns it.
+    #[test]
+    fn test_bt_registry_accessor_returns_valid_registry() {
+        let engine = DownloadEngine::new();
+        let registry = engine.bt_registry();
+        let reg = registry.read().unwrap();
+        assert!(reg.is_empty(), "new engine should have empty BtRegistry");
+        assert_eq!(reg.tcp_port(), 0);
+        assert_eq!(reg.udp_port(), 0);
+    }
+
+    #[cfg(feature = "bittorrent")]
+    #[test]
+    fn test_lpd_manager_is_injected_at_engine_construction() {
+        let manager = Arc::new(crate::engine::bittorrent::discovery::lpd::LpdManager::new());
+        let engine = DownloadEngine::with_lpd_manager(Arc::clone(&manager));
+
+        assert!(
+            Arc::ptr_eq(engine.lpd_manager(), &manager),
+            "engine must retain the one configured LPD manager supplied by the application"
+        );
+    }
+
+    #[cfg(feature = "bittorrent")]
+    /// Verify that multiple Arc clones of the BtRegistry share the same
+    /// underlying data, so changes made through one clone are visible
+    /// through the other.
+    #[test]
+    fn test_bt_registry_arc_shared_ownership() {
+        let engine = DownloadEngine::new();
+        let registry_arc = engine.bt_registry().clone();
+
+        // Insert via the cloned Arc
+        {
+            let mut reg = registry_arc.write().unwrap();
+            reg.set_tcp_port(6881);
+            let obj = super::super::bittorrent::registry::BtObject::new();
+            reg.put(42, obj);
+        }
+
+        // Verify visibility through the engine's accessor
+        let reg = engine.bt_registry().read().unwrap();
+        assert_eq!(reg.tcp_port(), 6881);
+        assert!(reg.get(42).is_some());
+    }
+
+    #[cfg(feature = "bittorrent")]
+    /// Verify BtRegistry info-hash lookup works end-to-end when a
+    /// DownloadContext with TorrentAttribute is registered.
+    #[test]
+    fn test_bt_registry_info_hash_lookup_via_engine() {
+        use crate::download::download_context::{
+            BtFileMode, ContextAttributeType, TorrentAttribute,
+        };
+
+        let engine = DownloadEngine::new();
+        let info_hash = "abcdef0123456789abcdef0123456789abcdef01";
+
+        // Create a DownloadContext with TorrentAttribute
+        let mut ctx =
+            crate::download::DownloadContext::new(1024, 4096, "/tmp/test.bin".to_string());
+        let ta = TorrentAttribute {
+            name: "test_torrent".to_string(),
+            mode: BtFileMode::Single,
+            announce_list: vec![],
+            nodes: vec![],
+            info_hash: info_hash.to_string(),
+            metadata: vec![],
+            metadata_size: 0,
+            private_torrent: false,
+            creation_date: 0,
+            comment: String::new(),
+            created_by: String::new(),
+            url_list: vec![],
+        };
+        ctx.set_attribute(ContextAttributeType::BitTorrent, Box::new(ta));
+        let ctx = Arc::new(ctx);
+
+        // Register into BtRegistry
+        let obj = super::super::bittorrent::registry::BtObject::builder()
+            .download_context(Arc::clone(&ctx))
+            .build();
+        {
+            let mut reg = engine.bt_registry().write().unwrap();
+            reg.put(123, obj);
+        }
+
+        // Lookup by info_hash should find the context
+        let reg = engine.bt_registry().read().unwrap();
+        let found = reg.get_download_context_by_info_hash(info_hash);
+        assert!(
+            found.is_some(),
+            "info-hash lookup should find registered context"
+        );
+
+        // Wrong hash should not find it
+        assert!(
+            reg.get_download_context_by_info_hash("wrong_hash")
+                .is_none(),
+            "wrong hash should not match"
+        );
+    }
+}

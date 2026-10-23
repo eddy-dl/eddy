@@ -169,6 +169,11 @@ export component ListOptionsSheet inherits Rectangle {
                     selected: root.current.filter == FileFilter.Audio;
                     clicked => { root.set_filter(FileFilter.Audio); }
                 }
+                Chip {
+                    text: @tr("Folders");
+                    selected: root.current.filter == FileFilter.Folder;
+                    clicked => { root.set_filter(FileFilter.Folder); }
+                }
             }
 
             HorizontalLayout {

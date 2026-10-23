@@ -1,0 +1,225 @@
+// Performance benchmark for sequential piece selection optimization
+// This benchmark demonstrates the O(1) complexity improvement
+
+use aria2_core::engine::bittorrent::piece::{
+    PiecePicker, PiecePriorityMode, PieceSelectionStrategy,
+};
+use criterion::{BatchSize, BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+
+fn bench_sequential_selection(c: &mut Criterion) {
+    let mut group = c.benchmark_group("sequential_selection");
+
+    // Test different sizes to show O(1) complexity
+    for size in [100, 1000, 10000, 50000].iter() {
+        // Benchmark: Sequential strategy with cursor optimization
+        group.bench_with_input(
+            BenchmarkId::new("optimized_sequential", size),
+            size,
+            |b, &size| {
+                b.iter(|| {
+                    let mut picker = PiecePicker::new(size);
+                    picker.set_strategy(PieceSelectionStrategy::Sequential);
+
+                    // Mark half of the pieces as completed
+                    for i in 0..(size / 2) {
+                        picker.mark_completed(i);
+                    }
+
+                    // Pick next piece (should be O(1) with cursor)
+                    black_box(picker.pick_next())
+                });
+            },
+        );
+
+        // Benchmark: SequentialHead mode with cursor optimization
+        group.bench_with_input(
+            BenchmarkId::new("optimized_head", size),
+            size,
+            |b, &size| {
+                b.iter(|| {
+                    let mut picker = PiecePicker::new(size);
+                    picker.set_priority_mode(PiecePriorityMode::SequentialHead);
+
+                    for i in 0..(size / 2) {
+                        picker.mark_completed(i);
+                    }
+
+                    black_box(picker.pick_next())
+                });
+            },
+        );
+
+        // Benchmark: SequentialTail mode with cursor optimization
+        group.bench_with_input(
+            BenchmarkId::new("optimized_tail", size),
+            size,
+            |b, &size| {
+                b.iter(|| {
+                    let mut picker = PiecePicker::new(size);
+                    picker.set_priority_mode(PiecePriorityMode::SequentialTail);
+
+                    for i in (size / 2)..size {
+                        picker.mark_completed(i);
+                    }
+
+                    black_box(picker.pick_next())
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+fn bench_cursor_update(c: &mut Criterion) {
+    let mut group = c.benchmark_group("cursor_update");
+
+    // Benchmark cursor update performance when marking pieces as completed
+    group.bench_function("mark_completed_updates_cursor", |b| {
+        let mut picker = PiecePicker::new(10000);
+        picker.set_strategy(PieceSelectionStrategy::Sequential);
+
+        b.iter(|| {
+            // Mark a piece as completed and update cursor
+            for i in 0..100 {
+                picker.mark_completed(i);
+            }
+            black_box(picker.pick_next())
+        });
+    });
+
+    // Benchmark cursor update with in_progress changes
+    group.bench_function("mark_in_progress_updates_cursor", |b| {
+        let mut picker = PiecePicker::new(10000);
+        picker.set_strategy(PieceSelectionStrategy::Sequential);
+
+        b.iter(|| {
+            for i in 0..100 {
+                picker.mark_in_progress(i, true);
+            }
+            black_box(picker.pick_next())
+        });
+    });
+
+    group.finish();
+}
+
+fn bench_rarest_selection(c: &mut Criterion) {
+    let mut group = c.benchmark_group("rarest_selection");
+
+    for size in [1_000usize, 10_000, 50_000] {
+        let frequencies = (0..size)
+            .map(|index| ((index * 37) % size) as u32)
+            .collect::<Vec<_>>();
+        let frequency_input = frequencies.clone();
+        group.bench_with_input(
+            BenchmarkId::new("legacy_linear_scan", size),
+            &size,
+            |b, &size| {
+                b.iter_batched(
+                    || {
+                        let mut completed = vec![false; size];
+                        for piece in &mut completed[..size / 2] {
+                            *piece = true;
+                        }
+                        completed
+                    },
+                    |completed| {
+                        let mut best = None;
+                        for index in 0..size {
+                            if completed[index] {
+                                continue;
+                            }
+                            if best.is_none_or(|best_index| {
+                                frequency_input[index] < frequency_input[best_index]
+                            }) {
+                                best = Some(index);
+                            }
+                        }
+                        black_box(best)
+                    },
+                    BatchSize::SmallInput,
+                );
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("sorted_cursor", size),
+            &size,
+            |b, &size| {
+                b.iter_batched(
+                    || {
+                        let mut picker = PiecePicker::new(size as u32);
+                        let frequencies = frequency_input
+                            .iter()
+                            .map(|&frequency| frequency as usize)
+                            .collect::<Vec<_>>();
+                        picker.set_frequencies_from_peers(&frequencies);
+                        for piece in 0..size / 2 {
+                            picker.mark_completed(piece as u32);
+                        }
+                        picker
+                    },
+                    |mut picker| black_box(picker.pick_next_without_endgame()),
+                    BatchSize::SmallInput,
+                );
+            },
+        );
+    }
+
+    group.finish();
+}
+
+fn bench_real_world_scenario(c: &mut Criterion) {
+    let mut group = c.benchmark_group("real_world");
+
+    // Simulate real-world torrent download scenario
+    group.bench_function("sequential_download_simulation", |b| {
+        b.iter(|| {
+            let mut picker = PiecePicker::new(10000);
+            picker.set_strategy(PieceSelectionStrategy::Sequential);
+
+            // Simulate downloading pieces one by one
+            let mut downloaded = 0;
+            while let Some(piece) = picker.pick_next() {
+                picker.mark_completed(piece);
+                downloaded += 1;
+                if downloaded >= 1000 {
+                    break;
+                }
+            }
+
+            black_box(downloaded)
+        });
+    });
+
+    // Simulate streaming scenario (SequentialHead)
+    group.bench_function("streaming_download_simulation", |b| {
+        b.iter(|| {
+            let mut picker = PiecePicker::new(10000);
+            picker.set_priority_mode(PiecePriorityMode::SequentialHead);
+
+            let mut downloaded = 0;
+            while let Some(piece) = picker.pick_next() {
+                picker.mark_completed(piece);
+                downloaded += 1;
+                if downloaded >= 1000 {
+                    break;
+                }
+            }
+
+            black_box(downloaded)
+        });
+    });
+
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_sequential_selection,
+    bench_cursor_update,
+    bench_rarest_selection,
+    bench_real_world_scenario
+);
+criterion_main!(benches);

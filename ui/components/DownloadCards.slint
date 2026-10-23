@@ -27,7 +27,23 @@ export struct DownloadItem {
     url: string, // where it's downloaded from (a magnet or .torrent path for torrents)
     backend: LinkBackend, // how it's downloaded
     folder: string, // where it's saved, as shown to the user
+    // Several files downloading (a playlist, a post): the one it's on,
+    // "3 of 12 · name" ("" otherwise; `progress` is then the whole's).
+    part: string,
+    // Done, and it saved a folder (several files): shown as one.
+    is_folder: bool,
     options: LinkOptions, // its speed limit, connections, user agent, folder
+}
+
+// How much is done: "12 MB of 40 MB", just "12 MB" while the size is
+// unknown, and (running) "Starting…" before anything's come in.
+global CardText {
+    public pure function amount(item: DownloadItem) -> string {
+        if item.size != "" {
+            return @tr("{} of {}", item.downloaded, item.size);
+        }
+        item.state == DownloadState.Active && item.progress == 0 && item.downloaded == "0 B" ? @tr("Starting…") : item.downloaded
+    }
 }
 
 component ProgressBar inherits Rectangle {
@@ -68,25 +84,20 @@ component SelectedBadge inherits Rectangle {
     border-radius: 22px;
     background: ThemeSettings.primary_accent;
 
-    Path {
+    Image {
+        source: @image-url("../icons/rounded/check.svg");
         width: 24px;
         height: 24px;
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
-        viewbox-width: 24;
-        viewbox-height: 24;
-        stroke: #ffffff;
-        stroke-width: 2.5px;
-        stroke-line-cap: round;
-        stroke-line-join: round;
-        fill: transparent;
-        commands: "M6 12.5l4 4l8 -9";
+        colorize: #ffffff;
     }
 }
 
 // Shared card frame: surface background, file icon (or the check badge when
 // selected) on the left, content on the right. Tap fires `clicked`; a
-// press-and-hold fires `long_pressed` instead.
+// press-and-hold fires `long_pressed` instead, and so does tapping the icon
+// (it selects, as in Gmail or Files).
 component CardFrame inherits Rectangle {
     in property <FileType> file_type;
     in property <bool> muted: false;
@@ -135,6 +146,10 @@ component CardFrame inherits Rectangle {
                     transform-scale: root.selected ? 1.0 : 0.6;
                     animate opacity, transform-scale { duration: 150ms; easing: ease-out-quad; }
                 }
+                // Over the card's own touch area: the icon toggles selection.
+                TouchArea {
+                    clicked => { root.long_pressed(); }
+                }
             }
         }
 
@@ -172,7 +187,7 @@ export component DownloadingCard inherits Rectangle {
     height: 84px;
 
     CardFrame {
-        file_type: root.item.file_type;
+        file_type: root.item.is_folder ? FileType.Folder : root.item.file_type;
         selected: root.selected;
         clicked => { root.clicked(); }
         long_pressed => { root.long_pressed(); }
@@ -195,8 +210,9 @@ export component DownloadingCard inherits Rectangle {
         HorizontalLayout {
             spacing: 8px;
             CardDetail {
-                text: @tr("{} of {}", root.item.downloaded, root.item.size);
+                text: root.item.part != "" ? root.item.part : CardText.amount(root.item);
                 horizontal-stretch: 1;
+                overflow: elide;
             }
             CardDetail {
                 text: root.item.speed + " · " + @tr("{} left", root.item.eta);
@@ -222,7 +238,7 @@ export component QueuedCard inherits Rectangle {
     height: 68px;
 
     CardFrame {
-        file_type: root.item.file_type;
+        file_type: root.item.is_folder ? FileType.Folder : root.item.file_type;
         selected: root.selected;
         clicked => { root.clicked(); }
         long_pressed => { root.long_pressed(); }
@@ -253,7 +269,7 @@ export component StoppedCard inherits Rectangle {
     height: 84px;
 
     CardFrame {
-        file_type: root.item.file_type;
+        file_type: root.item.is_folder ? FileType.Folder : root.item.file_type;
         selected: root.selected;
         // Paused can resume where it left off; failed/cancelled look inactive.
         muted: root.item.state != DownloadState.Paused;
@@ -266,7 +282,7 @@ export component StoppedCard inherits Rectangle {
 
         // The state itself is shown by the list's group header.
         CardDetail {
-            text: Math.round(root.item.progress * 100) + "% · " + @tr("{} of {}", root.item.downloaded, root.item.size);
+            text: root.item.size == "" ? CardText.amount(root.item) : Math.round(root.item.progress * 100) + "% · " + CardText.amount(root.item);
         }
 
         ProgressBar {
@@ -292,7 +308,7 @@ export component CompletedCard inherits Rectangle {
     height: 68px;
 
     CardFrame {
-        file_type: root.item.file_type;
+        file_type: root.item.is_folder ? FileType.Folder : root.item.file_type;
         selected: root.selected;
         trailing: root.book ? 40px : 0px;
         clicked => { root.clicked(); }
@@ -314,15 +330,13 @@ export component CompletedCard inherits Rectangle {
         height: 48px;
         border-radius: 24px;
         background: update_ta.pressed ? ThemeSettings.text_color.transparentize(90%) : transparent;
-        Path {
+        Image {
+            source: @image-url("../icons/rounded/refresh.svg");
             width: 24px;
             height: 24px;
-            viewbox-width: 24;
-            viewbox-height: 24;
-            commands: "M20 11a8.1 8.1 0 0 0 -15.5 -2M4 5v4h4M4 13a8.1 8.1 0 0 0 15.5 2M20 19v-4h-4";
-            stroke: ThemeSettings.text_color.transparentize(25%);
-            stroke-width: 2px;
-            fill: transparent;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            colorize: ThemeSettings.text_color.transparentize(25%);
         }
         update_ta := TouchArea {
             clicked => { root.update_book(); }

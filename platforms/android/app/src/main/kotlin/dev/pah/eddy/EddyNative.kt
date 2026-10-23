@@ -34,6 +34,10 @@ object EddyNative {
     @JvmStatic external fun controlDownloads(action: Int)
 
     // Downloads still running or queued.
+    // The app's or the share popup's screen is going for good: stops the
+    // link checks it started (downloads go on).
+    @JvmStatic external fun screenClosed()
+
     @JvmStatic external fun activeDownloads(): Int
 
     // For the notification: "count\tfirst name\tprogress" (progress in

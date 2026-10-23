@@ -123,6 +123,13 @@
                 <data android:mimeType="text/plain" />
                 <data android:mimeType="application/x-bittorrent" />
             </intent-filter>
+            <!-- Magnet links tapped in a browser or another app. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="magnet" />
+            </intent-filter>
         </activity-alias>
         <!-- Popup asking how to download, then starts. -->
         <activity-alias
@@ -149,6 +156,13 @@
                 <data android:mimeType="text/plain" />
                 <data android:mimeType="application/x-bittorrent" />
             </intent-filter>
+            <!-- Magnet links tapped in a browser or another app. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="magnet" />
+            </intent-filter>
         </activity-alias>
         <!-- Popup previewing each link with its download options. -->
         <activity-alias
@@ -174,6 +188,13 @@
                 <data android:scheme="file" />
                 <data android:mimeType="text/plain" />
                 <data android:mimeType="application/x-bittorrent" />
+            </intent-filter>
+            <!-- Magnet links tapped in a browser or another app. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="magnet" />
             </intent-filter>
         </activity-alias>
     </application>

@@ -1,0 +1,165 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use tracing::{debug, info};
+
+use super::session_serializer;
+use crate::engine::command::{Command, CommandStatus};
+use crate::error::Result;
+use crate::request::request_group::GroupId;
+use crate::request::request_group_man::RequestGroupMan;
+
+pub struct SaveSessionCommand {
+    path: PathBuf,
+    request_group_man: Arc<RequestGroupMan>,
+    status: CommandStatus,
+}
+
+impl SaveSessionCommand {
+    pub fn new(path: PathBuf, man: Arc<RequestGroupMan>) -> Self {
+        SaveSessionCommand {
+            path,
+            request_group_man: man,
+            status: CommandStatus::Pending,
+        }
+    }
+
+    pub fn path(&self) -> &PathBuf {
+        &self.path
+    }
+}
+
+#[async_trait]
+impl Command for SaveSessionCommand {
+    async fn execute(&mut self) -> Result<()> {
+        self.status = CommandStatus::Running;
+        debug!("Starting session save to {}", self.path.display());
+
+        self.request_group_man.request_control_file_saves();
+        let groups = self.request_group_man.list_groups();
+        let stopped_results = self.request_group_man.get_stopped_results(0, usize::MAX);
+        session_serializer::save_to_file_with_results(&self.path, &groups, &stopped_results)
+            .await?;
+
+        self.status = CommandStatus::Completed;
+        info!("Session saved to {}", self.path.display());
+        Ok(())
+    }
+
+    fn status(&self) -> CommandStatus {
+        self.status.clone()
+    }
+
+    fn gid(&self) -> GroupId {
+        GroupId(0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::request::request_group::DownloadOptions;
+    use crate::util::rwlock_ext::RwLockRecover;
+
+    #[tokio::test]
+    async fn test_save_session_command_creation() {
+        let man = Arc::new(RequestGroupMan::new());
+        let cmd = SaveSessionCommand::new(PathBuf::from("/tmp/test.sess"), man);
+        assert_eq!(cmd.status(), CommandStatus::Pending);
+        assert!(cmd.path().to_str().unwrap().contains("test.sess"));
+    }
+
+    #[tokio::test]
+    async fn test_save_session_command_execute() {
+        let man = Arc::new(RequestGroupMan::new());
+        man.add_group(
+            vec!["http://example.com/file.zip".into()],
+            DownloadOptions {
+                split: Some(4),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("test_save_session_{}.sess", std::process::id()));
+        let mut cmd = SaveSessionCommand::new(path.clone(), man);
+
+        cmd.execute().await.unwrap();
+        assert_eq!(cmd.status(), CommandStatus::Completed);
+
+        let content = tokio::fs::read_to_string(&path).await.unwrap();
+        assert!(content.contains("http://example.com/file.zip"));
+        assert!(content.contains("GID="));
+        assert!(content.contains("split=4"));
+
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[tokio::test]
+    async fn test_save_session_command_requests_control_file_saves() {
+        let man = Arc::new(RequestGroupMan::new());
+        let gid = man
+            .add_group(
+                vec!["http://example.com/checkpoint.bin".into()],
+                DownloadOptions::default(),
+            )
+            .unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.txt");
+        let mut cmd = SaveSessionCommand::new(path, Arc::clone(&man));
+
+        cmd.execute().await.unwrap();
+
+        assert!(
+            man.find_group(gid)
+                .unwrap()
+                .recover()
+                .is_save_control_file_requested(),
+            "session save must request a protocol checkpoint"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_save_session_empty_manager() {
+        let man = Arc::new(RequestGroupMan::new());
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("test_save_empty_{}.sess", std::process::id()));
+        let mut cmd = SaveSessionCommand::new(path.clone(), man);
+
+        cmd.execute().await.unwrap();
+        assert_eq!(cmd.status(), CommandStatus::Completed);
+
+        let content = tokio::fs::read_to_string(&path).await.unwrap();
+        assert!(content.is_empty() || content.trim().is_empty());
+
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[tokio::test]
+    async fn test_save_session_atomic_write() {
+        let man = Arc::new(RequestGroupMan::new());
+        man.add_group(
+            vec!["http://example.com/atomic.bin".into()],
+            DownloadOptions::default(),
+        )
+        .unwrap();
+
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("test_atomic_{}.sess", std::process::id()));
+        let mut cmd = SaveSessionCommand::new(path.clone(), man);
+
+        cmd.execute().await.unwrap();
+
+        assert!(path.exists(), "Target file should exist");
+        let tmp_path = path.with_extension("sess.tmp");
+        assert!(
+            !tmp_path.exists(),
+            "Temp file should have been renamed away"
+        );
+
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+}

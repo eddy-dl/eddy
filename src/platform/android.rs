@@ -500,6 +500,7 @@ pub extern "system" fn Java_dev_pah_eddy_EddyNative_startDownload<'caller>(
                 folder: folder.try_to_string(env)?,
                 settings: Default::default(),
                 id: 0,
+                resume: false,
             }))
             // The whole request as JSON, when it's there.
             .map(|request| {
@@ -594,6 +595,16 @@ pub extern "system" fn Java_dev_pah_eddy_EddyNative_controlDownloads<'caller>(
     action: jint,
 ) {
     crate::downloads::control_all(action == 1);
+}
+
+/// The app's or the share popup's screen is going for good: link checks
+/// running for it are stopped (downloads carry on in the service).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pah_eddy_EddyNative_screenClosed<'caller>(
+    _unowned_env: EnvUnowned<'caller>,
+    _class: JClass<'caller>,
+) {
+    crate::children::stop_checks();
 }
 
 /// How many downloads are still going, so the service knows when to stop.
@@ -717,6 +728,25 @@ pub fn open_file(path: &str) {
     });
     if let Err(e) = result {
         log::error!("Couldn't open the file: {e}");
+    }
+}
+
+/// Shares downloads through Android's share sheet: their files (paths or
+/// document URIs), with `text` (their links) alongside, or the text alone.
+pub fn share(files: &[String], text: &str) {
+    let result = with_env(|env, activity| {
+        let files = env.new_string(files.join("\n"))?;
+        let text = env.new_string(text)?;
+        env.call_method(
+            activity,
+            jni_str!("shareItems"),
+            jni_sig!("(Ljava/lang/String;Ljava/lang/String;)V"),
+            &[JValue::Object(&files), JValue::Object(&text)],
+        )?;
+        Ok(())
+    });
+    if let Err(e) = result {
+        log::error!("Couldn't share: {e}");
     }
 }
 

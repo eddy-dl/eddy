@@ -15,8 +15,38 @@ use std::sync::{Arc, Mutex};
 #[derive(Clone, Debug)]
 pub struct Job {
     pub label: String,
+    /// The file being downloaded: bytes done and its size (0 unknown).
     pub done: u64,
     pub total: u64,
+    /// With several files (a playlist, a post), which one this is.
+    pub part: Option<Part>,
+    /// What it has written so far (files, and yt-dlp's targets, whose
+    /// partial files sit beside them), for cleaning up if it's cancelled.
+    pub written: Vec<PathBuf>,
+}
+
+/// One of a job's several files: its place (from 1) and name, and the
+/// bytes of the files before it.
+#[derive(Clone, Debug, Default)]
+pub struct Part {
+    pub index: usize,
+    pub count: usize,
+    pub name: String,
+    pub finished: u64,
+}
+
+impl Job {
+    /// How far the whole job is (0..1), files and all.
+    pub fn fraction(&self) -> Option<f32> {
+        let part = self.part.as_ref()?;
+        let file = if self.total > 0 { (self.done as f64 / self.total as f64).min(1.0) } else { 0.0 };
+        Some((((part.index.saturating_sub(1)) as f64 + file) / part.count.max(1) as f64) as f32)
+    }
+
+    /// Bytes done across its files.
+    pub fn bytes_done(&self) -> u64 {
+        self.part.as_ref().map_or(0, |p| p.finished) + self.done
+    }
 }
 
 /// How to stop a job: its flag (so a stopped job doesn't report a failure),
@@ -26,6 +56,8 @@ struct Control {
     cancelled: Arc<AtomicBool>,
     abort: Option<tokio::task::AbortHandle>,
     child: Option<Arc<Mutex<Option<std::process::Child>>>>,
+    /// The aria2 download fetching a native extractor's file right now.
+    aria: Option<String>,
 }
 
 static JOBS: Mutex<Option<HashMap<u64, (Job, Control)>>> = Mutex::new(None);
@@ -41,7 +73,7 @@ pub(super) fn begin(label: &str) -> (u64, Arc<AtomicBool>) {
     let id = NEXT_JOB.fetch_add(1, Ordering::SeqCst);
     let control = Control::default();
     let cancelled = Arc::clone(&control.cancelled);
-    with_jobs(|jobs| jobs.insert(id, (Job { label: label.to_string(), done: 0, total: 0 }, control)));
+    with_jobs(|jobs| jobs.insert(id, (Job { label: label.to_string(), done: 0, total: 0, part: None, written: Vec::new() }, control)));
     (id, cancelled)
 }
 
@@ -63,6 +95,35 @@ pub(super) fn progress(id: u64, done: u64, total: u64) {
     });
 }
 
+/// The next of a job's `count` files starts (named `name`).
+pub(super) fn next_part(id: u64, count: usize, name: &str) {
+    with_jobs(|jobs| {
+        if let Some((job, _)) = jobs.get_mut(&id) {
+            let mut part = job.part.take().unwrap_or_default();
+            if part.index > 0 {
+                part.finished += job.done;
+            }
+            part.index += 1;
+            part.count = count.max(part.index);
+            part.name = name.to_string();
+            job.part = Some(part);
+            job.done = 0;
+            job.total = 0;
+        }
+    });
+}
+
+/// The job is writing `path`.
+pub(super) fn wrote(id: u64, path: &Path) {
+    with_jobs(|jobs| {
+        if let Some((job, _)) = jobs.get_mut(&id) {
+            if !job.written.iter().any(|p| p == path) {
+                job.written.push(path.to_path_buf());
+            }
+        }
+    });
+}
+
 pub(super) fn end(id: u64) {
     with_jobs(|jobs| jobs.remove(&id));
 }
@@ -77,10 +138,29 @@ pub fn cancel(id: u64) {
         }
         if let Some(child) = control.child {
             if let Some(child) = child.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
-                let _ = child.kill();
+                // With the ffmpeg it may be running.
+                crate::children::kill_tree(child);
             }
         }
+        // Its file and .aria2 stay, for carrying on.
+        if let Some(gid) = control.aria {
+            super::engine().remove_download(&gid);
+        }
     }
+}
+
+/// How many jobs have an aria2 download of their own going (counted once,
+/// as the job).
+pub fn aria_downloads() -> usize {
+    with_jobs(|jobs| jobs.values().filter(|(_, control)| control.aria.is_some()).count())
+}
+
+fn set_aria(id: u64, gid: Option<String>) {
+    with_jobs(|jobs| {
+        if let Some((_, control)) = jobs.get_mut(&id) {
+            control.aria = gid;
+        }
+    });
 }
 
 /// Media and book downloads still going.
@@ -108,9 +188,9 @@ pub fn start(request: &DownloadRequest, dir: &str, name: Option<String>, deliver
         native => {
             let (job, cancelled) = begin(&label);
             let (url, dir) = (request.url.clone(), PathBuf::from(dir));
-            let max_speed = request.settings.max_speed;
+            let (settings, resume) = (request.settings.clone(), request.resume);
             let task = runtime().spawn(async move {
-                let result = download_native(job, native, &url, &media, &dir, name.as_deref(), max_speed).await;
+                let result = download_native(job, native, &url, &media, &dir, name.as_deref(), &settings, resume).await;
                 end(job);
                 if cancelled.load(Ordering::SeqCst) {
                     return;
@@ -126,6 +206,9 @@ pub fn start(request: &DownloadRequest, dir: &str, name: Option<String>, deliver
     }
 }
 
+/// Runs yt-dlp for `media`: once, or for a playlist partly saved as audio,
+/// once for the video items and then once for the audio ones (see
+/// ytdlp::download_args), as one job.
 #[allow(clippy::too_many_arguments)]
 fn start_ytdlp(
     record: i64,
@@ -138,19 +221,15 @@ fn start_ytdlp(
     settings: &super::DownloadSettings,
 ) -> Result<u64, String> {
     use std::io::BufRead;
-    let args = extractors::ytdlp::download_args(url, media, dir, name.as_deref(), settings);
-    let mut child = crate::platform::ytdlp_command()
-        .ok_or("yt-dlp isn't available")?
-        .args(&args)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Couldn't run yt-dlp: {e}"))?;
-
+    let runs = extractors::ytdlp::download_args(url, media, dir, name.as_deref(), settings);
+    // A playlist's files, for "3 of 12" (yt-dlp says when each starts).
+    let count = if media.playlist { if media.items.is_empty() { media.entries } else { media.items.len() } } else { 0 };
+    if crate::platform::ytdlp_command().is_none() {
+        return Err("yt-dlp isn't available".to_string());
+    }
     let (job, cancelled) = begin(&label);
-    let stdout = child.stdout.take();
-    // Shared with cancel(), which kills it.
-    let child = Arc::new(Mutex::new(Some(child)));
+    // The running yt-dlp, shared with cancel(), which kills it.
+    let child: Arc<Mutex<Option<std::process::Child>>> = Arc::new(Mutex::new(None));
     with_jobs(|jobs| {
         if let Some((_, control)) = jobs.get_mut(&job) {
             control.child = Some(Arc::clone(&child));
@@ -158,35 +237,73 @@ fn start_ytdlp(
     });
     std::thread::spawn(move || {
         let mut files = Vec::new();
-        if let Some(stdout) = stdout {
-            for line in std::io::BufReader::new(stdout).lines().map_while(Result::ok) {
-                if let Some(path) = line.strip_prefix(extractors::ytdlp::SAVED_PREFIX) {
-                    files.push(PathBuf::from(path.trim()));
-                } else if let Some((done, total)) = extractors::ytdlp::parse_progress(&line) {
-                    progress(job, done, total);
+        let mut failure = None;
+        for args in runs {
+            let spawned = crate::platform::ytdlp_command().ok_or_else(|| std::io::Error::other("yt-dlp isn't available")).and_then(|mut c| {
+                crate::children::own_group(&mut c)
+                    .args(&args)
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+            });
+            let mut running = match spawned {
+                Ok(running) => running,
+                Err(e) => {
+                    failure = Some(format!("Couldn't run yt-dlp: {e}"));
+                    break;
+                }
+            };
+            let stdout = running.stdout.take();
+            *child.lock().unwrap_or_else(|e| e.into_inner()) = Some(running);
+            if cancelled.load(Ordering::SeqCst) {
+                // Cancelled between two runs: this one goes too.
+                if let Some(mut c) = child.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                    crate::children::kill_tree(&mut c);
+                }
+                break;
+            }
+            if let Some(stdout) = stdout {
+                for line in std::io::BufReader::new(stdout).lines().map_while(Result::ok) {
+                    if let Some(path) = line.strip_prefix(extractors::ytdlp::SAVED_PREFIX) {
+                        files.push(PathBuf::from(path.trim()));
+                        wrote(job, Path::new(path.trim()));
+                    } else if let Some(path) = line.strip_prefix(extractors::ytdlp::TARGET_PREFIX) {
+                        wrote(job, Path::new(path.trim()));
+                    } else if let Some(title) = line.strip_prefix(extractors::ytdlp::ITEM_PREFIX) {
+                        if count > 1 {
+                            next_part(job, count, title.trim());
+                        }
+                    } else if let Some((done, total)) = extractors::ytdlp::parse_progress(&line) {
+                        progress(job, done, total);
+                    }
+                }
+            }
+            let taken = child.lock().unwrap_or_else(|e| e.into_inner()).take();
+            let Some(taken) = taken else {
+                break;
+            };
+            match taken.wait_with_output() {
+                Ok(output) if output.status.success() => {}
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    log_stderr(&label, &stderr);
+                    let last = stderr.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("yt-dlp failed");
+                    failure = Some(last.trim_start_matches("ERROR: ").to_string());
+                    break;
+                }
+                Err(e) => {
+                    failure = Some(e.to_string());
+                    break;
                 }
             }
         }
-        let child = child.lock().unwrap_or_else(|e| e.into_inner()).take();
-        let result = match child {
-            Some(child) => child.wait_with_output(),
-            None => return,
-        };
         end(job);
         if cancelled.load(Ordering::SeqCst) {
             return; // paused or cancelled
         }
-        match result {
-            Ok(output) if output.status.success() => {
-                finished(record, saved_name(&files, label), true, String::new(), deliver, files.first().cloned())
-            }
-            Ok(output) => {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                log_stderr(&label, &stderr);
-                let last = stderr.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("yt-dlp failed");
-                finished(record, label, false, last.trim_start_matches("ERROR: ").to_string(), None, None);
-            }
-            Err(e) => finished(record, label, false, e.to_string(), None, None),
+        match failure {
+            None => finished(record, saved_name(&files, label), true, String::new(), deliver, files.first().cloned()),
+            Some(message) => finished(record, label, false, message, None, None),
         }
     });
     Ok(job)
@@ -225,35 +342,72 @@ async fn download_native(
     media: &MediaRequest,
     dir: &Path,
     name: Option<&str>,
-    max_speed: u64,
+    settings: &super::DownloadSettings,
+    // Carrying on: files it finished are kept, partial ones continued.
+    resume: bool,
 ) -> Result<Vec<PathBuf>, String> {
     let fetches = extractors::resolve(service, url, media).await?;
     if fetches.is_empty() {
         return Err("Nothing to download".to_string());
     }
+    // Several files go in a folder of their own (`name`, else the post's
+    // caption), each named by its place in the post.
     let several = fetches.len() > 1;
+    let caption = fetches.first().and_then(|f| f.caption.as_deref()).map(safe_name).filter(|c| !c.is_empty());
+    let dir = match (several, name) {
+        (false, _) => dir.to_path_buf(),
+        (true, Some(name)) => dir.join(safe_name(name)),
+        (true, None) => dir.join(caption.clone().unwrap_or_else(|| format!("{} post", service.label()))),
+    };
+    if several {
+        tokio::fs::create_dir_all(&dir).await.map_err(|e| format!("Couldn't make the folder: {e}"))?;
+    }
     let mut files = Vec::new();
     for fetch in &fetches {
         let base = match (name, several) {
             (Some(name), false) => safe_name(name),
-            (Some(name), true) => format!("{} {}", safe_name(name), fetch.index + 1),
-            (None, _) => {
-                let caption = fetch.caption.as_deref().map(safe_name).filter(|c| !c.is_empty());
-                match caption {
-                    Some(c) if several => format!("{c} {}", fetch.index + 1),
-                    Some(c) => c,
-                    None => format!("{} {}", service.label(), fetch.index + 1),
-                }
-            }
+            (_, true) => format!("{:02} {}", fetch.index + 1, caption.as_deref().unwrap_or(service.label())),
+            (None, false) => caption.clone().unwrap_or_else(|| format!("{} {}", service.label(), fetch.index + 1)),
         };
         let path = dir.join(format!("{base}.{}", fetch.ext));
-        if fetch.hls {
-            save_hls(fetch, &path).await?;
-        } else {
-            save(job, fetch, &path, max_speed).await?;
+        if several {
+            next_part(job, fetches.len(), &format!("{base}.{}", fetch.ext));
         }
-        if !media.audio_codec.is_empty() && fetch.kind != extractors::MediaKind::Image {
-            files.push(to_audio(&path, &media.audio_codec, media.audio_kbps).await?);
+        wrote(job, &path);
+        let audio = extractors::as_audio(media, fetch.index) && fetch.kind != extractors::MediaKind::Image;
+        // Finished before it stopped (as audio, the converted file).
+        let finished = if audio { audio_path(&path, &media.audio_codec) } else { path.clone() };
+        if resume && !part_path(&path).exists() && std::fs::metadata(&finished).is_ok_and(|m| m.len() > 0) {
+            let size = std::fs::metadata(&finished).map(|m| m.len()).unwrap_or(0);
+            progress(job, size, size);
+            wrote(job, &finished);
+            files.push(finished);
+            continue;
+        }
+        if fetch.hls {
+            save_hls(job, fetch, &path).await?;
+        } else {
+            let mut fetch = fetch.clone();
+            let mut refreshed = 0;
+            loop {
+                match save(job, &fetch, &path, settings, resume || refreshed > 0).await {
+                    Ok(()) => break,
+                    // Its link ran out (they're signed, and don't last):
+                    // a fresh one, carrying on from what's saved.
+                    Err(e) if refreshed < 2 && link_expired(&e) => {
+                        refreshed += 1;
+                        log::warn!("{}: link expired ({e}); getting a new one", path.display());
+                        let fresh = extractors::resolve(service, url, media).await?;
+                        fetch = fresh.into_iter().find(|f| f.index == fetch.index).ok_or(e)?;
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+        }
+        if audio {
+            let audio = to_audio(job, &path, &media.audio_codec, media.audio_kbps).await?;
+            wrote(job, &audio);
+            files.push(audio);
         } else {
             files.push(path);
         }
@@ -261,57 +415,113 @@ async fn download_native(
     Ok(files)
 }
 
-/// Streams a file to `path`, reporting progress.
-/// `max_speed`: bytes per second, 0 for no limit.
-async fn save(job: u64, fetch: &Fetch, path: &Path, max_speed: u64) -> Result<(), String> {
-    use tokio::io::AsyncWriteExt;
-    let mut response = extractors::http::get_following(&fetch.url, &fetch.headers, None)
-        .await?
-        .error_for_status()
-        .map_err(|e| e.to_string())?;
-    let total = response.content_length().unwrap_or(0);
-    let mut file = tokio::fs::File::create(path).await.map_err(|e| e.to_string())?;
-    let mut done = 0u64;
-    let started = std::time::Instant::now();
-    while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
-        file.write_all(&chunk).await.map_err(|e| e.to_string())?;
-        done += chunk.len() as u64;
-        progress(job, done, total);
-        // Ahead of the limit: wait until the average is back down to it.
-        if max_speed > 0 {
-            let due = std::time::Duration::from_secs_f64(done as f64 / max_speed as f64);
-            let elapsed = started.elapsed();
-            if due > elapsed {
-                tokio::time::sleep(due - elapsed).await;
-            }
-        }
-    }
-    file.flush().await.map_err(|e| e.to_string())?;
-    if done == 0 {
-        let _ = tokio::fs::remove_file(path).await;
-        return Err("The site sent an empty file".to_string());
-    }
-    Ok(())
+/// Where a file is written until it's whole.
+fn part_path(path: &Path) -> PathBuf {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(".part");
+    path.with_file_name(name)
 }
 
-async fn ffmpeg(args: Vec<String>) -> Result<(), String> {
-    let output = tokio::task::spawn_blocking(move || match crate::platform::ffmpeg_command() {
-        Some(mut command) => command.args(&args).output(),
-        None => Err(std::io::Error::other("ffmpeg isn't available")),
+/// Downloads a file to `path` with aria2 (its connections, retries and
+/// speed limit from `settings`), through its .part, reporting progress.
+/// A pause removes the aria2 download but keeps the .part and its .aria2,
+/// which `resume` carries on from, even from a fresh link. Otherwise any
+/// left from before are dropped first.
+async fn save(job: u64, fetch: &Fetch, path: &Path, settings: &super::DownloadSettings, resume: bool) -> Result<(), String> {
+    let part = part_path(path);
+    let control = part.with_file_name(format!("{}.aria2", part.file_name().unwrap_or_default().to_string_lossy()));
+    if !resume {
+        let _ = tokio::fs::remove_file(&part).await;
+        let _ = tokio::fs::remove_file(&control).await;
+    }
+    let dir = path.parent().unwrap_or(Path::new(".")).to_string_lossy().into_owned();
+    let out = part.file_name().unwrap_or_default().to_string_lossy().into_owned();
+    let engine = super::engine();
+    let gid = engine.start_download_with_headers(&fetch.url, &dir, Some(&out), None, settings, &fetch.headers)?;
+    set_aria(job, Some(gid.clone()));
+    let result = loop {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let Some(p) = engine.get_progress(&gid) else {
+            continue; // not picked up yet
+        };
+        progress(job, p.completed_length, p.total_length);
+        match p.status.as_str() {
+            "complete" => break Ok(()),
+            "error" | "removed" => break Err(engine.error_message(&gid).unwrap_or(p.status)),
+            _ => {}
+        }
+    };
+    set_aria(job, None);
+    result?;
+    if tokio::fs::metadata(&part).await.map(|m| m.len()).unwrap_or(0) == 0 {
+        let _ = tokio::fs::remove_file(&part).await;
+        return Err("The site sent an empty file".to_string());
+    }
+    tokio::fs::rename(&part, path).await.map_err(|e| e.to_string())
+}
+
+/// An error that means the file's link has run out: the site refusing it
+/// (403), or no longer knowing it (404, 410).
+fn link_expired(error: &str) -> bool {
+    ["error: 403", "error: 404", "error: 410", "403 Forbidden", "404 Not Found", "410 Gone"].iter().any(|code| error.contains(code))
+}
+
+/// Runs ffmpeg for `job`, which can stop it: it's the job's child while it
+/// runs (`cancel` kills it, like yt-dlp), so a pause doesn't leave it going.
+async fn ffmpeg(job: u64, args: Vec<String>) -> Result<(), String> {
+    let slot: Arc<Mutex<Option<std::process::Child>>> = Arc::new(Mutex::new(None));
+    with_jobs(|jobs| {
+        if let Some((_, control)) = jobs.get_mut(&job) {
+            control.child = Some(Arc::clone(&slot));
+        }
+    });
+    let (status, stderr) = tokio::task::spawn_blocking(move || {
+        use std::io::Read;
+        let mut command = crate::platform::ffmpeg_command().ok_or_else(|| std::io::Error::other("ffmpeg isn't available"))?;
+        let mut child = crate::children::own_group(&mut command)
+            .args(&args)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .spawn()?;
+        let mut err = child.stderr.take();
+        let errors = std::thread::spawn(move || {
+            let mut text = String::new();
+            if let Some(err) = err.as_mut() {
+                let _ = err.read_to_string(&mut text);
+            }
+            text
+        });
+        *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(child);
+        // Polled, not waited on under the lock: `cancel` takes it to kill.
+        let status = loop {
+            let done = slot.lock().unwrap_or_else(|e| e.into_inner()).as_mut().map(|c| c.try_wait());
+            match done {
+                Some(Ok(Some(status))) => break status,
+                Some(Ok(None)) => std::thread::sleep(std::time::Duration::from_millis(100)),
+                Some(Err(e)) => return Err(e),
+                None => return Err(std::io::Error::other("stopped")),
+            }
+        };
+        slot.lock().unwrap_or_else(|e| e.into_inner()).take();
+        Ok::<_, std::io::Error>((status, errors.join().unwrap_or_default()))
     })
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| format!("Couldn't run ffmpeg: {e}"))?;
-    if output.status.success() {
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| format!("Couldn't run ffmpeg: {e}"))?;
+    with_jobs(|jobs| {
+        if let Some((_, control)) = jobs.get_mut(&job) {
+            control.child = None;
+        }
+    });
+    if status.success() {
         Ok(())
     } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
         Err(stderr.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("ffmpeg failed").to_string())
     }
 }
 
 /// Saves an HLS stream as one mp4 (stream copy, no re-encoding).
-async fn save_hls(fetch: &Fetch, path: &Path) -> Result<(), String> {
+async fn save_hls(job: u64, fetch: &Fetch, path: &Path) -> Result<(), String> {
     let headers: String = fetch.headers.iter().map(|(k, v)| format!("{k}: {v}\r\n")).collect();
     let mut args = vec!["-y".to_string()];
     if !headers.is_empty() {
@@ -323,17 +533,20 @@ async fn save_hls(fetch: &Fetch, path: &Path) -> Result<(), String> {
             .map(|s| s.to_string()),
     );
     args.push(path.to_string_lossy().into_owned());
-    ffmpeg(args).await
+    ffmpeg(job, args).await
 }
 
 /// Replaces a downloaded video with its audio, as mp3 or m4a.
 /// Returns the audio file's path.
-async fn to_audio(path: &Path, codec: &str, kbps: u32) -> Result<PathBuf, String> {
-    let (encoder, ext) = match codec {
-        "mp3" => ("libmp3lame", "mp3"),
-        _ => ("aac", "m4a"),
-    };
-    let target = path.with_extension(ext);
+/// The audio file `to_audio` makes of `path`.
+fn audio_path(path: &Path, codec: &str) -> PathBuf {
+    path.with_extension(if codec == "mp3" { "mp3" } else { "m4a" })
+}
+
+async fn to_audio(job: u64, path: &Path, codec: &str, kbps: u32) -> Result<PathBuf, String> {
+    let encoder = if codec == "mp3" { "libmp3lame" } else { "aac" };
+    let target = audio_path(path, codec);
+    let ext = target.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
     // ffmpeg can't write over its own input (an .m4a kept as m4a).
     let out = if target == path { path.with_extension(format!("audio.{ext}")) } else { target.clone() };
     let mut args = vec!["-y".to_string(), "-i".to_string(), path.to_string_lossy().into_owned()];
@@ -342,7 +555,7 @@ async fn to_audio(path: &Path, codec: &str, kbps: u32) -> Result<PathBuf, String
         args.extend(["-b:a".to_string(), format!("{kbps}k")]);
     }
     args.push(out.to_string_lossy().into_owned());
-    ffmpeg(args).await?;
+    ffmpeg(job, args).await?;
     let _ = tokio::fs::remove_file(path).await;
     if out != target {
         tokio::fs::rename(&out, &target).await.map_err(|e| e.to_string())?;

@@ -174,6 +174,11 @@ pub fn show_toast(message: &str) {
 }
 pub fn set_bar_icons_dark(_: bool) {}
 
+/// Desktops have no share sheet to hand things to.
+pub fn share(_files: &[String], _text: &str) {
+    show_toast("Sharing isn't available here");
+}
+
 /// ffmpeg from PATH (merging, HLS, converting to audio).
 /// The yt-dlp helper apps are Android's; elsewhere yt-dlp is a normal program.
 pub fn helper_apps() -> Option<(std::collections::HashMap<String, String>, String)> {

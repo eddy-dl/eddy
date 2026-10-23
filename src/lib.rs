@@ -1,4 +1,5 @@
 pub mod cache;
+pub mod children;
 pub mod components;
 pub mod cookies;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -56,6 +57,7 @@ fn android_main(app: AndroidApp) {
     };
     // Logs that grew too big since last time (in the background).
     logs::trim();
+    preferences::apply_font(&ui.global::<ThemeSettings>());
     let ui_weak = ui.as_weak();
     let update_system_accent = move || {
         if let Some(ui) = ui_weak.upgrade() {
@@ -170,6 +172,7 @@ fn run_share_popup() {
             return;
         }
     };
+    preferences::apply_font(&ui.global::<ThemeSettings>());
     preferences::load_theme(&ui);
     preferences::apply_download_defaults(&ui.global::<AppSettings>());
     folders::install(&ui);

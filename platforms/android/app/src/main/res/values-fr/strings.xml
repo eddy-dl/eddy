@@ -27,6 +27,8 @@
     <string name="downloaded_name">%s téléchargé</string>
     <string name="download_failed_name">Échec du téléchargement : %s</string>
     <string name="cant_open_file">Impossible d\'ouvrir le fichier</string>
+    <string name="saved_in_folder">Enregistré dans %1$s</string>
+    <string name="cant_share">Impossible de les partager</string>
     <string name="cant_delete_file">Impossible de supprimer le fichier</string>
     <string name="allow_installs">Autorisez Eddy à installer des applications, puis touchez à nouveau le paquet</string>
 </resources>

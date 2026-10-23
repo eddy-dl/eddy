@@ -9,14 +9,14 @@
 
 use crate::downloader::{self, Backend, DownloadRequest, Handle};
 use crate::{
-    DownloadItem, DownloadState, DownloaderApp, FileFilter, FileType, ItemAction, LinkBackend, ListOptions, SelectionAction,
-    SortKey, TabListOptions,
+    DownloadItem, DownloadState, DownloaderApp, FileFilter, FileType, FolderFile, FolderFiles, ItemAction, LinkBackend,
+    ListOptions, SelectionAction, SortKey, TabListOptions,
 };
 use slint::ComponentHandle;
 use serde::{Deserialize, Serialize};
 use slint::{Model, ModelRc, VecModel};
 use std::rc::Rc;
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -70,6 +70,18 @@ pub struct Saved {
     /// A folder picked for an unfinished download (as `request.folder`
     /// takes it): its files move there once it's done (`apply_move`).
     pub move_to: Option<String>,
+    /// What an unfinished download has written (`note_written`), removed
+    /// if it's cancelled or deleted with its files.
+    pub partial: Vec<String>,
+    /// Done, it saved a folder (a playlist, a post, a torrent's files):
+    /// `path` is the folder.
+    pub is_folder: bool,
+    /// It's several files (so they go in a folder): known from the
+    /// request, or seen while it ran.
+    pub several: bool,
+    /// A finished folder's files when it finished (paths inside it, sizes),
+    /// so ones moved or deleted since can be shown as missing.
+    pub files: Vec<(String, u64)>,
 }
 
 /// A record and what's running it.
@@ -83,6 +95,8 @@ struct Entry {
     /// For a speed where the work doesn't report one: (bytes, when).
     last: Option<(u64, Instant)>,
     speed: f64,
+    /// With several files: which one it's on, and the whole's progress.
+    part: Option<(String, f32)>,
 }
 
 static ENTRIES: Mutex<Option<Vec<Entry>>> = Mutex::new(None);
@@ -104,7 +118,13 @@ fn with_entries<T>(f: impl FnOnce(&mut Vec<Entry>) -> T) -> T {
                 if matches!(saved.state, State::Active | State::Queued) {
                     saved.state = State::Paused;
                 }
-                Some(Entry { id, saved, handle: None, retired: Vec::new(), last: None, speed: 0.0 })
+                // Saved when torrents had a type of their own (6): what's in
+                // them instead.
+                if saved.file_type == 6 {
+                    saved.file_type = file_type_index(guess_type(&saved.request));
+                    saved.several |= several_files(&saved.request);
+                }
+                Some(Entry { id, saved, handle: None, retired: Vec::new(), last: None, speed: 0.0, part: None })
             })
             .collect()
     });
@@ -130,13 +150,14 @@ pub fn register(request: &DownloadRequest) -> i64 {
         state: State::Active,
         folder: folder_display(request),
         added: now(),
+        several: several_files(request),
         ..Default::default()
     };
     let id = crate::db::insert_download(&serde_json::to_string(&saved).unwrap_or_default());
     let mut saved = saved;
     saved.request.id = id;
     if id > 0 {
-        with_entries(|entries| entries.push(Entry { id, saved, handle: None, retired: Vec::new(), last: None, speed: 0.0 }));
+        with_entries(|entries| entries.push(Entry { id, saved, handle: None, retired: Vec::new(), last: None, speed: 0.0, part: None }));
     }
     id
 }
@@ -332,6 +353,7 @@ pub fn update_request(request: &DownloadRequest) {
         if let Some(entry) = entries.iter_mut().find(|e| e.id == request.id) {
             entry.saved.request = request.clone();
             entry.saved.file_type = file_type_index(guess_type(request));
+            entry.saved.several |= several_files(request);
             save(entry);
         }
     });
@@ -362,7 +384,9 @@ pub fn ended(id: i64, handle: Option<&Handle>, name: &str, ok: bool, message: &s
         entry.saved.message = message.to_string();
         if ok {
             entry.saved.name = name.to_string();
-            let mut path = path;
+            entry.saved.partial.clear();
+            // Several files: the folder they're in, not the first of them.
+            let mut path = path.map(|p| top_item(&entry.saved, p));
             // Renamed while it downloaded.
             if let (Some(new_name), Some(old)) = (entry.saved.rename_to.take(), path.clone()) {
                 let new = renamed(&old, &new_name);
@@ -372,7 +396,18 @@ pub fn ended(id: i64, handle: Option<&Handle>, name: &str, ok: bool, message: &s
                 }
             }
             // What it came to on disk (books counted chapters until now).
-            if let Some(size) = path.as_ref().and_then(|p| std::fs::metadata(p).ok()).filter(|m| m.is_file()).map(|m| m.len()) {
+            entry.saved.is_folder = path.as_ref().is_some_and(|p| p.is_dir());
+            entry.saved.files = match &path {
+                Some(dir) if entry.saved.is_folder => folder_listing(dir),
+                _ => Vec::new(),
+            };
+            // A torrent's one file, now that it's known.
+            if entry.saved.request.backend == Backend::Torrent && !entry.saved.is_folder {
+                if let Some(name) = path.as_ref().and_then(|p| p.file_name()) {
+                    entry.saved.file_type = file_type_index(crate::links::file_type_for(&name.to_string_lossy(), None));
+                }
+            }
+            if let Some(size) = path.as_deref().map(disk_size).filter(|&n| n > 0) {
                 entry.saved.total = size;
                 entry.saved.done = size;
             }
@@ -383,6 +418,123 @@ pub fn ended(id: i64, handle: Option<&Handle>, name: &str, ok: bool, message: &s
         save(entry);
         true
     })
+}
+
+/// Whether a request is for several files: a playlist (not of one), a
+/// post's or a torrent's picked files. A post with all of its items, or a
+/// whole torrent, isn't known until it runs.
+fn several_files(request: &DownloadRequest) -> bool {
+    match request.backend {
+        // Several picked, or a whole torrent whose name isn't a file's (a
+        // single-file torrent is named after its file).
+        Backend::Torrent => {
+            request.select_files.contains([',', '-'])
+                || (request.select_files.is_empty() && crate::links::file_type_for(&request.filename, None) == FileType::Other)
+        }
+        Backend::Media => serde_json::from_str::<crate::extractors::MediaRequest>(&request.format).is_ok_and(|media| {
+            media.items.len() > 1 || (media.playlist && media.items.is_empty() && media.entries > 1)
+        }),
+        _ => false,
+    }
+}
+
+/// Where a download's files go: its folder (and subfolder), as written to.
+fn base_dir(saved: &Saved) -> std::path::PathBuf {
+    let dir = crate::storage::resolve_for(&saved.request.folder, saved.request.id).write_dir().to_path_buf();
+    let subfolder = &saved.request.settings.subfolder;
+    if subfolder.trim().is_empty() { dir } else { dir.join(crate::novels::clean::safe_file_name(subfolder)) }
+}
+
+/// What a download saved at the top of its folder: the folder its files
+/// went into (a playlist's, a post's, a torrent's), or the file itself.
+fn top_item(saved: &Saved, path: std::path::PathBuf) -> std::path::PathBuf {
+    let base = base_dir(saved);
+    match path.strip_prefix(&base).ok().and_then(|rel| rel.components().next()) {
+        Some(top) => base.join(top),
+        None => path,
+    }
+}
+
+/// A file's size, or everything in a folder.
+fn disk_size(path: &std::path::Path) -> u64 {
+    match std::fs::metadata(path) {
+        Ok(m) if m.is_dir() => std::fs::read_dir(path).map(|d| d.flatten().map(|e| disk_size(&e.path())).sum()).unwrap_or(0),
+        Ok(m) => m.len(),
+        Err(_) => 0,
+    }
+}
+
+/// Adds what the running work has written to the record.
+fn note_written(entry: &mut Entry) {
+    let Some(handle) = &entry.handle else {
+        return;
+    };
+    let mut changed = false;
+    for path in downloader::written(handle) {
+        let path = path.to_string_lossy().into_owned();
+        if !entry.saved.partial.contains(&path) {
+            entry.saved.partial.push(path);
+            changed = true;
+        }
+    }
+    if changed {
+        save(entry);
+    }
+}
+
+/// Removes what an unfinished download wrote: its files, the partial
+/// files beside them (yt-dlp's .part, per-format and fragment files,
+/// aria2's .aria2), and folders that leaves empty. A moment later, so the
+/// work it stopped has let go of them.
+fn discard_partial(saved: &mut Saved) {
+    let written: Vec<std::path::PathBuf> = saved.partial.drain(..).map(Into::into).collect();
+    if written.is_empty() {
+        return;
+    }
+    let base = base_dir(saved);
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        for path in &written {
+            remove_with_partials(path);
+        }
+        for path in &written {
+            let mut dir = path.parent();
+            while let Some(d) = dir.filter(|d| d.starts_with(&base) && *d != base) {
+                if std::fs::remove_dir(d).is_err() {
+                    break;
+                }
+                dir = d.parent();
+            }
+        }
+    });
+}
+
+fn remove_with_partials(path: &std::path::Path) {
+    let _ = std::fs::remove_file(path);
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name().and_then(|n| n.to_str())) else {
+        return;
+    };
+    let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
+    let Ok(siblings) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for sibling in siblings.flatten() {
+        let other = sibling.file_name().to_string_lossy().into_owned();
+        let partial = other == format!("{name}.aria2")
+            || other.strip_prefix(stem).filter(|rest| rest.starts_with('.')).is_some_and(is_partial_suffix);
+        if partial {
+            let _ = std::fs::remove_file(sibling.path());
+        }
+    }
+}
+
+/// What yt-dlp adds to an item's name while it works: `.part`, `.ytdl`,
+/// `.temp`, fragments, a format's own file (`.f137.mp4`), the thumbnail.
+fn is_partial_suffix(rest: &str) -> bool {
+    static FORMAT_RE: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"^\.f[0-9A-Za-z_-]+\.").unwrap());
+    [".part", ".ytdl", ".temp", "-Frag"].iter().any(|p| rest.contains(p))
+        || FORMAT_RE.is_match(rest)
+        || matches!(rest, ".webp" | ".jpg" | ".png")
 }
 
 /// A finished download's copy in its picked folder (Android: a document
@@ -404,6 +556,34 @@ fn is_document(path: &str) -> bool {
 
 // --- Actions ---
 
+/// Shares the selected downloads: finished ones' files (a folder's, all of
+/// them that are still there), the rest's links.
+fn share(ids: &[i32]) {
+    let (files, links) = with_entries(|entries| {
+        let (mut files, mut links) = (Vec::new(), Vec::new());
+        for entry in entries.iter().filter(|e| ids.contains(&(e.id as i32))) {
+            let saved = &entry.saved;
+            match (&saved.state, &saved.path) {
+                (State::Completed, Some(path)) if is_document(path) => files.push(path.clone()),
+                (State::Completed, Some(path)) if saved.is_folder => {
+                    let dir = std::path::Path::new(path);
+                    files.extend(folder_listing(dir).into_iter().map(|(rel, _)| dir.join(rel).to_string_lossy().into_owned()));
+                }
+                (State::Completed, Some(path)) if std::path::Path::new(path).exists() => files.push(path.clone()),
+                // A saved .torrent's path means nothing to anyone else.
+                _ if !saved.request.url.starts_with('/') => links.push(saved.request.url.clone()),
+                _ => {}
+            }
+        }
+        (files, links)
+    });
+    if files.is_empty() && links.is_empty() {
+        crate::platform::show_toast("Nothing to share: their files can't be found");
+        return;
+    }
+    crate::platform::share(&files, &links.join("\n"));
+}
+
 fn pause(id: i64) {
     with_entries(|entries| {
         let Some(entry) = entries.iter_mut().find(|e| e.id == id) else {
@@ -412,6 +592,7 @@ fn pause(id: i64) {
         if !matches!(entry.saved.state, State::Active | State::Queued) {
             return;
         }
+        note_written(entry);
         if let Some(handle) = &entry.handle {
             downloader::pause(handle);
             // A job is gone once stopped; aria2 keeps its download, paused.
@@ -454,7 +635,7 @@ fn resume(id: i64) {
         entry.saved.state = State::Active;
         entry.saved.message.clear();
         save(entry);
-        Some(entry.saved.request.clone())
+        Some(DownloadRequest { resume: true, ..entry.saved.request.clone() })
     });
     // Outside the lock: starting reports back through `running`.
     if let Some(request) = restart {
@@ -472,9 +653,12 @@ fn cancel(id: i64) {
         if !matches!(entry.saved.state, State::Active | State::Queued | State::Paused) {
             return;
         }
+        note_written(entry);
         if let Some(handle) = entry.handle.take() {
             downloader::cancel(&handle);
         }
+        // Trying it again starts over, so what it had is no use.
+        discard_partial(&mut entry.saved);
         entry.saved.state = State::Cancelled;
         save(entry);
     });
@@ -485,16 +669,19 @@ fn delete(id: i64, files: bool) {
     let removed = with_entries(|entries| {
         let index = entries.iter().position(|e| e.id == id)?;
         let mut entry = entries.remove(index);
+        note_written(&mut entry);
         if let Some(handle) = entry.handle.take() {
             downloader::cancel(&handle);
         }
         Some(entry)
     });
-    let Some(entry) = removed else {
+    let Some(mut entry) = removed else {
         return;
     };
     crate::db::delete_download(id);
-    if files {
+    if files && entry.saved.state != State::Completed {
+        discard_partial(&mut entry.saved);
+    } else if files {
         if let Some(uri) = entry.saved.path.as_ref().filter(|p| is_document(p)) {
             crate::platform::delete_document(uri);
         } else if let Some(path) = &entry.saved.path {
@@ -504,13 +691,105 @@ fn delete(id: i64, files: bool) {
     }
 }
 
+/// Opens a finished download: its file, or for a folder, the list of its
+/// files (FolderFilesSheet). A file that's gone says so instead.
 fn open(id: i64) {
-    let found = with_entries(|entries| entries.iter().find(|e| e.id == id).map(|e| (e.saved.path.clone(), e.saved.folder.clone())));
-    match found {
-        Some((Some(path), _)) => crate::platform::open_file(&path),
-        Some((None, folder)) => crate::platform::show_toast(&format!("Saved in {folder}")),
-        None => {}
+    let found = with_entries(|entries| entries.iter().find(|e| e.id == id).map(|e| e.saved.clone()));
+    let Some(saved) = found else {
+        return;
+    };
+    let Some(path) = saved.path.clone() else {
+        crate::platform::show_toast(&format!("Saved in {}", saved.folder));
+        return;
+    };
+    if is_document(&path) {
+        crate::platform::open_file(&path);
+        return;
     }
+    let dir = std::path::Path::new(&path);
+    if saved.is_folder {
+        // Recorded when it finished; downloads from before that, as it is now.
+        let recorded = if saved.files.is_empty() { folder_listing(dir) } else { saved.files.clone() };
+        if recorded.is_empty() {
+            crate::platform::show_toast(if dir.exists() { "This folder is empty" } else { "This folder can't be found. It may have been moved or deleted" });
+            return;
+        }
+        show_folder(id, &saved.name, dir, &recorded);
+        return;
+    }
+    if dir.exists() {
+        crate::platform::open_file(&path);
+    } else {
+        crate::platform::show_toast("This file can't be found. It may have been moved or deleted");
+    }
+}
+
+/// The files in a folder (paths inside it, sizes), sorted. aria2's
+/// .aria2 files are left out.
+fn folder_listing(dir: &std::path::Path) -> Vec<(String, u64)> {
+    fn walk(base: &std::path::Path, dir: &std::path::Path, out: &mut Vec<(String, u64)>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            if out.len() >= 5000 {
+                return;
+            }
+            let path = entry.path();
+            match entry.metadata() {
+                Ok(m) if m.is_dir() => walk(base, &path, out),
+                Ok(m) if !path.extension().is_some_and(|e| e == "aria2") => {
+                    let rel = path.strip_prefix(base).unwrap_or(&path).to_string_lossy().into_owned();
+                    out.push((rel, m.len()));
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(dir, dir, &mut files);
+    files.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+    files
+}
+
+/// Fills in and opens the folder sheet.
+fn show_folder(id: i64, name: &str, dir: &std::path::Path, files: &[(String, u64)]) {
+    let rows: Vec<FolderFile> = files
+        .iter()
+        .map(|(rel, size)| {
+            let on_disk = std::fs::metadata(dir.join(rel)).ok().filter(|m| m.is_file());
+            FolderFile {
+                name: rel.clone().into(),
+                size: crate::links::format_size(on_disk.as_ref().map_or(*size, |m| m.len())).into(),
+                file_type: crate::links::file_type_for(rel, None),
+                missing: on_disk.is_none(),
+            }
+        })
+        .collect();
+    let missing = rows.iter().filter(|r| r.missing).count();
+    APP.with(|app| {
+        let Some(ui) = app.borrow().as_ref().and_then(|w| w.upgrade()) else {
+            return;
+        };
+        let sheet = ui.global::<FolderFiles>();
+        sheet.set_id(id as i32);
+        sheet.set_title(name.into());
+        sheet.set_files(ModelRc::new(VecModel::from(rows)));
+        sheet.set_missing(missing as i32);
+        sheet.set_open(true);
+    });
+}
+
+/// A finished folder download's folder, and the path of its file at
+/// `index` in the sheet's list.
+fn folder_file(id: i64, index: Option<usize>) -> Option<(std::path::PathBuf, Option<std::path::PathBuf>)> {
+    with_entries(|entries| {
+        let saved = &entries.iter().find(|e| e.id == id)?.saved;
+        let dir = std::path::PathBuf::from(saved.path.as_ref()?);
+        let files = if saved.files.is_empty() { folder_listing(&dir) } else { saved.files.clone() };
+        let file = index.and_then(|i| files.get(i)).map(|(rel, _)| dir.join(rel));
+        Some((dir, file))
+    })
 }
 
 /// Renames a finished download's file (unfinished ones keep their name).
@@ -546,6 +825,9 @@ fn rename(id: i64, name: &str) {
 
 /// `old` with the name `name`, keeping its extension unless `name` has one.
 fn renamed(old: &std::path::Path, name: &str) -> std::path::PathBuf {
+    if old.is_dir() {
+        return old.with_file_name(name);
+    }
     let new_name = match (old.extension(), std::path::Path::new(name).extension()) {
         (Some(ext), None) => format!("{name}.{}", ext.to_string_lossy()),
         _ => name.to_string(),
@@ -679,6 +961,46 @@ pub fn apply_move(id: i64, path: Option<std::path::PathBuf>, deliver: Option<dow
     }
 }
 
+/// A finished torrent with several files: its folder (the torrent's own
+/// name) renamed to the folder name the preview gave it. Returns where its
+/// first file is now.
+pub fn name_torrent_folder(id: i64, path: Option<std::path::PathBuf>, deliver: Option<&downloader::Deliver>) -> Option<std::path::PathBuf> {
+    let path = path?;
+    let wanted = with_entries(|entries| {
+        let request = &entries.iter().find(|e| e.id == id)?.saved.request;
+        let name = crate::novels::clean::safe_file_name(request.filename.trim());
+        (request.backend == Backend::Torrent && !name.is_empty()).then(|| (name, request.folder.clone(), request.settings.subfolder.clone()))
+    });
+    let Some((name, folder, subfolder)) = wanted else {
+        return Some(path);
+    };
+    let mut dir = match deliver {
+        Some(d) => d.staging.clone(),
+        None => crate::storage::resolve(&folder).write_dir().to_path_buf(),
+    };
+    if !subfolder.trim().is_empty() {
+        dir = dir.join(crate::novels::clean::safe_file_name(&subfolder));
+    }
+    let Ok(rel) = path.strip_prefix(&dir).map(|r| r.to_path_buf()) else {
+        return Some(path);
+    };
+    let mut parts = rel.components();
+    let Some(top) = parts.next().map(|c| dir.join(c)) else {
+        return Some(path);
+    };
+    let inside: std::path::PathBuf = parts.collect();
+    // Single-file torrents keep their file's name.
+    if !top.is_dir() || inside.as_os_str().is_empty() || top.file_name().is_some_and(|n| n == name.as_str()) {
+        return Some(path);
+    }
+    let renamed = dir.join(&name);
+    if renamed.exists() || std::fs::rename(&top, &renamed).is_err() {
+        log::warn!("couldn't rename {} to {name}", top.display());
+        return Some(path);
+    }
+    Some(renamed.join(inside))
+}
+
 /// Moves `from` to `to`: Ok(true) when renamed, Ok(false) when it's being
 /// copied across drives in the background (with `background`), Err when it
 /// couldn't.
@@ -700,9 +1022,9 @@ fn move_item(id: i64, from: &std::path::Path, to: &std::path::Path, background: 
     std::thread::spawn(move || match copy() {
         Ok(()) => with_entries(|entries| {
             if let Some(entry) = entries.iter_mut().find(|e| e.id == id) {
-                // Its first file, wherever it is inside what moved.
-                let now = entry.saved.path.as_ref().and_then(|p| std::path::Path::new(p).strip_prefix(&from).ok().map(|r| to.join(r)));
-                entry.saved.path = now.or(Some(to.clone())).map(|p| p.to_string_lossy().into_owned());
+                // What moved is what it saved (a folder's whole).
+                entry.saved.path = Some(to.to_string_lossy().into_owned());
+                entry.saved.is_folder = to.is_dir();
                 save(entry);
             }
         }),
@@ -793,6 +1115,19 @@ pub fn install(ui: &DownloaderApp) {
     ui.set_stopped_items(ModelRc::from(stopped.clone()));
     ui.set_completed_items(ModelRc::from(completed.clone()));
 
+    APP.with(|app| *app.borrow_mut() = Some(ui.as_weak()));
+    let folder_files = ui.global::<FolderFiles>();
+    folder_files.on_open_file(|id, index| {
+        match folder_file(id as i64, Some(index as usize)) {
+            Some((_, Some(file))) if file.is_file() => crate::platform::open_file(&file.to_string_lossy()),
+            _ => crate::platform::show_toast("This file can't be found. It may have been moved or deleted"),
+        }
+    });
+    folder_files.on_open_folder(|id| match folder_file(id as i64, None) {
+        Some((dir, _)) if dir.is_dir() => crate::platform::open_file(&dir.to_string_lossy()),
+        _ => crate::platform::show_toast("This folder can't be found. It may have been moved or deleted"),
+    });
+
     ui.on_download_options_changed(|id, options| {
         change_options(id as i64, &options);
         refresh_now();
@@ -881,6 +1216,8 @@ pub fn install(ui: &DownloaderApp) {
 
 thread_local! {
     static REFRESH: std::cell::RefCell<Option<Box<dyn Fn()>>> = const { std::cell::RefCell::new(None) };
+    /// The app, for the folder sheet `open` fills in.
+    static APP: std::cell::RefCell<Option<slint::Weak<DownloaderApp>>> = const { std::cell::RefCell::new(None) };
 }
 
 /// Shows an action's result straight away rather than at the next tick.
@@ -904,6 +1241,10 @@ pub fn control_all(cancel_them: bool) {
 
 /// Acts on the selected downloads (the selection bar).
 pub fn act(ids: &[i32], action: SelectionAction, delete_files: bool) {
+    if action == SelectionAction::Share {
+        share(ids);
+        return;
+    }
     for &id in ids {
         let id = id as i64;
         match action {
@@ -911,6 +1252,7 @@ pub fn act(ids: &[i32], action: SelectionAction, delete_files: bool) {
             SelectionAction::Resume => resume(id),
             SelectionAction::Cancel => cancel(id),
             SelectionAction::Delete => delete(id, delete_files),
+            SelectionAction::Share => {}
         }
     }
     pump();
@@ -960,6 +1302,7 @@ fn save_list_options(tab: i32, options: &TabListOptions) {
         FileFilter::Image => 3,
         FileFilter::Document => 4,
         FileFilter::Archive => 5,
+        FileFilter::Folder => 6,
         _ => 0,
     };
     let value = format!("{sort},{},{filter}", options.ascending as u8);
@@ -988,6 +1331,7 @@ fn load_list_options(tab: i32) -> Option<TabListOptions> {
             3 => FileFilter::Image,
             4 => FileFilter::Document,
             5 => FileFilter::Archive,
+            6 => FileFilter::Folder,
             _ => FileFilter::All,
         },
     })
@@ -1001,6 +1345,8 @@ fn matches_filter(item: &DownloadItem, filter: FileFilter) -> bool {
         FileFilter::Image => item.file_type == FileType::Image,
         FileFilter::Document => item.file_type == FileType::Document,
         FileFilter::Archive => matches!(item.file_type, FileType::Archive | FileType::DiskImage),
+        // A folder also shows under what's in it (a playlist under Video).
+        FileFilter::Folder => item.is_folder,
         _ => true,
     }
 }
@@ -1012,7 +1358,14 @@ fn items() -> Vec<Row> {
             .iter_mut()
             .map(|entry| {
                 let mut state = entry.saved.state;
+                entry.part = None;
+                note_written(entry);
                 if let Some(handle) = &entry.handle {
+                    entry.part = downloader::part(handle);
+                    if entry.part.is_some() && !entry.saved.several {
+                        entry.saved.several = true;
+                        save(entry);
+                    }
                     if let Some((live, done, total, speed)) = downloader::progress(handle) {
                         // Queued in aria2's own queue (Eddy's queued ones are
                         // paused there, or not started).
@@ -1055,7 +1408,11 @@ fn view(entry: &Entry, state: State) -> DownloadItem {
     let running = state == State::Active;
     // An unfinished book's progress is in chapters, not bytes.
     let counts_chapters = saved.request.backend == Backend::Book && state != State::Completed;
-    let progress = if saved.total > 0 { (saved.done as f64 / saved.total as f64).min(1.0) as f32 } else { 0.0 };
+    let progress = match &entry.part {
+        Some((_, fraction)) if running => *fraction,
+        _ if saved.total > 0 => (saved.done as f64 / saved.total as f64).min(1.0) as f32,
+        _ => 0.0,
+    };
     let eta = if running && entry.speed > 1.0 && saved.total > saved.done {
         duration(((saved.total - saved.done) as f64 / entry.speed) as u64)
     } else {
@@ -1095,6 +1452,8 @@ fn view(entry: &Entry, state: State) -> DownloadItem {
             Backend::Direct | Backend::Auto => LinkBackend::Direct,
         },
         folder: saved.folder.clone().into(),
+        part: entry.part.as_ref().filter(|_| running).map(|(p, _)| p.clone()).unwrap_or_default().into(),
+        is_folder: if state == State::Completed { saved.is_folder } else { saved.several },
         options: options_of(&saved.request.settings),
     }
 }
@@ -1148,7 +1507,9 @@ fn civil(z: i64) -> (i64, u32, u32) {
 /// What a new download most likely is, for its icon.
 fn guess_type(request: &DownloadRequest) -> FileType {
     match request.backend {
-        Backend::Torrent => FileType::Torrent,
+        // What's in it: a single file's type (its name is the file's);
+        // several files show as a folder (`several_files`).
+        Backend::Torrent => crate::links::file_type_for(&request.filename, None),
         Backend::Book => FileType::Document,
         Backend::Media => {
             let media: crate::extractors::MediaRequest = serde_json::from_str(&request.format).unwrap_or_default();
@@ -1184,7 +1545,7 @@ fn file_type_index(file_type: FileType) -> i32 {
         FileType::Document => 3,
         FileType::Archive => 4,
         FileType::DiskImage => 5,
-        FileType::Torrent => 6,
+        // 6 was torrents' own type (see with_entries).
         FileType::Program => 7,
         _ => 8,
     }
@@ -1198,7 +1559,6 @@ fn file_type(index: i32) -> FileType {
         3 => FileType::Document,
         4 => FileType::Archive,
         5 => FileType::DiskImage,
-        6 => FileType::Torrent,
         7 => FileType::Program,
         _ => FileType::Other,
     }

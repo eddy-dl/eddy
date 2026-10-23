@@ -54,7 +54,7 @@ component LinkRow inherits SettingsCard {
         VerticalLayout {
             alignment: center;
             Image {
-                source: @image-url("../../icons/arrow_right.svg");
+                source: @image-url("../../icons/rounded/chevron_right.svg");
                 width: 16px;
                 height: 16px;
                 colorize: root.text_color.transparentize(40%);
@@ -117,7 +117,7 @@ export component AboutSettings inherits Rectangle {
                 last: false;
                 label: @tr("Developer");
                 detail: "Nubuki-all";
-                icon: @image-url("../../icons/person.svg");
+                icon: @image-url("../../icons/rounded/person.svg");
                 text_color: root.text_color;
                 clicked => { AppSettings.open_url("https://github.com/Nubuki-all"); }
             }
@@ -126,7 +126,7 @@ export component AboutSettings inherits Rectangle {
                 last: true;
                 label: @tr("Source code");
                 detail: "GitHub";
-                icon: @image-url("../../icons/code.svg");
+                icon: @image-url("../../icons/rounded/code.svg");
                 text_color: root.text_color;
                 clicked => { AppSettings.open_url("https://github.com/Nubuki-all/eddy"); }
             }
@@ -167,7 +167,7 @@ export component AboutSettings inherits Rectangle {
             VerticalLayout {
                 padding-top: 12px;
                 Text {
-                    text: @tr("The logo's font is Pacifico, under the SIL Open Font License.");
+                    text: @tr("This app logo's font is Pacifico, under the SIL Open Font License.");
                     font-size: 12px;
                     color: root.text_color.transparentize(50%);
                     horizontal-alignment: center;

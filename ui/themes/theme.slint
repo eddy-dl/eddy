@@ -16,6 +16,11 @@ export global ThemeSettings {
     in-out property <color> system_second_accent: system_accent;
     in-out property <bool> system_has_second: false;
 
+    // The windows' font. Material's is Roboto; with the phone's own font
+    // (SLINT_DEFAULT_FONT, set as Eddy opens) it's "sans-serif", the family
+    // that font takes the place of. Set by Rust.
+    in property <string> font_family: "Roboto";
+
     // How long colours take to change with the theme (the pages' fade);
     // cards and sheets follow it.
     out property <duration> fade: 300ms;

@@ -60,7 +60,8 @@ pub struct DownloadRequest {
     /// yt-dlp format selector; empty for the other backends.
     pub format: String,
     /// File name to save as (yt-dlp: without extension); empty to let the
-    /// backend choose. Ignored for torrents, whose files keep their names.
+    /// backend choose. With several files (a playlist, a post, a torrent),
+    /// the folder they go in, each keeping its own name.
     pub filename: String,
     /// Torrent files to download, as aria2's 1-based list ("1,3"); empty for
     /// all of them.
@@ -71,6 +72,11 @@ pub struct DownloadRequest {
     /// Speed, connections, user agent and category folder (Settings →
     /// Downloads, or the preview's options for this one).
     pub settings: DownloadSettings,
+    /// Started again after a pause or a failure: the native downloader
+    /// carries on from its .part files and keeps the files it finished
+    /// (aria2 and yt-dlp find theirs themselves). Not saved.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub resume: bool,
 }
 
 /// How a download goes about it. Each backend uses what it can: aria2
@@ -201,8 +207,14 @@ fn finished_by(id: i64, handle: Option<&Handle>, name: String, ok: bool, message
         log::error!("download failed: {name}: {message}");
     }
     let deliver = deliver.filter(|_| ok);
-    // A folder picked while it downloaded: it moves there now.
-    let (path, deliver) = if ok { crate::downloads::apply_move(id, path, deliver) } else { (path, deliver) };
+    // A torrent's folder takes the name the preview gave it; a folder
+    // picked while it downloaded, it moves there now.
+    let (path, deliver) = if ok {
+        let path = crate::downloads::name_torrent_folder(id, path, deliver.as_ref());
+        crate::downloads::apply_move(id, path, deliver)
+    } else {
+        (path, deliver)
+    };
     // Staged files move into the picked folder, so the path won't hold.
     let path = if deliver.is_some() { None } else { path };
     if !crate::downloads::ended(id, handle, &name, ok, &message, path) {
@@ -281,7 +293,11 @@ pub fn summary() -> (usize, String, Option<f64>) {
         for w in watched.iter() {
             if let Some(p) = engine.get_progress(&w.gid) {
                 if first.is_empty() {
-                    first = w.label.clone();
+                    // A torrent with several files: the one it's on.
+                    first = match torrent_part(&w.gid) {
+                        Some((index, count, name)) => format!("{name} ({index} of {count})"),
+                        None => w.label.clone(),
+                    };
                 }
                 done += p.completed_length;
                 total += p.total_length;
@@ -289,11 +305,25 @@ pub fn summary() -> (usize, String, Option<f64>) {
         }
     }
     for job in media::jobs() {
-        if first.is_empty() {
-            first = job.label.clone();
+        match (&job.part, job.fraction()) {
+            // Several files: the one it's on, and the whole's progress (as
+            // a share of a million, as each file's size is only known as
+            // it starts).
+            (Some(part), Some(fraction)) => {
+                if first.is_empty() {
+                    first = format!("{} ({} of {})", part.name, part.index, part.count);
+                }
+                done += (fraction as f64 * 1_000_000.0) as u64;
+                total += 1_000_000;
+            }
+            _ => {
+                if first.is_empty() {
+                    first = job.label.clone();
+                }
+                done += job.done;
+                total += job.total;
+            }
         }
-        done += job.done;
-        total += job.total;
     }
     (count, first, (total > 0).then(|| done as f64 / total as f64))
 }
@@ -328,7 +358,7 @@ pub fn start(request: &DownloadRequest) -> Result<(), String> {
 
 /// Starts `request`'s work; its handle, or None while Auto decides.
 fn launch(request: &DownloadRequest) -> Result<Option<Handle>, String> {
-    let target = crate::storage::resolve(&request.folder);
+    let target = crate::storage::resolve_for(&request.folder, request.id);
     let deliver = match &target {
         crate::storage::SaveTarget::Staged { tree_uri, staging } => {
             std::fs::create_dir_all(staging).map_err(|e| e.to_string())?;
@@ -412,11 +442,23 @@ pub fn unpause(handle: &Handle) -> bool {
     }
 }
 
-/// Stops a download for good (its partial files stay until it's deleted).
+/// Stops a download for good (downloads::cancel clears its partial files).
 pub fn cancel(handle: &Handle) {
     match handle {
         Handle::Aria(gid) => engine().remove_download(gid),
         Handle::Job(job) => media::cancel(*job),
+    }
+}
+
+/// What a download has written so far: a job's files (and yt-dlp's
+/// targets), aria2's files.
+pub fn written(handle: &Handle) -> Vec<PathBuf> {
+    match handle {
+        Handle::Aria(gid) => ENGINE
+            .get()
+            .map(|e| e.files(gid).into_iter().filter(|(path, ..)| !path.is_empty()).map(|(path, ..)| PathBuf::from(path)).collect())
+            .unwrap_or_default(),
+        Handle::Job(job) => media::job(*job).map(|j| j.written).unwrap_or_default(),
     }
 }
 
@@ -435,7 +477,12 @@ pub fn progress(handle: &Handle) -> Option<(crate::downloads::Live, u64, u64, f6
             };
             Some((live, p.completed_length, p.total_length, p.download_speed))
         }
-        Handle::Job(job) => media::job(*job).map(|j| (Live::Active, j.done, j.total, 0.0)),
+        // Several files: their bytes so far (each one's size is only known
+        // as it starts; `part` gives the whole's progress).
+        Handle::Job(job) => media::job(*job).map(|j| match j.part {
+            Some(_) => (Live::Active, j.bytes_done(), 0, 0.0),
+            None => (Live::Active, j.done, j.total, 0.0),
+        }),
     }
 }
 
@@ -450,12 +497,44 @@ pub fn aria_file(handle: &Handle) -> Option<PathBuf> {
     }
 }
 
+/// For a job with several files: which one it's on ("3 of 12 · name"), and
+/// how far it is as a whole (0..1).
+pub fn part(handle: &Handle) -> Option<(String, f32)> {
+    match handle {
+        Handle::Job(job) => {
+            let job = media::job(*job)?;
+            let part = job.part.as_ref()?;
+            Some((format!("{} of {} · {}", part.index, part.count, part.name), job.fraction()?))
+        }
+        Handle::Aria(gid) => {
+            let (index, count, name) = torrent_part(gid)?;
+            let p = ENGINE.get()?.get_progress(gid)?;
+            let fraction = if p.total_length > 0 { (p.completed_length as f64 / p.total_length as f64) as f32 } else { 0.0 };
+            Some((format!("{index} of {count} · {name}"), fraction))
+        }
+    }
+}
+
+/// A torrent with several files: the first chosen one not done yet (its
+/// place among them, from 1), how many were chosen, and its name.
+fn torrent_part(gid: &str) -> Option<(usize, usize, String)> {
+    let files: Vec<_> = ENGINE.get()?.files(gid).into_iter().filter(|(_, _, _, selected)| *selected).collect();
+    if files.len() < 2 {
+        return None;
+    }
+    let (index, (path, ..)) =
+        files.iter().enumerate().find(|(_, (_, length, done, _))| done < length).or_else(|| files.iter().enumerate().last())?;
+    let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.clone());
+    Some((index + 1, files.len(), name))
+}
+
 /// Downloads still running or queued, across every backend and Eddy's own
 /// queue. Doesn't start the engine just to ask.
 pub fn active_count() -> usize {
     let aria = ENGINE.get().map(|e| e.active_count()).unwrap_or(0);
     // Queued ones too: the download service keeps going for them.
-    aria + media::jobs().len() + CHOOSING.load(Ordering::SeqCst) + crate::downloads::queued_count()
+    // A native extractor's job downloads its files with aria2: counted once.
+    aria.saturating_sub(media::aria_downloads()) + media::jobs().len() + CHOOSING.load(Ordering::SeqCst) + crate::downloads::queued_count()
 }
 
 /// Downloads `url` to `dir/out` with aria2 (several connections, retries),

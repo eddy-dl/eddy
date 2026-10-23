@@ -64,6 +64,7 @@ class SharePopupActivity : GameActivity() {
             windowManager.removeCrossWindowBlurEnabledListener(blurListener)
         }
         DownloadService.ping(this, popupOpen = false)
+        if (isFinishing) EddyNative.screenClosed()
         super.onDestroy()
         // Each popup needs a fresh process for Slint to start again.
         if (isFinishing) {

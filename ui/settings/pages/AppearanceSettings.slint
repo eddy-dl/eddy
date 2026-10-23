@@ -23,6 +23,14 @@ component AccentRow inherits Rectangle {
     in property <bool> is_active;
     in property <color> text_color;
     callback clicked;
+    // The selected row, as the picker opens: where it is, so the list can
+    // start there.
+    callback shown_active(y: length, height: length);
+    init => {
+        if (root.is_active) {
+            root.shown_active(root.y, root.height);
+        }
+    }
 
     height: 56px;
     border-radius: 8px;
@@ -59,6 +67,13 @@ component AccentRow inherits Rectangle {
 // system gives two colours (Android's Material You).
 component SystemAccentRow inherits Rectangle {
     in property <color> text_color;
+    // See AccentRow.
+    callback shown_active(y: length, height: length);
+    init => {
+        if (ThemeSettings.accent == AccentColor.System) {
+            root.shown_active(root.y, root.height);
+        }
+    }
     height: 56px;
     border-radius: 8px;
     background: sys_ta.has-hover ? ThemeSettings.hover_color : transparent;
@@ -298,9 +313,14 @@ export component AppearanceSettings inherits Rectangle {
                     color: root.text_color;
                 }
 
-                Flickable {
+                accent_flick := Flickable {
                     vertical-stretch: 1;
                     content-height: accent_v_layout.preferred-height;
+
+                    // Opens on the selected colour, centred where the list allows.
+                    function reveal(y: length, height: length) {
+                        self.content-y = Math.max(Math.min(0px, self.height / 2 - y - height / 2), self.height - self.content-height);
+                    }
 
                     accent_v_layout := VerticalLayout {
                         spacing: 4px;
@@ -311,6 +331,7 @@ export component AppearanceSettings inherits Rectangle {
                             fill_color: #c85450;
                             text_color: root.text_color;
                             is_active: ThemeSettings.accent == AccentColor.MutedRed;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
                             clicked => { ThemeSettings.accent = AccentColor.MutedRed; AppSettings.preferences_changed(); }
                         }
 
@@ -319,6 +340,7 @@ export component AppearanceSettings inherits Rectangle {
                             fill_color: #f4a261;
                             text_color: root.text_color;
                             is_active: ThemeSettings.accent == AccentColor.Orange;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
                             clicked => { ThemeSettings.accent = AccentColor.Orange; AppSettings.preferences_changed(); }
                         }
 
@@ -327,6 +349,7 @@ export component AppearanceSettings inherits Rectangle {
                             fill_color: #e8c75a;
                             text_color: root.text_color;
                             is_active: ThemeSettings.accent == AccentColor.Yellow;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
                             clicked => { ThemeSettings.accent = AccentColor.Yellow; AppSettings.preferences_changed(); }
                         }
 
@@ -335,6 +358,7 @@ export component AppearanceSettings inherits Rectangle {
                             fill_color: #a7c957;
                             text_color: root.text_color;
                             is_active: ThemeSettings.accent == AccentColor.Lime;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
                             clicked => { ThemeSettings.accent = AccentColor.Lime; AppSettings.preferences_changed(); }
                         }
 
@@ -343,6 +367,7 @@ export component AppearanceSettings inherits Rectangle {
                             fill_color: #81b29a;
                             text_color: root.text_color;
                             is_active: ThemeSettings.accent == AccentColor.Green;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
                             clicked => { ThemeSettings.accent = AccentColor.Green; AppSettings.preferences_changed(); }
                         }
 
@@ -351,6 +376,7 @@ export component AppearanceSettings inherits Rectangle {
                             fill_color: #2a9d8f;
                             text_color: root.text_color;
                             is_active: ThemeSettings.accent == AccentColor.Teal;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
                             clicked => { ThemeSettings.accent = AccentColor.Teal; AppSettings.preferences_changed(); }
                         }
 
@@ -359,6 +385,7 @@ export component AppearanceSettings inherits Rectangle {
                             fill_color: #3d5a80;
                             text_color: root.text_color;
                             is_active: ThemeSettings.accent == AccentColor.Blue;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
                             clicked => { ThemeSettings.accent = AccentColor.Blue; AppSettings.preferences_changed(); }
                         }
 
@@ -367,6 +394,7 @@ export component AppearanceSettings inherits Rectangle {
                             fill_color: #9c89b8;
                             text_color: root.text_color;
                             is_active: ThemeSettings.accent == AccentColor.Purple;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
                             clicked => { ThemeSettings.accent = AccentColor.Purple; AppSettings.preferences_changed(); }
                         }
 
@@ -375,6 +403,7 @@ export component AppearanceSettings inherits Rectangle {
                             fill_color: #e27aa6;
                             text_color: root.text_color;
                             is_active: ThemeSettings.accent == AccentColor.Pink;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
                             clicked => { ThemeSettings.accent = AccentColor.Pink; AppSettings.preferences_changed(); }
                         }
 
@@ -384,12 +413,14 @@ export component AppearanceSettings inherits Rectangle {
                             fill_color: #9e9e9e;
                             text_color: root.text_color;
                             is_active: ThemeSettings.accent == AccentColor.Greyscale;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
                             clicked => { ThemeSettings.accent = AccentColor.Greyscale; AppSettings.preferences_changed(); }
                         }
 
                         // One colour: with the single accents.
                         if !ThemeSettings.system_has_second: SystemAccentRow {
                             text_color: root.text_color;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
                         }
 
                         // Pairs: a main colour and a second (the logo's wave, and as
@@ -412,6 +443,7 @@ export component AppearanceSettings inherits Rectangle {
                             second_color: #f4a261;
                             text_color: root.text_color;
                             is_active: ThemeSettings.accent == AccentColor.Sunset;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
                             clicked => { ThemeSettings.accent = AccentColor.Sunset; AppSettings.preferences_changed(); }
                         }
 
@@ -421,6 +453,7 @@ export component AppearanceSettings inherits Rectangle {
                             second_color: #4ea8de;
                             text_color: root.text_color;
                             is_active: ThemeSettings.accent == AccentColor.Lagoon;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
                             clicked => { ThemeSettings.accent = AccentColor.Lagoon; AppSettings.preferences_changed(); }
                         }
 
@@ -430,6 +463,7 @@ export component AppearanceSettings inherits Rectangle {
                             second_color: #2a9d8f;
                             text_color: root.text_color;
                             is_active: ThemeSettings.accent == AccentColor.Meadow;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
                             clicked => { ThemeSettings.accent = AccentColor.Meadow; AppSettings.preferences_changed(); }
                         }
 
@@ -439,6 +473,7 @@ export component AppearanceSettings inherits Rectangle {
                             second_color: #e27aa6;
                             text_color: root.text_color;
                             is_active: ThemeSettings.accent == AccentColor.Berry;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
                             clicked => { ThemeSettings.accent = AccentColor.Berry; AppSettings.preferences_changed(); }
                         }
 
@@ -448,12 +483,14 @@ export component AppearanceSettings inherits Rectangle {
                             second_color: #9c89b8;
                             text_color: root.text_color;
                             is_active: ThemeSettings.accent == AccentColor.Dusk;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
                             clicked => { ThemeSettings.accent = AccentColor.Dusk; AppSettings.preferences_changed(); }
                         }
 
                         // Two colours: a pair, so with the pairs.
                         if ThemeSettings.system_has_second: SystemAccentRow {
                             text_color: root.text_color;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
                         }
 
 
@@ -662,7 +699,8 @@ export component AppearanceSettings inherits Rectangle {
             if !SettingsLayout.desktop: SectionHeader { text: @tr("Font"); }
             if !SettingsLayout.desktop: SwitchRow {
                 title: @tr("System font");
-                subtitle: @tr("The font your phone uses, from the next time Eddy opens.");
+                subtitle: AppSettings.system_font_status != "" ? AppSettings.system_font_status
+                    : @tr("The font your phone uses");
                 text_color: root.text_color;
                 checked <=> AppSettings.system_font;
                 toggled => { AppSettings.preferences_changed(); }

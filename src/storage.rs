@@ -40,6 +40,12 @@ impl SaveTarget {
 /// Android, a path on desktop), or "" for the folder picked in settings,
 /// or failing that the default (Download/Eddy).
 pub fn resolve(folder: &str) -> SaveTarget {
+    resolve_for(folder, 0)
+}
+
+/// `resolve`, for the download with record `id` (its staging folder, if
+/// it needs one, is its own each time it starts).
+pub fn resolve_for(folder: &str, id: i64) -> SaveTarget {
     let folder = if folder.is_empty() {
         crate::db::raw_download_path().unwrap_or_default()
     } else {
@@ -61,7 +67,7 @@ pub fn resolve(folder: &str) -> SaveTarget {
                 return SaveTarget::Dir(path);
             }
         }
-        return SaveTarget::Staged { tree_uri: folder, staging: new_staging_dir() };
+        return SaveTarget::Staged { tree_uri: folder, staging: staging_dir(id) };
     }
 
     SaveTarget::Dir(PathBuf::from(folder))
@@ -90,8 +96,13 @@ fn private_dir() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from(crate::platform::get_app_data_dir()))
 }
 
-/// A fresh folder for one staged download, in the app's own storage.
-fn new_staging_dir() -> PathBuf {
+/// A staged download's folder, in the app's own storage: its record's
+/// (`id`), so starting it again carries on with what's there; else a
+/// fresh one.
+fn staging_dir(id: i64) -> PathBuf {
+    if id > 0 {
+        return PathBuf::from(crate::platform::get_app_data_dir()).join("staging").join(format!("download-{id}"));
+    }
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

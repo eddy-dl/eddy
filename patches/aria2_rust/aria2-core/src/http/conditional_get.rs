@@ -1,0 +1,469 @@
+// Conditional GET and Smart Resume support for HTTP downloads.
+// Implements RFC 7232 (Conditional Requests) and RFC 7233 (Range Requests)
+// for efficient download resumption and unchanged-file detection.
+
+use std::collections::HashMap;
+
+/// Simple datetime structure for HTTP-date handling without a chrono dependency.
+/// Stores the timestamp as seconds since the Unix epoch.
+#[derive(Debug, Clone, Copy)]
+pub struct SimpleDateTime {
+    timestamp: i64, // seconds since Unix epoch
+}
+
+impl SimpleDateTime {
+    /// Create from Unix timestamp
+    pub fn from_timestamp(ts: i64) -> Self {
+        Self { timestamp: ts }
+    }
+
+    /// Format a date according to RFC 7231 (IMF-fixdate format).
+    pub fn format_imf_fixdate(&self) -> String {
+        crate::http::cookie::parsing::format_http_date(self.timestamp)
+    }
+
+    /// Try to parse any RFC 7231 HTTP-date form.
+    ///
+    /// Parse IMF-fixdate, RFC 850 (two- or four-digit year), RFC1123
+    /// numeric-zone variants, or ANSI C asctime.
+    pub fn parse_http_date(date_str: &str) -> Option<Self> {
+        crate::http::cookie::parsing::parse_http_date(date_str).map(Self::from_timestamp)
+    }
+}
+
+/// Manages HTTP conditional headers for smart resume and unchanged-file detection.
+pub struct ConditionalRequest {
+    pub last_modified: Option<SimpleDateTime>,
+    pub etag: Option<String>,
+    pub content_length: Option<u64>,
+    /// Track whether server returned 304 Not Modified in last request
+    pub not_modified: bool,
+}
+
+impl ConditionalRequest {
+    /// Create a new empty ConditionalRequest
+    pub fn new() -> Self {
+        Self {
+            last_modified: None,
+            etag: None,
+            content_length: None,
+            not_modified: false,
+        }
+    }
+}
+
+impl Default for ConditionalRequest {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ConditionalRequest {
+    /// Build headers for conditional GET request.
+    ///
+    /// Matches C++ `HttpRequestCommand` logic: only sends `If-Modified-Since`
+    /// (from the local file's mtime) and/or `If-None-Match` (from a stored
+    /// ETag). We intentionally do **not** send `If-Match` or
+    /// `If-Unmodified-Since` — those are preconditions that would cause a
+    /// 412 response if the resource changed, which is not what aria2 wants.
+    /// C++ aria2 only sends `If-Modified-Since` for conditional GET.
+    pub fn to_headers(&self) -> Vec<(String, String)> {
+        let mut headers = Vec::new();
+
+        // Prefer ETag (stronger validator per RFC 7232 § 6) — matches
+        // C++ behaviour where If-None-Match is used when ETag is available.
+        if let Some(ref etag) = self.etag {
+            headers.push(("If-None-Match".into(), etag.clone()));
+        }
+
+        // If-Modified-Since: matches C++ `HttpRequestCommand` L167-170
+        // which sends the local file's mtime as an HTTP-date.
+        if let Some(ref lm) = self.last_modified {
+            headers.push(("If-Modified-Since".into(), lm.format_imf_fixdate()));
+        }
+
+        // Range header for resume — only when we have a known content length
+        // and a partial download. This is separate from conditional GET.
+        if let Some(len) = self.content_length {
+            headers.push(("Range".into(), format!("bytes={}-", len)));
+        }
+
+        headers
+    }
+
+    /// Parse response headers to update state for next request.
+    pub fn update_from_response(&mut self, status: u16, headers: &[(String, String)]) {
+        for (name, value) in headers {
+            match name.to_lowercase().as_str() {
+                "last-modified" => {
+                    if let Some(dt) = SimpleDateTime::parse_http_date(value) {
+                        self.last_modified = Some(dt);
+                    }
+                }
+                "etag" => {
+                    self.etag = Some(value.trim_matches('"').to_string());
+                }
+                "content-length" => {
+                    if let Ok(len) = value.parse::<u64>() {
+                        self.content_length = Some(len);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Handle status codes
+        match status {
+            304 => {
+                // Not Modified — file unchanged, skip download
+                self.not_modified = true;
+            }
+            206 => {
+                // Partial Content — resume successful
+                self.not_modified = false;
+            }
+            416 => {
+                // Range Not Satisfiable — need full re-download
+                self.content_length = None;
+                self.not_modified = false;
+            }
+            _ => {
+                self.not_modified = false;
+            }
+        }
+    }
+
+    /// Should we skip this download? (304 Not Modified)
+    pub fn should_skip(&self) -> bool {
+        self.not_modified
+    }
+
+    /// Is resume possible? (have partial data + server supports Range)
+    pub fn can_resume(&self, local_file_size: u64) -> bool {
+        self.content_length.is_some_and(|len| local_file_size < len)
+    }
+
+    /// Need full re-download? (416 or no range support detected)
+    pub fn needs_full_redownload(&self) -> bool {
+        self.content_length.is_none()
+    }
+}
+
+/// Coordinates conditional GET across multiple URI attempts for the same resource.
+pub struct SmartResumeManager {
+    entries: HashMap<String, ConditionalRequest>, // keyed by URL or GID
+}
+
+impl SmartResumeManager {
+    /// Create a new SmartResumeManager
+    pub fn new() -> Self {
+        Self {
+            entries: HashMap::new(),
+        }
+    }
+
+    /// Get or create conditional state for a download
+    pub fn get_or_create(&mut self, key: &str) -> &mut ConditionalRequest {
+        self.entries.entry(key.to_string()).or_default()
+    }
+
+    /// Record that server returned 304 (unchanged)
+    pub fn mark_unchanged(&mut self, key: &str) {
+        if let Some(entry) = self.entries.get_mut(key) {
+            entry.not_modified = true;
+        }
+    }
+
+    /// Check if any URI returned 304 (all unchanged)
+    pub fn is_all_unchanged(&self, keys: &[&str]) -> bool {
+        keys.iter()
+            .all(|key| self.entries.get(*key).is_some_and(|e| e.not_modified))
+    }
+}
+
+impl Default for SmartResumeManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Action to take based on HTTP status code for smart resume scenarios.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ResumeAction {
+    Continue,       // Normal download/resume
+    SkipUnchanged,  // 304 Not Modified — file up to date
+    RedownloadFull, // 416 Range Not Satisfiable — start over
+    RetryLater,     // 503 Server Unavailable — retry with delay
+}
+
+/// Handle special HTTP statuses for smart resume scenarios.
+/// Returns action to take.
+pub fn handle_resume_status(status: u16, _cond: &ConditionalRequest) -> ResumeAction {
+    match status {
+        200..=299 => ResumeAction::Continue,
+        304 => ResumeAction::SkipUnchanged,
+        416 => ResumeAction::RedownloadFull,
+        500..=599 => ResumeAction::RetryLater,
+        _ => ResumeAction::Continue, // Unknown — try anyway
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_conditional_headers_etag() {
+        let mut cond = ConditionalRequest::new();
+        cond.etag = Some("\"abc123\"".to_string());
+
+        let headers = cond.to_headers();
+
+        // Should have If-None-Match with the etag value (matches C++ aria2)
+        assert!(
+            headers
+                .iter()
+                .any(|(k, v)| k == "If-None-Match" && v == "\"abc123\"")
+        );
+        // Should NOT have If-Match (C++ aria2 only sends If-None-Match)
+        assert!(
+            !headers.iter().any(|(k, _)| k == "If-Match"),
+            "If-Match should not be sent (matches C++ aria2)"
+        );
+
+        // ETag value should be trimmed of quotes when stored but preserved in headers
+        cond.update_from_response(
+            200,
+            &[("ETag".to_string(), "\"new-etag-value\"".to_string())],
+        );
+        assert_eq!(cond.etag, Some("new-etag-value".to_string()));
+    }
+
+    #[test]
+    fn test_conditional_headers_last_modified() {
+        let mut cond = ConditionalRequest::new();
+
+        // Set last modified using a known timestamp
+        // November 6, 1994 08:49:37 GMT = 784111777 (approximately)
+        cond.last_modified = Some(SimpleDateTime::from_timestamp(784111777));
+
+        let headers = cond.to_headers();
+
+        // Should have If-Modified-Since header (matches C++ aria2)
+        assert!(headers.iter().any(|(k, _)| k == "If-Modified-Since"));
+        // Should NOT have If-Unmodified-Since (C++ aria2 only sends If-Modified-Since)
+        assert!(
+            !headers.iter().any(|(k, _)| k == "If-Unmodified-Since"),
+            "If-Unmodified-Since should not be sent (matches C++ aria2)"
+        );
+
+        // Verify the date format follows IMF-fixdate pattern (RFC 7231)
+        let ims_header = headers
+            .iter()
+            .find(|(k, _)| k == "If-Modified-Since")
+            .unwrap();
+        assert!(ims_header.1.contains("GMT"), "Date should end with GMT");
+        assert!(
+            ims_header.1.contains(","),
+            "Date should have comma after weekday"
+        );
+    }
+
+    #[test]
+    fn test_update_from_response_304() {
+        let mut cond = ConditionalRequest::new();
+
+        // Simulate server response with 304 status
+        cond.update_from_response(
+            304,
+            &[
+                ("ETag".to_string(), "\"static-content-v1\"".to_string()),
+                (
+                    "Last-Modified".to_string(),
+                    "Mon, 01 Jan 2024 00:00:00 GMT".to_string(),
+                ),
+            ],
+        );
+
+        // should_skip should return true after 304
+        assert!(
+            cond.should_skip(),
+            "should_skip should be true after 304 response"
+        );
+        assert!(cond.not_modified, "not_modified flag should be set");
+
+        // Headers should still be parsed
+        assert_eq!(cond.etag, Some("static-content-v1".to_string()));
+        assert!(cond.last_modified.is_some());
+    }
+
+    #[test]
+    fn test_handle_status_416_needs_full_redownload() {
+        let mut cond = ConditionalRequest::new();
+        cond.content_length = Some(1000); // Assume we had content length before
+
+        // Handle 416 status
+        let action = handle_resume_status(416, &cond);
+
+        assert_eq!(
+            action,
+            ResumeAction::RedownloadFull,
+            "416 should trigger RedownloadFull"
+        );
+
+        // Update from response should clear content_length
+        cond.update_from_response(416, &[]);
+        assert!(
+            cond.needs_full_redownload(),
+            "After 416, needs_full_redownload should be true"
+        );
+        assert!(
+            cond.content_length.is_none(),
+            "content_length should be cleared after 416"
+        );
+
+        // Test other status codes
+        assert_eq!(
+            handle_resume_status(304, &cond),
+            ResumeAction::SkipUnchanged
+        );
+        assert_eq!(handle_resume_status(200, &cond), ResumeAction::Continue);
+        assert_eq!(handle_resume_status(206, &cond), ResumeAction::Continue);
+        assert_eq!(handle_resume_status(503, &cond), ResumeAction::RetryLater);
+    }
+
+    #[test]
+    fn test_smart_resume_manager() {
+        let mut manager = SmartResumeManager::new();
+
+        // Get or create entry
+        let entry = manager.get_or_create("download-1");
+        entry.etag = Some("\"file-v1\"".to_string());
+
+        // Get existing entry
+        let entry2 = manager.get_or_create("download-1");
+        assert_eq!(
+            entry2.etag,
+            Some("\"file-v1\"".to_string()),
+            "Should retrieve existing entry"
+        );
+
+        // Mark as unchanged
+        manager.mark_unchanged("download-1");
+        assert!(
+            manager.is_all_unchanged(&["download-1"]),
+            "Should report as unchanged"
+        );
+
+        // Multiple keys
+        manager.get_or_create("download-2").not_modified = true;
+        assert!(
+            manager.is_all_unchanged(&["download-1", "download-2"]),
+            "All should be unchanged"
+        );
+
+        manager.get_or_create("download-3"); // New entry, not modified=false by default
+        assert!(
+            !manager.is_all_unchanged(&["download-1", "download-3"]),
+            "Not all unchanged"
+        );
+    }
+
+    #[test]
+    fn test_can_resume_and_needs_full_redownload() {
+        let mut cond = ConditionalRequest::new();
+
+        // No content length - cannot resume
+        assert!(
+            !cond.can_resume(100),
+            "Cannot resume without content length"
+        );
+        assert!(
+            cond.needs_full_redownload(),
+            "Needs full redownload without content length"
+        );
+
+        // With content length and local size smaller
+        cond.content_length = Some(1000);
+        assert!(
+            cond.can_resume(500),
+            "Can resume when local file is smaller"
+        );
+        assert!(
+            !cond.can_resume(1000),
+            "Cannot resume when local file equals content length"
+        );
+        assert!(
+            !cond.can_resume(1500),
+            "Cannot resume when local file is larger"
+        );
+        assert!(
+            !cond.needs_full_redownload(),
+            "Doesn't need full redownload with content length"
+        );
+    }
+
+    #[test]
+    fn test_simple_datetime_parsing() {
+        let expected = "Sun, 06 Nov 1994 08:49:37 GMT";
+        let inputs = [
+            expected,
+            "Sunday, 06-Nov-94 08:49:37 GMT",
+            "Sunday, 06-Nov-1994 08:49:37 GMT",
+            "Sun Nov  6 08:49:37 1994",
+            "Sun, 06 Nov 1994 08:49:37 +0000",
+        ];
+
+        for input in inputs {
+            let dt = SimpleDateTime::parse_http_date(input)
+                .unwrap_or_else(|| panic!("failed to parse HTTP-date: {input}"));
+            assert_eq!(
+                dt.timestamp, 784_111_777,
+                "unexpected timestamp for {input}"
+            );
+            assert_eq!(dt.format_imf_fixdate(), expected);
+        }
+
+        assert_eq!(
+            SimpleDateTime::from_timestamp(0).format_imf_fixdate(),
+            "Thu, 01 Jan 1970 00:00:00 GMT"
+        );
+        assert_eq!(
+            SimpleDateTime::from_timestamp(-1).format_imf_fixdate(),
+            "Wed, 31 Dec 1969 23:59:59 GMT"
+        );
+        assert_eq!(
+            SimpleDateTime::parse_http_date("Wed, 31 Dec 1969 23:59:59 GMT")
+                .expect("pre-epoch HTTP-date should parse")
+                .timestamp,
+            -1
+        );
+        assert_eq!(
+            SimpleDateTime::from_timestamp(2_147_483_647).format_imf_fixdate(),
+            "Tue, 19 Jan 2038 03:14:07 GMT"
+        );
+
+        assert!(
+            SimpleDateTime::parse_http_date("invalid-date").is_none(),
+            "invalid HTTP-date must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_conditional_request_with_range() {
+        let mut cond = ConditionalRequest::new();
+        cond.content_length = Some(1024 * 1024); // 1 MB
+
+        let headers = cond.to_headers();
+
+        // Should have Range header
+        let range_header = headers.iter().find(|(k, _)| k == "Range");
+        assert!(
+            range_header.is_some(),
+            "Should have Range header when content_length is set"
+        );
+        // Range header format: bytes={content_length}-
+        let expected = format!("bytes={}-", cond.content_length.unwrap());
+        assert_eq!(range_header.unwrap().1, expected);
+    }
+}

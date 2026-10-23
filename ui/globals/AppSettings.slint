@@ -17,6 +17,9 @@ export global AppSettings {
     // Android: draw with the font picked for the phone (found as Eddy
     // opens, so it shows from the next start).
     in-out property <bool> system_font: false;
+    // What the font in use is: "" (Eddy's own), a file name, or why there's
+    // none.
+    in property <string> system_font_status;
     // Settings → About.
     in property <string> app_version: "0.0.0";
     in property <string> slint_version: "1.18.1";

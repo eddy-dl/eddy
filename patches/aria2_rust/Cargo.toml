@@ -1,0 +1,85 @@
+[workspace]
+resolver = "2"
+# Eddy vendors only the two crates it uses (see EDDY.md).
+members = [
+    "aria2-core",
+    "aria2-protocol",
+]
+
+[workspace.package]
+edition = "2024"
+authors = ["aria2-rust contributors"]
+license = "GPL-3.0-or-later"
+repository = "https://github.com/balovess/aria2_rust/"
+readme = "README.md"
+keywords = ["download", "bittorrent", "http", "ftp", "rpc"]
+categories = ["command-line-utilities", "network-programming", "web-programming::http-client"]
+
+[workspace.dependencies]
+tokio = { version = "1.35", features = ["full"] }
+tokio-util = "0.7"
+futures = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+thiserror = "1.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+bytes = "1.5"
+async-trait = "0.1"
+criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
+# These ranges describe compatible library APIs. They are not a shared
+# release-version source; each workspace member owns its package version.
+aria2-protocol = { path = "aria2-protocol", version = "0.3" }
+aria2-core = { path = "aria2-core", version = "0.3" }
+aria2-rpc = { path = "aria2-rpc", version = "0.3" }
+
+# Cross-crate: unify to workspace-level
+reqwest = { version = "0.13", default-features = false }
+tokio-tungstenite = "0.21"
+base64 = "0.21"
+hex = "0.4"
+hmac = "0.12"
+sha2 = "0.10"
+aes-gcm = "0.10"
+pbkdf2 = "0.12"
+rand = "0.8"
+tempfile = "3.8"
+rustls = { version = "0.23", default-features = false }
+rustls-pemfile = "2.1"
+p12_q3 = "0.8"
+
+[workspace.metadata.release]
+# Release workflow settings
+release = true
+publish = false  # We use GitHub Actions for publishing
+
+# Pre-release checks
+pre-release-hook = ["cargo", "test", "--workspace", "--all-targets"]
+
+# Git operations
+push = true
+tag = true
+tag-name = "v{{version}}"
+commit-message = "chore: release v{{version}}"
+
+# Allow release from main branch only
+allow-branch = ["main", "master"]
+
+# Independent versioning per crate (libraries are published to crates.io
+# individually; the binary has its own program-level version).
+consolidate-commits = false
+shared-version = false
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = 1
+split-debuginfo = "unpacked"

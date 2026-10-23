@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
+# aria2_rust, patched (see patches/aria2_rust), is a workspace of its own.
+exclude = ["patches/aria2_rust"]
 
 # Android/IOS build target
 [lib]
@@ -61,6 +63,10 @@ raw-window-handle = "0.6"
 slint = { version = "1.17.1", features = ["raw-window-handle-06"] }
 
 # Taskbar progress: Windows' ITaskbarList3 (the version Slint already uses).
+# Process groups for the programs Eddy starts (children.rs).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell"] }
 
@@ -99,3 +105,8 @@ panic = "abort"
 # Drop once a Slint release includes it.
 [patch.crates-io]
 i-slint-backend-android-activity = { path = "patches/i-slint-backend-game-activity" }
+
+# aria2_rust with resuming fixed (see patches/aria2_rust/EDDY.md).
+[patch."https://github.com/balovess/aria2_rust/"]
+aria2-core = { path = "patches/aria2_rust/aria2-core" }
+aria2-protocol = { path = "patches/aria2_rust/aria2-protocol" }

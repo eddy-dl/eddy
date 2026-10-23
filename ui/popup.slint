@@ -13,6 +13,8 @@ import { FolderBrowserSheet } from "components/FolderBrowserSheet.slint";
 // so it only has what it was shared; anything left when it closes stays
 // pending in the main app.
 export component PreviewApp inherits Window {
+    // Material's Roboto, or the phone's own font (see ThemeSettings).
+    default-font-family: ThemeSettings.font_family;
     // 1 = "Download now" (ask how, then start everything), 2 = preview.
     in property <int> mode: 2;
 

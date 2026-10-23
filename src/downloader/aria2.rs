@@ -10,6 +10,9 @@ use std::time::Duration;
 /// Magnets can take a while to find peers for metadata
 pub const PROBE_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// What probes' throwaway folders are called (then a timestamp).
+const PROBE_DIR: &str = "eddy-probe-";
+
 /// Same rule aria2-core uses to decide a finished download spawns follow-up
 /// downloads (torrent/metalink handlers): content type or path extension.
 fn may_spawn_followers(content_type: Option<&str>, paths: &[String]) -> bool {
@@ -128,6 +131,23 @@ impl AriaEngineClient {
         None
     }
 
+    /// A running download's files (a torrent's): (path, size, bytes done,
+    /// selected), in the torrent's order.
+    pub fn files(&self, target_gid: &str) -> Vec<(String, u64, u64, bool)> {
+        for (gid, group_lock) in &self.group_man.all_groups() {
+            if gid.to_hex_string() == target_gid {
+                let group = group_lock.recover();
+                return group
+                    .create_download_result()
+                    .files
+                    .into_iter()
+                    .map(|f| (f.path, f.length, f.completed_length, f.selected))
+                    .collect();
+            }
+        }
+        Vec::new()
+    }
+
     /// Submits a task to the engine via the command channel. `out` names
     /// the saved file; None lets aria2 pick it from the URL or server.
     /// `select_files` limits a torrent to some of its files ("1,3", 1-based);
@@ -140,6 +160,20 @@ impl AriaEngineClient {
         select_files: Option<&str>,
         settings: &super::DownloadSettings,
     ) -> Result<String, String> {
+        self.start_download_with_headers(uri, save_dir, out, select_files, settings, &[])
+    }
+
+    /// `start_download`, sending `headers` with every request (a site's
+    /// Referer and cookies, for the native extractors' files).
+    pub fn start_download_with_headers(
+        &self,
+        uri: &str,
+        save_dir: &str,
+        out: Option<&str>,
+        select_files: Option<&str>,
+        settings: &super::DownloadSettings,
+        headers: &[(String, String)],
+    ) -> Result<String, String> {
         let gid = self.group_man.next_available_gid();
 
         let mut options = DownloadOptions::default();
@@ -148,6 +182,11 @@ impl AriaEngineClient {
         options.select_file = select_files.map(str::to_string);
         options.continue_download = true;
         apply(&mut options, settings);
+        // Asks for the size first, so a named download can split from the
+        // start (otherwise aria2-core fetches it on one connection until a
+        // resume). Without an answer it still downloads, on one.
+        options.use_head = true;
+        options.header = headers.iter().map(|(name, value)| format!("{name}: {value}")).collect();
 
         let group = Arc::new(std::sync::RwLock::new(RequestGroup::new(
             gid,
@@ -176,7 +215,7 @@ impl AriaEngineClient {
         // afterwards. Inside the app's own data dir: Android apps can't write
         // to the system temp dir.
         let probe_dir = std::path::PathBuf::from(crate::platform::get_app_data_dir()).join(format!(
-            "eddy-probe-{}",
+            "{PROBE_DIR}{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -360,7 +399,10 @@ impl AriaEngineClient {
             .all_groups()
             .iter()
             .filter(|(_, group)| {
-                matches!(group.recover().status(), DownloadStatus::Active | DownloadStatus::Waiting)
+                let group = group.recover();
+                // Probes (a link's size, a torrent's files) aren't downloads.
+                let probe = group.options().dir.as_deref().is_some_and(|d| d.contains(PROBE_DIR));
+                !probe && matches!(group.status(), DownloadStatus::Active | DownloadStatus::Waiting)
             })
             .count()
     }
@@ -429,4 +471,7 @@ fn apply(options: &mut DownloadOptions, settings: &super::DownloadSettings) {
     // aria2's own unless one was picked: some servers drop requests that
     // claim to be a browser.
     options.user_agent = settings.user_agent().map(str::to_string);
+    // A moment between retries (aria2's default is none): a phone's network
+    // drops out for seconds, and instant retries use them all up at once.
+    options.retry_wait = 2;
 }

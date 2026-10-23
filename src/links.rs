@@ -87,6 +87,43 @@ where
         })
     });
     links.on_select_all_files(|id, selected| update_files(id, |file| file.selected = selected));
+    // A video item as audio or not (images and audio stay as they are).
+    links.on_toggle_audio(|id, index| {
+        update_files(id, |file| {
+            if file.index == index && file.kind == 1 {
+                file.as_audio = !file.as_audio;
+                file.quality = SharedString::new();
+            }
+        })
+    });
+    links.on_set_all_audio(|id, audio| {
+        update_files(id, |file| {
+            let audio = audio && file.kind == 1;
+            if file.as_audio != audio {
+                // Its own quality was a video's (or an audio's) one.
+                file.quality = SharedString::new();
+            }
+            file.as_audio = audio;
+        })
+    });
+    // The preview's quality and bitrate: the items' sizes follow them.
+    links.on_choose_quality(|id, video, audio| {
+        MEDIA.with(|m| {
+            if let Some(meta) = m.borrow_mut().get_mut(&id) {
+                meta.video_choice = video.to_string();
+                meta.audio_choice = audio.to_string();
+            }
+        });
+        update_files(id, |_| {});
+    });
+    // One item's own quality ("" to follow the preview's again).
+    links.on_set_item_quality(|id, index, quality| {
+        update_files(id, |file| {
+            if file.index == index {
+                file.quality = quality.clone();
+            }
+        })
+    });
 
     // "Download now": everything is handed over at once, without waiting for
     // the checks. Torrents stay torrents; for the rest, Auto lets the
@@ -263,6 +300,7 @@ fn push_torrent(url: &str, meta: &TorrentMeta, name: &str) -> i32 {
     let id = next_id();
     let files = torrent_files(meta);
     let filename = clean_name(&meta.info.name);
+    let file_type = torrent_type(&files, &filename);
     PENDING.with(|m| {
         m.push(PendingLink {
             id,
@@ -270,7 +308,7 @@ fn push_torrent(url: &str, meta: &TorrentMeta, name: &str) -> i32 {
             state: ProbeState::Ready,
             error: SharedString::new(),
             filename: if filename.is_empty() { name.into() } else { filename.into() },
-            file_type: FileType::Torrent,
+            file_type,
             size: match meta.total_size() {
                 0 => SharedString::new(),
                 size => format_size(size).into(),
@@ -279,7 +317,7 @@ fn push_torrent(url: &str, meta: &TorrentMeta, name: &str) -> i32 {
             backends: backends_model(&[LinkBackend::Torrent]),
             formats: ModelRc::new(VecModel::default()),
             files_selected: files.len() as i32,
-            files: files_model(&files),
+            files: files_model(&files, &[]),
             folder: usual_folder_display().into(),
             folder_uri: SharedString::new(),
             service: SharedString::new(),
@@ -369,6 +407,7 @@ fn start_link(id: i32, backend: Backend, format: String, filename: String, optio
         settings: download_settings(options, &link, audio),
         // A book saved before is updated in place of a second copy.
         id: if backend == Backend::Book { link.book_saved_id as i64 } else { 0 },
+        resume: false,
     };
     match crate::platform::start_download(&request) {
         Ok(()) => {
@@ -408,7 +447,8 @@ pub fn category_folder(file_type: FileType) -> &'static str {
         FileType::Document => "Documents",
         FileType::Archive => "Compressed",
         FileType::DiskImage | FileType::Program => "Programs",
-        FileType::Torrent => "Torrents",
+        // Only torrents are a folder before they're downloaded.
+        FileType::Folder => "Torrents",
         _ => "Other",
     }
 }
@@ -427,6 +467,33 @@ fn update_files(id: i32, change: impl Fn(&mut TorrentFile)) {
             link.files.set_row_data(row, file);
         }
         link.files_selected = link.files.iter().filter(|f| f.selected).count() as i32;
+        link.files_audio = link.files.iter().filter(|f| f.selected && f.as_audio).count() as i32;
+        // Media items: each one's size at its quality, and the total.
+        let sized = MEDIA.with(|media| {
+            let media = media.borrow();
+            let meta = media.get(&id).filter(|m| !m.items.is_empty())?;
+            let mut total = 0;
+            for row in 0..link.files.row_count() {
+                let mut file = link.files.row_data(row)?;
+                let item = meta.items.get(row)?;
+                let own = !file.quality.is_empty();
+                let choice = if own { file.quality.to_string() } else if file.as_audio { meta.audio_choice.clone() } else { meta.video_choice.clone() };
+                let (size, label) = item_size(item, file.as_audio, &choice);
+                file.size = match (own, size) {
+                    (true, 0) => label.into(),
+                    (true, _) => format!("{} · {label}", approx(size)).into(),
+                    (false, _) => approx(size).into(),
+                };
+                if file.selected {
+                    total += size;
+                }
+                link.files.set_row_data(row, file);
+            }
+            Some(total)
+        });
+        if let Some(total) = sized {
+            link.size = approx(total).into();
+        }
         m.set_row_data(index, link);
     });
 }
@@ -438,6 +505,8 @@ fn take_pending(id: i32) -> Option<PendingLink> {
     })?;
     MEDIA.with(|m| m.borrow_mut().remove(&id));
     if PENDING.with(|m| m.row_count() == 0) {
+        // Nothing left to show a check's result to.
+        crate::children::stop_checks();
         ON_EMPTY.with(|e| {
             if let Some(f) = e.borrow().as_ref() {
                 f();
@@ -498,7 +567,7 @@ fn initial_link(id: i32, url: &str) -> PendingLink {
         url: url.into(),
         state: ProbeState::Probing,
         error: SharedString::new(),
-        file_type: if magnet { FileType::Torrent } else { file_type_for(&filename, None) },
+        file_type: if magnet { torrent_type(&[], &filename) } else { file_type_for(&filename, None) },
         filename: filename.into(),
         size: SharedString::new(),
         source: if magnet { "BitTorrent".into() } else { host_of(url).into() },
@@ -539,6 +608,8 @@ struct Probe {
     /// A torrent's files, or a post's / playlist's items (1-based index,
     /// name, length); empty otherwise.
     files: Vec<(usize, String, u64)>,
+    /// For media items, next to `files`: what each is, and its thumbnail.
+    items: Vec<ItemMeta>,
     /// What an extractor found, for media links.
     media: Option<MediaMeta>,
     /// A web novel's chapter counts, for book links.
@@ -557,10 +628,33 @@ struct BookMeta {
 
 /// A media link's extras: who found it, what it is, and what's needed to
 /// download it later.
+/// A post's or playlist's item, for its row in the preview: what it is,
+/// its thumbnail, and its own qualities (best first, with sizes) and length,
+/// so its size follows the quality chosen for it.
+#[derive(Clone, Debug, Default)]
+struct ItemMeta {
+    /// 1 video, 2 audio, 3 image.
+    kind: i32,
+    thumbnail: Option<PathBuf>,
+    qualities: Vec<extractors::Quality>,
+    duration: Option<f64>,
+}
+
 #[derive(Clone, Debug)]
 struct MediaMeta {
     service: Service,
     kind: MediaKind,
+    /// A yt-dlp playlist, and how many entries it had.
+    playlist: bool,
+    entries: usize,
+    /// Its items (several), and the preview's choice for them: a video
+    /// quality and an audio bitrate ("128"), which items follow unless
+    /// they've been given their own.
+    items: Vec<ItemMeta>,
+    video_choice: String,
+    audio_choice: String,
+    /// Items whose thumbnail is a padded square cover (music tracks).
+    square_covers: Vec<usize>,
     /// Bitrates for converting to audio.
     audio_formats: Vec<(String, String, String)>,
     thumbnail: Option<PathBuf>,
@@ -601,7 +695,8 @@ fn apply_probe(id: i32, result: Result<Probe, String>) {
                         .collect::<Vec<_>>(),
                 ));
                 link.files_selected = probe.files.len() as i32;
-                link.files = files_model(&probe.files);
+                link.files = files_model(&probe.files, &probe.items);
+                link.files_audio = 0;
                 if let Some(media) = probe.media {
                     link.service = media.service.label().into();
                     link.media_kind = match media.kind {
@@ -674,6 +769,9 @@ pub async fn pick_backend(url: &str) -> (Backend, String) {
                 (Backend::Book, _) => serde_json::to_string(&crate::preferences::novel_defaults()).unwrap_or_default(),
                 (Backend::Media, Some(media)) => serde_json::to_string(&MediaRequest {
                     service: Some(media.service),
+                    playlist: media.playlist,
+                    entries: media.entries,
+                    square_covers: media.square_covers.clone(),
                     info_json: media.info_json.clone(),
                     image: media.kind == MediaKind::Image,
                     quality: "best".to_string(),
@@ -705,13 +803,16 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
         // aria2 fetches the torrent's metadata from peers, which can take up
         // to a minute.
         let (size, files) = crate::downloader::engine().check_files(url, crate::downloader::aria2::PROBE_TIMEOUT).await?;
+        let files: Vec<_> = files.into_iter().map(|f| (f.index, f.path, f.length)).collect();
+        let filename = magnet_name(url).unwrap_or_default();
         return Ok(Probe {
-            filename: magnet_name(url).unwrap_or_default(),
-            file_type: FileType::Torrent,
+            file_type: torrent_type(&files, &filename),
+            filename,
             size: format_size(size),
             backends: vec![LinkBackend::Torrent],
             formats: Vec::new(),
-            files: files.into_iter().map(|f| (f.index, f.path, f.length)).collect(),
+            files,
+            items: Vec::new(),
             media: None,
             book: None,
         });
@@ -733,6 +834,7 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
             backends: vec![LinkBackend::Book],
             formats: Vec::new(),
             files: Vec::new(),
+            items: Vec::new(),
             media: None,
             book: Some(BookMeta { site: book.site, id: book.id.clone(), chapters: book.chapters.len(), locked, cover }),
         });
@@ -755,6 +857,7 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
                 backends: vec![LinkBackend::Direct],
                 formats: Vec::new(),
                 files: Vec::new(),
+                items: Vec::new(),
                 media: None,
                 book: None,
             });
@@ -815,6 +918,7 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
                 backends: vec![LinkBackend::Direct],
                 formats: Vec::new(),
                 files: Vec::new(),
+                items: Vec::new(),
                 media: None,
                 book: None,
             });
@@ -837,7 +941,7 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
     }
     let size = info.length;
     Ok(Probe {
-        file_type: if is_torrent { FileType::Torrent } else { file_type_for(&filename, info.content_type.as_deref()) },
+        file_type: file_type_for(&filename, info.content_type.as_deref()),
         filename,
         size: size.map(format_size).unwrap_or_default(),
         backends: if is_torrent {
@@ -847,6 +951,7 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
         },
         formats: Vec::new(),
         files: Vec::new(),
+        items: Vec::new(),
         media: None,
         book: None,
     })
@@ -875,12 +980,13 @@ async fn probe_torrent_link(url: &str, filename: &str) -> Result<Probe, String> 
     Ok(Probe {
         // The torrent's own name: ".torrent" only goes back on when it's
         // downloaded Direct (the preview adds it).
+        file_type: torrent_type(&files, &name),
         filename: if name.is_empty() { filename.strip_suffix(".torrent").unwrap_or(filename).to_string() } else { name },
-        file_type: FileType::Torrent,
         size: format_size(size),
         backends: vec![LinkBackend::Torrent, LinkBackend::Direct],
         formats: Vec::new(),
         files,
+        items: Vec::new(),
         media: None,
         book: None,
     })
@@ -888,6 +994,17 @@ async fn probe_torrent_link(url: &str, filename: &str) -> Result<Probe, String> 
 
 /// A torrent's files in its own order, numbered from 1 like aria2's
 /// select-file.
+/// A torrent as its icon shows it: a folder when it holds several files,
+/// else its file's type (from the torrent's name while its files aren't
+/// known yet, as for a magnet).
+pub fn torrent_type(files: &[(usize, String, u64)], name: &str) -> FileType {
+    match files {
+        [_, _, ..] => FileType::Folder,
+        [(_, path, _)] => file_type_for(path, None),
+        [] => file_type_for(name, None),
+    }
+}
+
 fn torrent_files(meta: &TorrentMeta) -> Vec<(usize, String, u64)> {
     match &meta.info.files {
         Some(files) => files
@@ -899,15 +1016,30 @@ fn torrent_files(meta: &TorrentMeta) -> Vec<(usize, String, u64)> {
     }
 }
 
-fn files_model(files: &[(usize, String, u64)]) -> ModelRc<TorrentFile> {
+/// The preview's list of a download's files; `items` (if any) says what
+/// each media item is and holds its thumbnail.
+fn files_model(files: &[(usize, String, u64)], items: &[ItemMeta]) -> ModelRc<TorrentFile> {
     ModelRc::new(VecModel::from(
         files
             .iter()
-            .map(|(index, path, length)| TorrentFile {
-                index: *index as i32,
-                path: path.into(),
-                size: format_size(*length).into(),
-                selected: true,
+            .enumerate()
+            .map(|(i, (index, path, length))| {
+                let item = items.get(i);
+                TorrentFile {
+                    index: *index as i32,
+                    path: path.into(),
+                    size: if *length > 0 { format_size(*length).into() } else { SharedString::new() },
+                    selected: true,
+                    kind: item.map(|m| m.kind).unwrap_or(0),
+                    thumbnail: item
+                        .and_then(|m| m.thumbnail.as_deref())
+                        .and_then(|t| slint::Image::load_from_path(t).ok())
+                        .unwrap_or_default(),
+                    as_audio: false,
+                    quality: SharedString::new(),
+                    formats: item.map(item_formats).unwrap_or_default(),
+                    audio_formats: item.map(item_audio_formats).unwrap_or_default(),
+                }
             })
             .collect::<Vec<_>>(),
     ))
@@ -1100,7 +1232,18 @@ async fn media_probe(info: MediaInfo) -> Probe {
     };
 
     let thumbnail = fetch_thumbnail(&first.thumbnail).await;
-    let filename = first.caption.as_deref().map(clean_name).filter(|c| !c.is_empty()).unwrap_or(info.id.clone());
+    // Each item's thumbnail, a few at once (a long playlist's first ones).
+    let items = if several { item_metas(&info.items).await } else { Vec::new() };
+    // Several items go in a folder: the playlist's title, else the post's
+    // caption.
+    let filename = info
+        .title
+        .as_deref()
+        .filter(|_| several)
+        .or(first.caption.as_deref())
+        .map(clean_name)
+        .filter(|c| !c.is_empty())
+        .unwrap_or(info.id.clone());
     Probe {
         filename: filename.chars().take(150).collect(),
         file_type: match first.kind {
@@ -1116,15 +1259,99 @@ async fn media_probe(info: MediaInfo) -> Probe {
         },
         formats,
         files,
+        items: items.clone(),
         media: Some(MediaMeta {
             service: info.service,
             kind: first.kind,
+            playlist: several && info.service == Service::YtDlp,
+            entries: info.items.len(),
+            items,
+            video_choice: String::new(),
+            audio_choice: String::new(),
+            square_covers: info.items.iter().filter(|i| i.square_cover).map(|i| i.index).collect(),
             audio_formats,
             thumbnail,
             info_json: info.info_json,
         }),
         book: None,
     }
+}
+
+/// An item's own qualities, as its quality popup lists them.
+fn item_formats(item: &ItemMeta) -> ModelRc<LinkFormat> {
+    let kind = if item.kind == 3 { MediaKind::Image } else { MediaKind::Video };
+    ModelRc::new(VecModel::from(
+        item.qualities
+            .iter()
+            .map(|q| LinkFormat { selector: q.key.clone().into(), label: quality_label(&q.key, kind).into(), detail: approx(q.size).into() })
+            .collect::<Vec<_>>(),
+    ))
+}
+
+/// The bitrates an item can be saved as audio at, with its sizes.
+fn item_audio_formats(item: &ItemMeta) -> ModelRc<LinkFormat> {
+    if item.kind == 3 {
+        return ModelRc::default();
+    }
+    ModelRc::new(VecModel::from(
+        extractors::audio_presets(item.duration)
+            .into_iter()
+            .map(|q| {
+                let kbps = q.key.trim_end_matches('k').to_string();
+                LinkFormat { selector: kbps.clone().into(), label: format!("{kbps} kbps").into(), detail: approx(q.size).into() }
+            })
+            .collect::<Vec<_>>(),
+    ))
+}
+
+/// An item's size at `choice`: a bitrate ("128") as audio, else a quality
+/// key, picked as yt-dlp would: that quality, else one as tall, else its
+/// best. (`label`: the quality's name, for an item given its own.)
+fn item_size(item: &ItemMeta, as_audio: bool, choice: &str) -> (u64, String) {
+    if as_audio {
+        let kbps: u64 = choice.parse().unwrap_or(128);
+        let size = item.duration.map(|d| (kbps as f64 * 1000.0 * d / 8.0) as u64).unwrap_or(0);
+        return (size, format!("{kbps} kbps"));
+    }
+    let height = |key: &str| key.split_once(':').map(|(_, h)| h.to_string());
+    let picked = item
+        .qualities
+        .iter()
+        .find(|q| q.key == choice)
+        .or_else(|| height(choice).and_then(|h| item.qualities.iter().find(|q| height(&q.key).as_deref() == Some(h.as_str()))))
+        .or(item.qualities.first());
+    let kind = if item.kind == 3 { MediaKind::Image } else { MediaKind::Video };
+    picked.map(|q| (q.size, quality_label(&q.key, kind))).unwrap_or_default()
+}
+
+/// The items' kinds and thumbnails, fetching eight thumbnails at a time and
+/// at most the first hundred.
+async fn item_metas(items: &[extractors::MediaItem]) -> Vec<ItemMeta> {
+    let mut metas: Vec<ItemMeta> = items
+        .iter()
+        .map(|item| ItemMeta {
+            kind: match item.kind {
+                MediaKind::Video => 1,
+                MediaKind::Audio => 2,
+                MediaKind::Image => 3,
+            },
+            thumbnail: None,
+            qualities: item.qualities.clone(),
+            duration: item.duration,
+        })
+        .collect();
+    let urls: Vec<(usize, String)> =
+        items.iter().enumerate().filter(|(_, i)| !i.thumbnail.is_empty()).take(100).map(|(n, i)| (n, i.thumbnail.clone())).collect();
+    for batch in urls.chunks(8) {
+        let mut set = tokio::task::JoinSet::new();
+        for (n, url) in batch.iter().cloned() {
+            set.spawn(async move { (n, fetch_thumbnail(&url).await) });
+        }
+        while let Some(Ok((n, path))) = set.join_next().await {
+            metas[n].thumbnail = path;
+        }
+    }
+    metas
 }
 
 /// Saves a thumbnail in the app's cache folder for the preview; None if it
@@ -1180,10 +1407,20 @@ fn media_request(id: i32, link: &PendingLink, format: &str) -> MediaRequest {
         quality: "best".to_string(),
         ..Default::default()
     };
+    request.playlist = meta.as_ref().is_some_and(|m| m.playlist);
+    request.entries = meta.as_ref().map(|m| m.entries).unwrap_or(0);
+    request.square_covers = meta.as_ref().map(|m| m.square_covers.clone()).unwrap_or_default();
     match format.split('|').collect::<Vec<_>>().as_slice() {
         ["audio", kbps, codec] => {
             request.audio_codec = codec.to_string();
             request.audio_kbps = kbps.parse().unwrap_or(0);
+        }
+        // Some items as video (at this quality), the rest as audio.
+        ["mix", quality, kbps, codec] => {
+            request.quality = quality.to_string();
+            request.audio_codec = codec.to_string();
+            request.audio_kbps = kbps.parse().unwrap_or(0);
+            request.audio_items = link.files.iter().filter(|f| f.selected && f.as_audio).map(|f| (f.index - 1) as usize).collect();
         }
         [quality] if !quality.is_empty() => request.quality = quality.to_string(),
         _ => {}
@@ -1195,6 +1432,8 @@ fn media_request(id: i32, link: &PendingLink, format: &str) -> MediaRequest {
     if link.files_selected < link.files.row_count() as i32 {
         request.items = link.files.iter().filter(|f| f.selected).map(|f| (f.index - 1) as usize).collect();
     }
+    request.item_qualities =
+        link.files.iter().filter(|f| f.selected && !f.quality.is_empty()).map(|f| ((f.index - 1) as usize, f.quality.to_string())).collect();
     request
 }
 
@@ -1248,7 +1487,6 @@ pub fn file_type_for(name: &str, content_type: Option<&str>) -> FileType {
         "pdf" | "doc" | "docx" | "odt" | "txt" | "rtf" | "epub" | "xls" | "xlsx" | "ppt" | "pptx" | "md" => FileType::Document,
         "zip" | "rar" | "7z" | "tar" | "gz" | "xz" | "bz2" | "zst" | "tgz" => FileType::Archive,
         "iso" | "img" | "dmg" => FileType::DiskImage,
-        "torrent" => FileType::Torrent,
         "exe" | "msi" | "apk" | "deb" | "rpm" | "appimage" | "pkg" | "sh" => FileType::Program,
         _ => match content_type.and_then(|t| t.split('/').next()) {
             Some("video") => FileType::Video,

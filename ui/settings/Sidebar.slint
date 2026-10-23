@@ -7,7 +7,11 @@ import { Shine } from "../components/Shine.slint";
 component SidebarItem inherits Rectangle {
     in property <string> text;
     in property <string> subtitle;
+    // Material Symbols (rounded): outlined, and filled. MD3: portrait's
+    // icons in their coloured circles are filled; the landscape drawer's
+    // are outlined but for the selected item's.
     in property <image> icon;
+    in property <image> icon_filled;
     in property <bool> active;
     in property <bool> is_landscape;
     in property <color> icon_bg_color;
@@ -66,7 +70,7 @@ component SidebarItem inherits Rectangle {
             background: ThemeSettings.is_dark ? icon_bg_color : icon_bg_color.mix(Colors.white, 80%);
 
             Image {
-                source: root.icon;
+                source: root.icon_filled;
                 width: 24px;
                 height: 24px;
                 colorize: ThemeSettings.is_dark ? #1e1e2e : #2d3748;
@@ -76,7 +80,7 @@ component SidebarItem inherits Rectangle {
         }
 
         if root.is_landscape: Image {
-            source: root.icon;
+            source: root.active ? root.icon_filled : root.icon;
             width: 24px;
             height: 24px;
             colorize: root.active ? ThemeSettings.on_secondary_container : root.text_color;
@@ -160,7 +164,8 @@ export component Sidebar inherits Rectangle {
                 first: true;
                 text: @tr("Appearance");
                 subtitle: @tr("Change themes & accent color");
-                icon: @image-url("../icons/palette.svg");
+                icon: @image-url("../icons/rounded/palette.svg");
+                icon_filled: @image-url("../icons/rounded/filled/palette.svg");
                 active: root.active_tab == appearance_tab;
                 is_landscape: root.is_landscape;
                 icon_bg_color: #ffbcff;
@@ -175,7 +180,8 @@ export component Sidebar inherits Rectangle {
                 width: 100%;
                 text: @tr("General");
                 subtitle: @tr("Language, haptics");
-                icon: @image-url("../icons/settings.svg");
+                icon: @image-url("../icons/rounded/settings.svg");
+                icon_filled: @image-url("../icons/rounded/filled/settings.svg");
                 active: root.active_tab == general_tab;
                 is_landscape: root.is_landscape;
                 icon_bg_color: #ffd8be;
@@ -190,7 +196,8 @@ export component Sidebar inherits Rectangle {
                 width: 100%;
                 text: @tr("Downloads");
                 subtitle: @tr("Folder, cookies, books, yt-dlp packages");
-                icon: @image-url("../icons/download.svg");
+                icon: @image-url("../icons/rounded/download.svg");
+                icon_filled: @image-url("../icons/rounded/filled/download.svg");
                 active: root.active_tab == download_tab || root.active_tab == SettingsTab.Packages || root.active_tab == SettingsTab.Books || root.active_tab == SettingsTab.Downloading || root.active_tab == SettingsTab.Cookies;
                 is_landscape: root.is_landscape;
                 icon_bg_color: #cbe4de;
@@ -205,7 +212,8 @@ export component Sidebar inherits Rectangle {
                 width: 100%;
                 text: @tr("Advanced");
                 subtitle: @tr("Download cache");
-                icon: @image-url("../icons/tune.svg");
+                icon: @image-url("../icons/rounded/tune.svg");
+                icon_filled: @image-url("../icons/rounded/filled/tune.svg");
                 active: root.active_tab == advanced_tab;
                 is_landscape: root.is_landscape;
                 icon_bg_color: #c8d3ff;
@@ -221,7 +229,8 @@ export component Sidebar inherits Rectangle {
                 last: true;
                 text: @tr("About");
                 subtitle: @tr("Version, developer, source code");
-                icon: @image-url("../icons/info.svg");
+                icon: @image-url("../icons/rounded/info.svg");
+                icon_filled: @image-url("../icons/rounded/filled/info.svg");
                 active: root.active_tab == about_tab;
                 is_landscape: root.is_landscape;
                 icon_bg_color: #d9e7c4;

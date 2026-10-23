@@ -54,6 +54,8 @@ class MainActivity : GameActivity() {
 
     override fun onDestroy() {
         DownloadService.mainAppOpen = false
+        // Not for a rotation or the like: only when it's really going.
+        if (isFinishing) EddyNative.screenClosed()
         super.onDestroy()
     }
 
@@ -118,6 +120,12 @@ class MainActivity : GameActivity() {
         runOnUiThread {
             val file = File(path)
             try {
+                // A folder (a playlist's, a post's, a torrent's): in the
+                // phone's file manager.
+                if (file.isDirectory) {
+                    openFolder(file)
+                    return@runOnUiThread
+                }
                 // A copy in a picked folder is a document URI already.
                 val content = path.startsWith("content://")
                 val uri = if (content) android.net.Uri.parse(path)
@@ -132,6 +140,54 @@ class MainActivity : GameActivity() {
                 // Missing file, a folder FileProvider can't share, or no app for it.
                 Toast.makeText(this, getString(R.string.cant_open_file), Toast.LENGTH_LONG).show()
             }
+        }
+    }
+
+    // Shares downloads: `paths` (newline-separated files or document URIs)
+    // as attachments, with `text` (their links) alongside; or the text alone.
+    fun shareItems(paths: String, text: String) {
+        runOnUiThread {
+            try {
+                val uris = ArrayList(paths.lines().filter { it.isNotBlank() }.map { path ->
+                    if (path.startsWith("content://")) android.net.Uri.parse(path)
+                    else FileProvider.getUriForFile(this, "$packageName.files", File(path))
+                })
+                val intent = when (uris.size) {
+                    0 -> Intent(Intent.ACTION_SEND).setType("text/plain")
+                    1 -> Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, uris[0])
+                        .setType(contentResolver.getType(uris[0]) ?: "*/*")
+                    else -> Intent(Intent.ACTION_SEND_MULTIPLE).putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+                        .setType("*/*")
+                }
+                if (text.isNotBlank()) intent.putExtra(Intent.EXTRA_TEXT, text)
+                if (uris.isNotEmpty()) {
+                    // The receiving app may only read what's in the clip data.
+                    val clip = android.content.ClipData.newRawUri(null, uris[0])
+                    uris.drop(1).forEach { clip.addItem(android.content.ClipData.Item(it)) }
+                    intent.clipData = clip
+                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(Intent.createChooser(intent, null))
+            } catch (e: Exception) {
+                android.util.Log.w("eddy", "couldn't share", e)
+                Toast.makeText(this, getString(R.string.cant_share), Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    // Shared storage's folders have a document URI the system's Files app
+    // (and most others) open as a folder.
+    private fun openFolder(folder: File) {
+        val root = android.os.Environment.getExternalStorageDirectory().absolutePath
+        val rel = folder.absolutePath.removePrefix(root).trimStart('/')
+        val uri = android.provider.DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "primary:$rel")
+        val intent = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(uri, android.provider.DocumentsContract.Document.MIME_TYPE_DIR)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        try {
+            startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(this, getString(R.string.saved_in_folder, folder.absolutePath.removePrefix(root)), Toast.LENGTH_LONG).show()
         }
     }
 

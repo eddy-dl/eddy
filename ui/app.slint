@@ -13,10 +13,11 @@ import { TapToDismissArea } from "components/AnimatedPopup.slint";
 import { ListOptionsSheet } from "components/ListOptionsSheet.slint";
 import { AddLinksSheet } from "components/AddLinksSheet.slint";
 import { LinkPreviewSheet } from "components/LinkPreviewSheet.slint";
-import { SelectionAction, SelectionActionBar, DeleteConfirmSheet } from "components/SelectionActions.slint";
+import { ActionIcon, SelectionAction, SelectionActionBar, DeleteConfirmSheet } from "components/SelectionActions.slint";
 import { Wordmark } from "components/Wordmark.slint";
 import { SnackbarHost } from "components/SnackbarHost.slint";
 import { DownloadOptionsSheet, ItemAction } from "components/DownloadOptionsSheet.slint";
+import { FolderFiles, FolderFilesSheet } from "components/FolderFilesSheet.slint";
 import { Links, LinkBackend, LinkOptions } from "globals/Links.slint";
 import { FolderBrowser } from "globals/FolderBrowser.slint";
 import { FolderBrowserSheet } from "components/FolderBrowserSheet.slint";
@@ -34,6 +35,7 @@ export { Snackbar } from "globals/Snackbar.slint";
 export { DownloadItem, DownloadState, FileType } from "components/DownloadCards.slint";
 export { SelectionAction } from "components/SelectionActions.slint";
 export { ItemAction } from "components/DownloadOptionsSheet.slint";
+export { FolderFiles, FolderFile } from "components/FolderFilesSheet.slint";
 
 // The Android share popup's window. Exported before DownloaderApp so the
 // viewer (which shows the last component) still opens the main app.
@@ -44,6 +46,8 @@ export { Links, LinkBackend, LinkFormat, LinkOptions, PendingLink, ProbeState, Q
 
 export component DownloaderApp inherits Window {
     title: "Eddy";
+    // Material's Roboto, or the phone's own font (see ThemeSettings).
+    default-font-family: ThemeSettings.font_family;
     background: ThemeSettings.background;
     animate background { duration: ThemeSettings.fade; easing: ease-in-out; }
     preferred-width: 420px;
@@ -88,14 +92,14 @@ export component DownloaderApp inherits Window {
         { id: 4, filename: "Annual_Report_2025.pdf", file_type: FileType.Document, state: DownloadState.Active, progress: 0.25, downloaded: "0.9 MB", size: "3.4 MB", speed: "320 KB/s", eta: "8s", date: "", url: "https://example.com/files/Annual_Report_2025.pdf", backend: LinkBackend.Direct, folder: "Download/Eddy" },
         { id: 5, filename: "wallpapers-pack.zip", file_type: FileType.Archive, state: DownloadState.Active, progress: 0.61, downloaded: "525 MB", size: "860 MB", speed: "5.2 MB/s", eta: "1m 4s", date: "", url: "https://example.com/files/wallpapers-pack.zip", backend: LinkBackend.Direct, folder: "Download/Eddy" },
         { id: 6, filename: "ubuntu-24.04-desktop-amd64.iso", file_type: FileType.DiskImage, state: DownloadState.Active, progress: 0.15, downloaded: "870 MB", size: "5.8 GB", speed: "6.1 MB/s", eta: "13m 30s", date: "", url: "https://example.com/files/ubuntu-24.04-desktop-amd64.iso", backend: LinkBackend.Direct, folder: "Download/Eddy" },
-        { id: 7, filename: "Sintel (2010) [4K]", file_type: FileType.Torrent, state: DownloadState.Queued, progress: 0.0, downloaded: "0 B", size: "4.2 GB", speed: "", eta: "", date: "Oct 20", url: "magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10&dn=Sintel", backend: LinkBackend.Torrent, folder: "Download/Eddy" },
+        { id: 7, filename: "Sintel (2010) [4K]", file_type: FileType.Folder, state: DownloadState.Queued, progress: 0.0, downloaded: "0 B", size: "4.2 GB", speed: "", eta: "", date: "Oct 20", url: "magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10&dn=Sintel", backend: LinkBackend.Torrent, folder: "Download/Eddy" },
         { id: 8, filename: "eddy-setup-0.2.0.exe", file_type: FileType.Program, state: DownloadState.Queued, progress: 0.0, downloaded: "0 B", size: "94 MB", speed: "", eta: "", date: "Oct 20", url: "https://example.com/files/eddy-setup-0.2.0.exe", backend: LinkBackend.Direct, folder: "Download/Eddy" },
         { id: 9, filename: "firmware-v3.bin", file_type: FileType.Other, state: DownloadState.Queued, progress: 0.0, downloaded: "0 B", size: "16 MB", speed: "", eta: "", date: "Oct 19", url: "https://example.com/files/firmware-v3.bin", backend: LinkBackend.Direct, folder: "Download/Eddy" },
     ];
     in property <[DownloadItem]> stopped_items: [
         { id: 11, filename: "Big.Buck.Bunny.2008.1080p.mkv", file_type: FileType.Video, state: DownloadState.Paused, progress: 0.63, downloaded: "0.8 GB", size: "1.2 GB", speed: "", eta: "", date: "", url: "https://example.com/files/Big.Buck.Bunny.2008.1080p.mkv", backend: LinkBackend.Direct, folder: "Download/Eddy" },
         { id: 14, filename: "Annual_Report_2025.pdf", file_type: FileType.Document, state: DownloadState.Paused, progress: 0.48, downloaded: "1.6 MB", size: "3.4 MB", speed: "", eta: "", date: "", url: "https://example.com/files/Annual_Report_2025.pdf", backend: LinkBackend.Direct, folder: "Download/Eddy" },
-        { id: 17, filename: "Sintel (2010) [4K]", file_type: FileType.Torrent, state: DownloadState.Paused, progress: 0.33, downloaded: "1.4 GB", size: "4.2 GB", speed: "", eta: "", date: "", url: "magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10&dn=Sintel", backend: LinkBackend.Torrent, folder: "Download/Eddy" },
+        { id: 17, filename: "Sintel (2010) [4K]", file_type: FileType.Folder, state: DownloadState.Paused, progress: 0.33, downloaded: "1.4 GB", size: "4.2 GB", speed: "", eta: "", date: "", url: "magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10&dn=Sintel", backend: LinkBackend.Torrent, folder: "Download/Eddy" },
         { id: 12, filename: "lofi-beats-vol3.flac", file_type: FileType.Audio, state: DownloadState.Failed, progress: 0.27, downloaded: "14.0 MB", size: "52 MB", speed: "", eta: "", date: "", url: "https://example.com/files/lofi-beats-vol3.flac", backend: LinkBackend.Direct, folder: "Download/Eddy" },
         { id: 15, filename: "wallpapers-pack.zip", file_type: FileType.Archive, state: DownloadState.Failed, progress: 0.81, downloaded: "696.6 MB", size: "860 MB", speed: "", eta: "", date: "", url: "https://example.com/files/wallpapers-pack.zip", backend: LinkBackend.Direct, folder: "Download/Eddy" },
         { id: 18, filename: "eddy-setup-0.2.0.exe", file_type: FileType.Program, state: DownloadState.Failed, progress: 0.05, downloaded: "4.7 MB", size: "94 MB", speed: "", eta: "", date: "", url: "https://example.com/files/eddy-setup-0.2.0.exe", backend: LinkBackend.Direct, folder: "Download/Eddy" },
@@ -110,7 +114,7 @@ export component DownloaderApp inherits Window {
         { id: 24, filename: "Annual_Report_2025.pdf", file_type: FileType.Document, state: DownloadState.Completed, progress: 1.0, downloaded: "3.4 MB", size: "3.4 MB", speed: "", eta: "", date: "Oct 12", url: "https://example.com/files/Annual_Report_2025.pdf", backend: LinkBackend.Direct, folder: "Download/Eddy" },
         { id: 25, filename: "wallpapers-pack.zip", file_type: FileType.Archive, state: DownloadState.Completed, progress: 1.0, downloaded: "860 MB", size: "860 MB", speed: "", eta: "", date: "Oct 9", url: "https://example.com/files/wallpapers-pack.zip", backend: LinkBackend.Direct, folder: "Download/Eddy" },
         { id: 26, filename: "ubuntu-24.04-desktop-amd64.iso", file_type: FileType.DiskImage, state: DownloadState.Completed, progress: 1.0, downloaded: "5.8 GB", size: "5.8 GB", speed: "", eta: "", date: "Oct 6", url: "https://example.com/files/ubuntu-24.04-desktop-amd64.iso", backend: LinkBackend.Direct, folder: "Download/Eddy" },
-        { id: 27, filename: "Sintel (2010) [4K]", file_type: FileType.Torrent, state: DownloadState.Completed, progress: 1.0, downloaded: "4.2 GB", size: "4.2 GB", speed: "", eta: "", date: "Oct 4", url: "magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10&dn=Sintel", backend: LinkBackend.Torrent, folder: "Download/Eddy" },
+        { id: 27, filename: "Sintel (2010) [4K]", file_type: FileType.Folder, state: DownloadState.Completed, progress: 1.0, downloaded: "4.2 GB", size: "4.2 GB", speed: "", eta: "", date: "Oct 4", url: "magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10&dn=Sintel", backend: LinkBackend.Torrent, folder: "Download/Eddy" },
         { id: 28, filename: "eddy-setup-0.2.0.exe", file_type: FileType.Program, state: DownloadState.Completed, progress: 1.0, downloaded: "94 MB", size: "94 MB", speed: "", eta: "", date: "Sep 28", url: "https://example.com/files/eddy-setup-0.2.0.exe", backend: LinkBackend.Direct, folder: "Download/Eddy" },
         { id: 29, filename: "firmware-v3.bin", file_type: FileType.Other, state: DownloadState.Completed, progress: 1.0, downloaded: "16 MB", size: "16 MB", speed: "", eta: "", date: "Sep 21", url: "https://example.com/files/firmware-v3.bin", backend: LinkBackend.Direct, folder: "Download/Eddy" },
     ];
@@ -164,6 +168,9 @@ export component DownloaderApp inherits Window {
     // Select all / Invert: every row's marker reads the other way round
     // (Rust works out which items that selects).
     private property <bool> selection_inverted: false;
+    // Stopped's Cancel (for paused ones) lives in the ⋮ menu: the header
+    // holds three actions (SelectionActionBar).
+    private property <bool> selection_cancel_overflows: root.active_tab == 1 && root.selected_paused > 0;
     // How many selected items are in each state, so the header only offers
     // actions that apply (see SelectionActionBar).
     private property <int> selected_running: 0; // active or queued
@@ -385,6 +392,10 @@ export component DownloaderApp inherits Window {
                     root.close_item_options();
                     return accept;
                 }
+                if (FolderFiles.open) {
+                    FolderFiles.open = false;
+                    return accept;
+                }
                 if (root.selection_mode) {
                     root.clear_selection();
                     return accept;
@@ -416,34 +427,19 @@ export component DownloaderApp inherits Window {
                         height: 48px;
                         padding-left: Math.max(16px, root.safe-area-insets.left);
                         padding-right: Math.max(16px, root.safe-area-insets.right);
-                        alignment: space-between;
-
+                        // The left part takes the spare width (space-between
+                        // would share it out as gaps, putting the selection
+                        // actions mid-header on a wide screen), so the actions
+                        // sit at the right by the ⋮ on any screen.
                         HorizontalLayout {
                             spacing: 4px;
+                            horizontal-stretch: 1;
 
                             // Leaves selection mode (same as Back).
-                            if root.selection_mode: Rectangle {
-                                width: 48px;
-                                height: 48px;
-                                border-radius: 24px;
-                                background: ta_close_selection.pressed ? ThemeSettings.hover_color : transparent;
-
-                                ta_close_selection := TouchArea {
-                                    clicked => { root.clear_selection(); }
-                                }
-
-                                Path {
-                                    width: 24px;
-                                    height: 24px;
-                                    x: (parent.width - self.width) / 2;
-                                    y: (parent.height - self.height) / 2;
-                                    viewbox-width: 24;
-                                    viewbox-height: 24;
-                                    stroke: ThemeSettings.text_color;
-                                    stroke-width: 2px;
-                                    stroke-line-cap: round;
-                                    commands: "M6 6L18 18M18 6L6 18";
-                                }
+                            if root.selection_mode: ActionIcon {
+                                label: @tr("Close");
+                                icon: @image-url("icons/rounded/close.svg");
+                                clicked => { root.clear_selection(); }
                             }
 
                             // The app's logo; the count while selecting.
@@ -455,10 +451,10 @@ export component DownloaderApp inherits Window {
                                     Wordmark { }
                                 }
                             }
+                            // MD3 title large.
                             if root.selection_mode: Text {
                                 text: @tr("{n} selected" | "{n} selected" % root.selected_count);
-                                font-size: 24px;
-                                font-weight: 700;
+                                font-size: 22px;
                                 color: ThemeSettings.text_color;
                                 vertical-alignment: center;
                                 overflow: elide;
@@ -486,7 +482,7 @@ export component DownloaderApp inherits Window {
                             }
 
                             Image {
-                                source: @image-url("icons/menu.svg");
+                                source: @image-url("icons/rounded/more_vert.svg");
                                 width: 24px;
                                 height: 24px;
                                 colorize: ThemeSettings.text_color;
@@ -872,7 +868,7 @@ export component DownloaderApp inherits Window {
                         ]
 
                         Image {
-                            source: @image-url("icons/plus.svg");
+                            source: @image-url("icons/rounded/add.svg");
                             width: 24px;
                             height: 24px;
                             colorize: ThemeSettings.on_secondary_container;
@@ -1017,26 +1013,44 @@ export component DownloaderApp inherits Window {
                     easing: ease-out-quad;
                 }
 
+                // MD3 Expressive menu: a rounded container, rounded 48 rows
+                // with a leading icon, a little apart.
                 background: ThemeSettings.surface;
                 border-radius: 16px;
-                drop-shadow-blur: 12px;
-                drop-shadow-color: #00000020;
+                drop-shadow-blur: 16px;
+                drop-shadow-offset-y: 4px;
+                drop-shadow-color: #00000026;
 
                 menu_layout := VerticalLayout {
-                    padding: 8px;
+                    padding: 4px;
+                    spacing: 2px;
+                    min-width: 160px;
 
-                    for entry[i] in root.selection_mode ? [@tr("Select all"), @tr("Invert selection")] : [@tr("Settings"), @tr("About")]: Rectangle {
+                    // While selecting: what doesn't fit in the header (Cancel,
+                    // in Stopped), then Select all and Invert selection.
+                    for entry in root.selection_mode
+                        ? (root.selection_cancel_overflows
+                            ? [{ key: 4, label: @tr("Cancel"), icon: @image-url("icons/rounded/cancel.svg") },
+                               { key: 2, label: @tr("Select all"), icon: @image-url("icons/rounded/select_all.svg") },
+                               { key: 3, label: @tr("Invert selection"), icon: @image-url("icons/rounded/flip.svg") }]
+                            : [{ key: 2, label: @tr("Select all"), icon: @image-url("icons/rounded/select_all.svg") },
+                               { key: 3, label: @tr("Invert selection"), icon: @image-url("icons/rounded/flip.svg") }])
+                        : [{ key: 0, label: @tr("Settings"), icon: @image-url("icons/rounded/settings.svg") },
+                           { key: 1, label: @tr("About"), icon: @image-url("icons/rounded/info.svg") }]: Rectangle {
                         height: 48px;
-                        border-radius: 8px;
-                        background: entry_ta.has-hover ? ThemeSettings.background : transparent;
+                        border-radius: 12px;
+                        background: entry_ta.pressed ? ThemeSettings.text_color.transparentize(88%)
+                            : entry_ta.has-hover ? ThemeSettings.text_color.transparentize(92%) : transparent;
                         entry_ta := TouchArea {
                             clicked => {
                                 root.menu_open = false;
-                                if (root.selection_mode) {
-                                    root.select_all(i == 1);
+                                if (entry.key == 2 || entry.key == 3) {
+                                    root.select_all(entry.key == 3);
+                                } else if (entry.key == 4) {
+                                    root.run_selection_action(SelectionAction.Cancel);
                                 } else {
                                     // About opens straight on its page.
-                                    if (i == 1) {
+                                    if (entry.key == 1) {
                                         st_page.active_tab = SettingsTab.About;
                                     }
                                     root.show_settings = true;
@@ -1044,11 +1058,23 @@ export component DownloaderApp inherits Window {
                             }
                         }
 
-                        Text {
-                            text: entry;
-                            color: ThemeSettings.text_color;
-                            x: 16px;
-                            vertical-alignment: center;
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            spacing: 12px;
+                            Image {
+                                source: entry.icon;
+                                width: 24px;
+                                colorize: ThemeSettings.text_color.transparentize(25%);
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: entry.label;
+                                font-size: 14px;
+                                font-weight: 500;
+                                color: ThemeSettings.text_color;
+                                vertical-alignment: center;
+                            }
                         }
                     }
                 }
@@ -1107,7 +1133,7 @@ export component DownloaderApp inherits Window {
                             VerticalLayout {
                                 alignment: center;
                                 Image {
-                                    source: @image-url("icons/add_link.svg");
+                                    source: @image-url("icons/rounded/add_link.svg");
                                     width: 24px;
                                     height: 24px;
                                     colorize: ThemeSettings.text_color;
@@ -1137,7 +1163,7 @@ export component DownloaderApp inherits Window {
                             VerticalLayout {
                                 alignment: center;
                                 Image {
-                                    source: @image-url("icons/note_add.svg");
+                                    source: @image-url("icons/rounded/note_add.svg");
                                     width: 24px;
                                     height: 24px;
                                     colorize: ThemeSettings.text_color;
@@ -1211,7 +1237,12 @@ export component DownloaderApp inherits Window {
                 animate y, opacity { duration: 250ms; easing: ease-out-quad; }
 
                 skip => { Links.skip(self.link.id); }
-                download(backend, format, filename, options) => { Links.start(self.link.id, backend, format, filename, options); }
+                download(backend, format, filename, options) => {
+                    Links.start(self.link.id, backend, format, filename, options);
+                    // Where it shows up.
+                    root.options_open = false;
+                    root.active_tab = 0;
+                }
             }
         }
 
@@ -1225,6 +1256,8 @@ export component DownloaderApp inherits Window {
             opacity: root.item_options_open ? 1.0 : 0.0;
             visible: self.opacity > 0;
             animate opacity { duration: 250ms; }
+            property <length> slide: root.item_options_open ? 0px : 24px;
+            animate slide { duration: 250ms; easing: ease-out-quad; }
 
             property <length> keyboard_top: root.virtual-keyboard-size.height > 0
                 ? root.virtual-keyboard-position.y : root.height;
@@ -1241,9 +1274,10 @@ export component DownloaderApp inherits Window {
                 available_height: parent.sheet_bottom - Math.max(24px, root.safe-area-insets.top) - 12px;
                 width: Math.min(480px, parent.width - 2 * Math.max(12px, root.safe-area-insets.left, root.safe-area-insets.right));
                 x: (parent.width - self.width) / 2;
-                y: (root.item_options_open ? parent.sheet_bottom - self.height : parent.sheet_bottom - self.height + 24px) + self.drag_offset;
-                // Follows the finger while its handle's dragged.
-                animate y { duration: self.dragging ? 0ms : 250ms; easing: ease-out-quad; }
+                // Only the slide in and the drag animate, not its height (it
+                // differs from one download to the next, and animating it
+                // made it come in from the wrong side).
+                y: parent.sheet_bottom - self.height + parent.slide + self.drag_offset;
                 dismiss_requested => { root.close_item_options(); }
 
                 action(action, value) => {
@@ -1259,6 +1293,43 @@ export component DownloaderApp inherits Window {
                     root.delete_files = false;
                     root.delete_target = root.options_item.id;
                     root.delete_confirm_open = true;
+                }
+            }
+        }
+
+        // A finished folder download's files (its card tapped).
+        Rectangle {
+            z: 90;
+            width: 100%;
+            height: 100%;
+            background: #00000060;
+            opacity: FolderFiles.open ? 1.0 : 0.0;
+            visible: self.opacity > 0;
+            animate opacity { duration: 250ms; }
+            property <length> slide: FolderFiles.open ? 0px : 24px;
+            animate slide { duration: 250ms; easing: ease-out-quad; }
+
+            property <length> sheet_bottom: AppSettings.top_navigation_bar
+                ? root.height - Math.max(12px, root.safe-area-insets.bottom)
+                : root.height - root.bottom_bar_height - 12px;
+
+            TapToDismissArea {
+                tapped => { FolderFiles.open = false; }
+            }
+
+            folder_files_sheet := FolderFilesSheet {
+                available_height: parent.sheet_bottom - Math.max(24px, root.safe-area-insets.top) - 12px;
+                width: Math.min(480px, parent.width - 2 * Math.max(12px, root.safe-area-insets.left, root.safe-area-insets.right));
+                x: (parent.width - self.width) / 2;
+                // Only the slide in and the drag animate, not its height (a
+                // different folder has a different number of files).
+                y: parent.sheet_bottom - self.height + parent.slide + self.drag_offset;
+                dismiss_requested => { FolderFiles.open = false; }
+            }
+            // Each opening starts undragged.
+            changed visible => {
+                if (self.visible) {
+                    folder_files_sheet.reset();
                 }
             }
         }

@@ -1,49 +1,66 @@
 import { ThemeSettings } from "../themes/theme.slint";
 
+// MD3 common button, full-width in sheets and dialogs: fully rounded, a
+// 14 label, and a state layer when pressed. `primary` is a filled button,
+// `danger` a filled one in the error colour, otherwise it's tonal (the
+// secondary container) so it reads as a button on any surface;
+// `destructive` gives that tonal one an error-coloured label. With
+// `has_icon`, `icon` leads the label (MD3: 18, 8 before it).
 export component ActionButton inherits Rectangle {
     in property <string> text;
+    in property <image> icon;
+    in property <bool> has_icon: false;
+    // Larger for glyphs drawn small in their box (pause, play).
+    in property <length> icon_size: 18px;
     in property <bool> primary: false;
     in property <bool> danger: false;
     in property <bool> destructive: false;
     callback clicked;
 
     height: 56px;
-    border-radius: 16px;
+    border-radius: self.height / 2;
 
-    // helper functions cause the tenary expressions were getting a tad unreadable
-    function get_background() -> brush {
-        if primary {
-            return ThemeSettings.primary_accent;
-        }
-        if danger {
-            return #FF3B30;
-        }
-        return ThemeSettings.surface;
-    }
-    function get_txt_color() -> color {
-        if destructive {
-            return #FF3B30;
-        }
-        if primary || danger {
-            return #ffffff;
-        }
-        return ThemeSettings.text_color;
-    }
+    private property <color> container: root.primary ? ThemeSettings.primary_accent
+        : root.danger ? #E5534B
+        : ThemeSettings.secondary_container;
+    private property <color> content: root.primary || root.danger ? #ffffff
+        : root.destructive ? #E5534B
+        : ThemeSettings.on_secondary_container;
 
-    background: get_background();
+    background: root.container;
     animate background { duration: 200ms; }
 
-    Text {
-        text: root.text;
-        color: get_txt_color();
-        font-size: 16px;
-        font-weight: 600;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-        animate color { duration: 200ms; }
+    // State layer: the label's colour, 12% while pressed.
+    Rectangle {
+        border-radius: root.border-radius;
+        background: ta.pressed ? root.content.transparentize(88%) : transparent;
+        animate background { duration: 100ms; }
     }
 
-    TouchArea {
+    HorizontalLayout {
+        alignment: center;
+        spacing: 8px;
+
+        if root.has_icon: VerticalLayout {
+            alignment: center;
+            Image {
+                source: root.icon;
+                width: root.icon_size;
+                height: root.icon_size;
+                colorize: root.content;
+            }
+        }
+        Text {
+            text: root.text;
+            color: root.content;
+            font-size: 14px;
+            font-weight: 500;
+            vertical-alignment: center;
+            animate color { duration: 200ms; }
+        }
+    }
+
+    ta := TouchArea {
         clicked => { root.clicked() }
     }
 }

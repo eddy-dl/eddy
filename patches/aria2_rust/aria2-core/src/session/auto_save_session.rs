@@ -1,0 +1,248 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
+
+use async_trait::async_trait;
+use tracing::debug;
+
+use super::save_session_command::SaveSessionCommand;
+use crate::engine::command::{Command, CommandStatus};
+use crate::error::Result;
+use crate::request::request_group::GroupId;
+use crate::request::request_group_man::RequestGroupMan;
+
+pub struct AutoSaveSession {
+    inner: SaveSessionCommand,
+    interval: Duration,
+    last_saved: Instant,
+    dirty: AtomicBool,
+    status: CommandStatus,
+}
+
+impl AutoSaveSession {
+    pub fn new(path: PathBuf, interval: Duration, man: Arc<RequestGroupMan>) -> Self {
+        AutoSaveSession {
+            inner: SaveSessionCommand::new(path, man),
+            interval,
+            last_saved: Instant::now(),
+            dirty: AtomicBool::new(false),
+            status: CommandStatus::Pending,
+        }
+    }
+
+    pub fn mark_dirty(&self) {
+        self.dirty.store(true, Ordering::SeqCst);
+        debug!("AutoSaveSession marked as dirty");
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.dirty.load(Ordering::SeqCst)
+    }
+
+    pub fn interval(&self) -> Duration {
+        self.interval
+    }
+
+    /// Return the next point at which an interval-gated save may run.
+    ///
+    /// The engine uses this to park until the real persistence deadline
+    /// instead of waking on a fixed housekeeping tick.
+    pub fn next_save_deadline(&self) -> Instant {
+        self.last_saved + self.interval
+    }
+
+    /// Save the session if the dirty flag is set and the interval has elapsed.
+    ///
+    /// Unlike the `Command::execute()` interface, this is a direct method
+    /// call suitable for use from the engine loop's housekeeping tick.
+    pub async fn save_if_dirty(&mut self) {
+        let _ = self.execute().await;
+    }
+
+    /// Force an immediate session save regardless of interval or dirty flag.
+    ///
+    /// Used during shutdown to persist state. Mirrors C++ `onEndOfRun()`
+    /// which unconditionally saves the session file.
+    pub async fn force_save(&mut self) {
+        self.dirty.store(true, Ordering::SeqCst);
+        // Reset interval so the save always executes.
+        self.last_saved = Instant::now() - self.interval - Duration::from_secs(1);
+        let _ = self.execute().await;
+    }
+}
+
+#[async_trait]
+impl Command for AutoSaveSession {
+    async fn execute(&mut self) -> Result<()> {
+        let elapsed = self.last_saved.elapsed();
+
+        if elapsed < self.interval {
+            debug!(
+                "AutoSave skipped: interval not reached ({:.1}s < {:.1}s)",
+                elapsed.as_secs_f64(),
+                self.interval.as_secs_f64()
+            );
+            return Ok(());
+        }
+
+        if !self.is_dirty() {
+            debug!("AutoSave skipped: no changes (dirty=false)");
+            return Ok(());
+        }
+
+        debug!(
+            "AutoSave triggered: interval={:.1}s, dirty=true",
+            elapsed.as_secs_f64()
+        );
+
+        self.inner.execute().await?;
+        self.last_saved = Instant::now();
+        self.dirty.store(false, Ordering::SeqCst);
+        self.status = self.inner.status();
+        Ok(())
+    }
+
+    fn status(&self) -> CommandStatus {
+        self.status.clone()
+    }
+
+    fn gid(&self) -> GroupId {
+        GroupId(0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::request::request_group::DownloadOptions;
+    use crate::util::rwlock_ext::RwLockRecover;
+
+    #[tokio::test]
+    async fn test_auto_save_creation() {
+        let man = Arc::new(RequestGroupMan::new());
+        let auto = AutoSaveSession::new(
+            PathBuf::from("/tmp/auto.sess"),
+            Duration::from_secs(10),
+            man,
+        );
+        assert_eq!(auto.status(), CommandStatus::Pending);
+        assert_eq!(auto.interval(), Duration::from_secs(10));
+        assert!(!auto.is_dirty());
+    }
+
+    #[tokio::test]
+    async fn test_auto_save_dirty_flag() {
+        let man = Arc::new(RequestGroupMan::new());
+        let auto = AutoSaveSession::new(
+            PathBuf::from("/tmp/auto.sess"),
+            Duration::from_secs(10),
+            man,
+        );
+
+        assert!(!auto.is_dirty());
+        auto.mark_dirty();
+        assert!(auto.is_dirty());
+    }
+
+    #[tokio::test]
+    async fn test_auto_save_skip_when_not_dirty() {
+        let man = Arc::new(RequestGroupMan::new());
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("test_autosave_clean_{}.sess", std::process::id()));
+
+        let mut auto = AutoSaveSession::new(path.clone(), Duration::from_secs(0), man);
+
+        auto.execute().await.unwrap();
+        assert!(!path.exists(), "Non-dirty should not write file");
+
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[tokio::test]
+    async fn test_auto_save_skip_when_interval_not_reached() {
+        let man = Arc::new(RequestGroupMan::new());
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!(
+            "test_autosave_interval_{}.sess",
+            std::process::id()
+        ));
+
+        let mut auto = AutoSaveSession::new(path.clone(), Duration::from_secs(999999), man);
+        auto.mark_dirty();
+
+        auto.execute().await.unwrap();
+        assert!(!path.exists(), "Interval not reached should not write file");
+
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[tokio::test]
+    async fn test_auto_save_triggers_on_both_conditions() {
+        let man = Arc::new(RequestGroupMan::new());
+        man.add_group(
+            vec!["http://example.com/auto.bin".into()],
+            DownloadOptions {
+                split: Some(2),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("test_autosave_trigger_{}.sess", std::process::id()));
+
+        let mut auto = AutoSaveSession::new(path.clone(), Duration::from_secs(0), man);
+        auto.mark_dirty();
+
+        auto.execute().await.unwrap();
+        assert!(path.exists(), "Interval+dirty condition should write file");
+
+        let content = tokio::fs::read_to_string(&path).await.unwrap();
+        assert!(content.contains("http://example.com/auto.bin"));
+
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[tokio::test]
+    async fn test_auto_save_resets_dirty_after_save() {
+        let man = Arc::new(RequestGroupMan::new());
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("test_autosave_reset_{}.sess", std::process::id()));
+
+        let mut auto = AutoSaveSession::new(path.clone(), Duration::from_secs(0), man);
+        auto.mark_dirty();
+        assert!(auto.is_dirty());
+
+        auto.execute().await.unwrap();
+        assert!(!auto.is_dirty(), "After save dirty flag should be reset");
+
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[tokio::test]
+    async fn session_save_requests_control_file_save() {
+        let man = Arc::new(RequestGroupMan::new());
+        let gid = man
+            .add_group(
+                vec!["http://example.com/payload.bin".into()],
+                DownloadOptions::default(),
+            )
+            .unwrap();
+        let session = std::env::temp_dir().join(format!(
+            "test_session_without_control_save_{}.sess",
+            std::process::id()
+        ));
+        let mut auto = AutoSaveSession::new(session.clone(), Duration::ZERO, man.clone());
+        auto.mark_dirty();
+        auto.execute().await.unwrap();
+
+        assert!(
+            man.find_group(gid)
+                .unwrap()
+                .recover()
+                .is_save_control_file_requested()
+        );
+        let _ = tokio::fs::remove_file(session).await;
+    }
+}

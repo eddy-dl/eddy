@@ -1,6 +1,7 @@
 export enum SortKey { DateAdded, Name, Size, Progress }
 
-export enum FileFilter { All, Video, Audio, Image, Document, Archive }
+// Folder: downloads saved as a folder of files (playlists, posts, torrents).
+export enum FileFilter { All, Video, Audio, Image, Document, Archive, Folder }
 
 export struct TabListOptions {
     sort: SortKey,

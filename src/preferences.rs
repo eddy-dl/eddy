@@ -142,7 +142,9 @@ pub fn load_preferences(ui_weak: slint::Weak<DownloaderApp>) {
         theme_settings.set_accent(accent_color);
         theme_settings.set_amoled_dark(amoled);
         app_settings.set_haptic_feedback(enable_haptic_feedback);
-        app_settings.set_system_font(platform::get_pref(SYSTEM_FONT_KEY, "false").ok().is_some_and(|v| v == "true"));
+        let system_font = platform::get_pref(SYSTEM_FONT_KEY, "false").ok().is_some_and(|v| v == "true");
+        app_settings.set_system_font(system_font);
+        app_settings.set_system_font_status(system_font_status(system_font).into());
         app_settings.set_current_download_path(download_dir_display.into());
         apply_download_defaults(&app_settings);
         let novel = novel_defaults();
@@ -150,6 +152,37 @@ pub fn load_preferences(ui_weak: slint::Weak<DownloaderApp>) {
         app_settings.set_novel_images(novel.images);
         app_settings.set_novel_author_note_images(novel.author_note_images);
         app_settings.set_novel_small_images(novel.small_images);
+    }
+}
+
+/// The windows' font: the phone's own when it's in use (Material names
+/// Roboto otherwise, which would win over it).
+pub fn apply_font(theme: &ThemeSettings) {
+    if std::env::var("SLINT_DEFAULT_FONT").is_ok_and(|p| !p.is_empty()) {
+        theme.set_font_family("sans-serif".into());
+    }
+}
+
+/// What Settings says about the system font, and what the logs get: the
+/// file Slint started with (SLINT_DEFAULT_FONT, set by the Android app as
+/// it opened), else why there's none.
+fn system_font_status(wanted: bool) -> String {
+    let in_use = std::env::var("SLINT_DEFAULT_FONT").ok().filter(|p| !p.is_empty());
+    let found = platform::get_pref("system_font_status", "").unwrap_or_default();
+    match (wanted, in_use) {
+        (_, Some(path)) => {
+            let readable = std::fs::metadata(&path).map(|m| format!("{} KB", m.len() / 1024)).unwrap_or_else(|e| format!("unreadable: {e}"));
+            log::info!("system font in use: {path} ({readable})");
+            String::new()
+        }
+        (false, None) => String::new(),
+        (true, None) => {
+            log::warn!("system font wanted, none in use ({found})");
+            match found.strip_prefix("none: ") {
+                Some("off") | None => String::new(),
+                Some(why) => format!("Couldn't use it: {why}"),
+            }
+        }
     }
 }
 
@@ -234,7 +267,12 @@ pub fn save_preferences(ui_weak: slint::Weak<DownloaderApp>) {
             eprintln!("failed to save top navigation bar preference: {e}");
         }
 
-        if let Err(e) = platform::save_pref(SYSTEM_FONT_KEY, &app_settings.get_system_font().to_string()) {
+        let system_font = app_settings.get_system_font().to_string();
+        if platform::get_pref(SYSTEM_FONT_KEY, "false").ok().is_some_and(|old| old != system_font) {
+            // Slint picks its font once, as the app starts.
+            platform::show_toast("Takes effect the next time Eddy opens");
+        }
+        if let Err(e) = platform::save_pref(SYSTEM_FONT_KEY, &system_font) {
             eprintln!("failed to save system font preference: {e}");
         }
 

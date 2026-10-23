@@ -205,24 +205,25 @@ export component PackageSettings inherits Rectangle {
             // Room under the last item, so it doesn't end at the edge.
             padding-bottom: 24px;
 
-            // Lined up with the rows' text.
-            VerticalLayout {
-                padding-left: SettingsLayout.inset;
-                padding-right: SettingsLayout.inset;
-                padding-bottom: 8px;
-                Note {
-                    text: AppSettings.is_mobile
-                        ? @tr("Media from most sites needs these. They're separate apps, YTDLnis's packages: Eddy can fetch one for you, and you install it.")
-                        : @tr("Media from most sites needs these. Eddy can install them in its own folder; copies you already have are used too.");
-                    text_color: root.text_color;
-                }
-            }
             for package[i] in AppSettings.helper_packages: HelperRow {
                 first: i == 0;
                 last: i == AppSettings.helper_packages.length - 1;
                 package: package;
                 text_color: root.text_color;
                 clicked => { root.helper_tapped(package); }
+            }
+
+            // Lined up with the rows' text.
+            VerticalLayout {
+                padding-left: SettingsLayout.inset;
+                padding-right: SettingsLayout.inset;
+                padding-top: 12px;
+                Note {
+                    text: AppSettings.is_mobile
+                        ? @tr("Media from most sites needs these. They're separate apps, YTDLnis's packages: Eddy can fetch one for you, and you install it.")
+                        : @tr("Media from most sites needs these. Eddy can install them in its own folder; copies you already have are used too.");
+                    text_color: root.text_color;
+                }
             }
         }
     }

@@ -49,6 +49,8 @@ pub fn open_url(_url: &str) {}
 
 pub fn delete_document(_uri: &str) {}
 
+pub fn share(_files: &[String], _text: &str) {}
+
 pub fn has_all_files_access() -> bool {
     false
 }

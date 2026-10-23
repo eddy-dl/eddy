@@ -22,11 +22,23 @@ export struct LinkFormat {
 }
 
 // One file inside a torrent.
+// One of a download's several files: a torrent's, or a post's / playlist's
+// items.
 export struct TorrentFile {
     index: int, // 1-based, as aria2's select-file counts
-    path: string, // inside the torrent, e.g. "Show/S01E01.mkv"
+    path: string, // inside the torrent, e.g. "Show/S01E01.mkv"; an item's title
     size: string, // formatted
     selected: bool,
+    // Media items: 1 video, 2 audio, 3 image (0 a torrent's file), its
+    // thumbnail, and whether a video is saved as just its audio.
+    kind: int,
+    thumbnail: image,
+    as_audio: bool,
+    // Its own quality (a key, or a bitrate "128" as audio; "" for the
+    // preview's), and the ones it has (as video, and as audio), held to pick.
+    quality: string,
+    formats: [LinkFormat],
+    audio_formats: [LinkFormat],
 }
 
 // How one download goes about it (the preview's options; Settings →
@@ -56,6 +68,7 @@ export struct PendingLink {
     formats: [LinkFormat], // yt-dlp qualities, best first
     files: [TorrentFile], // a torrent's files, once known; all selected at first
     files_selected: int, // how many of `files` are selected
+    files_audio: int, // of the selected ones, how many are saved as audio
     folder: string, // where it'll be saved, as shown to the user
     folder_uri: string, // a folder picked for this link; "" for the usual one
     // Media links (LinkBackend.Media):
@@ -106,7 +119,7 @@ export global Links {
           filename: "missing.zip", file_type: FileType.Archive,
           size: "", source: "example.com", folder: "Download/Eddy", backends: [LinkBackend.Direct], formats: [] },
         { id: 4, url: "https://webtorrent.io/torrents/sintel.torrent", state: ProbeState.Ready, error: "",
-          filename: "Sintel", file_type: FileType.Torrent,
+          filename: "Sintel", file_type: FileType.Folder,
           size: "129 MB", source: "webtorrent.io", folder: "Download/Eddy", backends: [LinkBackend.Torrent, LinkBackend.Direct], formats: [],
           files: [
               { index: 1, path: "Sintel/Sintel.mp4", size: "123 MB", selected: true },
@@ -133,6 +146,13 @@ export global Links {
     callback toggle_file(id: int, index: int);
     // Select or unselect all of a torrent link's files.
     callback select_all_files(id: int, selected: bool);
+    // A video item saved as just its audio, or not; every item at once.
+    callback toggle_audio(id: int, index: int);
+    callback set_all_audio(id: int, audio: bool);
+    // The preview's quality and bitrate (the items' sizes follow them), and
+    // one item's own ("" to follow the preview's again).
+    callback choose_quality(id: int, video: string, audio: string);
+    callback set_item_quality(id: int, index: int, quality: string);
     // Download every pending link with the given choice, each as soon as
     // its check is done (failed ones stay pending).
     callback quick_download(QuickBackend);

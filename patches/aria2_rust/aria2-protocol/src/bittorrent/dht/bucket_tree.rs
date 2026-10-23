@@ -1,0 +1,382 @@
+//! DHT bucket tree — binary tree routing table structure.
+//!
+//! The C++ implementation uses `DHTBucketTreeNode` as a binary tree where leaf
+//! nodes hold buckets and internal nodes hold min/max ID ranges. When a bucket
+//! is full and contains our local node ID, it can be split into two child
+//! buckets. This is the core of the Kademlia routing table structure per BEP 5.
+//!
+//! The Rust version uses `Box` for tree ownership (replacing C++ `unique_ptr`).
+//! Buckets are owned directly (not behind `Arc`) since the tree is the sole
+//! owner, allowing mutable access through the tree structure.
+
+use super::bucket::Bucket;
+use super::node::DhtNode;
+use std::collections::BinaryHeap;
+
+/// K-bucket constant: maximum nodes per bucket.
+const K: usize = 8;
+
+/// A node in the DHT routing table's binary tree.
+///
+/// Leaf nodes hold a [`Bucket`] containing up to K [`DhtNode`]s.
+/// Internal nodes hold left/right children and the min/max ID range
+/// they collectively cover.
+///
+/// This is the Rust equivalent of C++ `DHTBucketTreeNode`.
+pub(super) enum BucketTreeNode {
+    /// Internal (branch) node with two children.
+    Internal {
+        left: Box<BucketTreeNode>,
+        right: Box<BucketTreeNode>,
+        /// Minimum ID in this subtree (inclusive).
+        min_id: [u8; 20],
+        /// Maximum ID in this subtree (inclusive).
+        max_id: [u8; 20],
+    },
+    /// Leaf node holding a bucket.
+    Leaf { bucket: Bucket },
+}
+
+impl BucketTreeNode {
+    /// Create a new leaf node wrapping the given bucket.
+    pub(super) fn new_leaf(bucket: Bucket) -> Self {
+        Self::Leaf { bucket }
+    }
+
+    /// Create a new internal node from two children.
+    ///
+    /// The min/max ID range is derived from the children.
+    fn new_internal(left: Box<BucketTreeNode>, right: Box<BucketTreeNode>) -> Self {
+        let min_id = left.min_id();
+        let max_id = right.max_id();
+        Self::Internal {
+            left,
+            right,
+            min_id,
+            max_id,
+        }
+    }
+
+    /// Returns the minimum ID covered by this subtree.
+    fn min_id(&self) -> [u8; 20] {
+        match self {
+            Self::Internal { min_id, .. } => *min_id,
+            Self::Leaf { bucket } => *bucket.min_id(),
+        }
+    }
+
+    /// Returns the maximum ID covered by this subtree.
+    fn max_id(&self) -> [u8; 20] {
+        match self {
+            Self::Internal { max_id, .. } => *max_id,
+            Self::Leaf { bucket } => *bucket.max_id(),
+        }
+    }
+
+    /// Returns the child (left or right) that contains the given key.
+    ///
+    /// Returns `None` if this is a leaf node.
+    fn dig(&self, key: &[u8; 20]) -> Option<&BucketTreeNode> {
+        match self {
+            Self::Internal { left, right, .. } => {
+                if left.is_in_range(key) {
+                    Some(left)
+                } else {
+                    Some(right)
+                }
+            }
+            Self::Leaf { .. } => None,
+        }
+    }
+
+    /// Returns the mutable child (left or right) that contains the given key.
+    fn dig_mut(&mut self, key: &[u8; 20]) -> Option<&mut BucketTreeNode> {
+        match self {
+            Self::Internal { left, right, .. } => {
+                if left.is_in_range(key) {
+                    Some(left)
+                } else {
+                    Some(right)
+                }
+            }
+            Self::Leaf { .. } => None,
+        }
+    }
+
+    /// Returns `true` if `key` falls within this node's [min, max] range.
+    fn is_in_range(&self, key: &[u8; 20]) -> bool {
+        let min = self.min_id();
+        let max = self.max_id();
+        // key >= min AND key <= max (lexicographic comparison)
+        key.as_slice() >= min.as_slice() && key.as_slice() <= max.as_slice()
+    }
+
+    /// Split this leaf node's bucket into two child buckets.
+    ///
+    /// This converts the leaf node into an internal node with two children:
+    /// - Left: the existing bucket (mutated in-place to become left half)
+    /// - Right: the new bucket returned by `Bucket::split()`
+    ///
+    /// Panics if called on an internal node.
+    pub(super) fn split(&mut self, local_id: &[u8; 20]) {
+        match self {
+            Self::Leaf { bucket } => {
+                // Check if splitting is allowed.
+                if !bucket.split_allowed() {
+                    tracing::debug!("Bucket split rejected: not allowed");
+                    return;
+                }
+
+                // Split the bucket in-place: self becomes the left half,
+                // right_bucket is the new right half.
+                let right_bucket = bucket.split();
+
+                // Create the two child leaf nodes.
+                // We need to extract the mutated left bucket since we're about to
+                // replace self with an Internal node.
+                let left_bucket = std::mem::replace(
+                    bucket,
+                    Bucket::new_for_range(0, [0u8; 20], [0xFFu8; 20], *local_id),
+                );
+
+                let left_node = Box::new(BucketTreeNode::new_leaf(left_bucket));
+                let right_node = Box::new(BucketTreeNode::new_leaf(right_bucket));
+
+                *self = Self::new_internal(left_node, right_node);
+
+                let (left_prefix, right_prefix) = match self {
+                    Self::Internal { left, right, .. } => {
+                        let prefix = |node: &BucketTreeNode| match node {
+                            Self::Leaf { bucket } => bucket.prefix_length(),
+                            Self::Internal { .. } => 0,
+                        };
+                        (prefix(left), prefix(right))
+                    }
+                    Self::Leaf { .. } => unreachable!("a split produces two child buckets"),
+                };
+                tracing::debug!(left_prefix, right_prefix, "Bucket split");
+            }
+            Self::Internal { .. } => {
+                panic!("split() called on non-leaf node");
+            }
+        }
+    }
+
+    pub(super) fn for_each_bucket_mut(&mut self, f: &mut impl FnMut(&mut Bucket)) {
+        match self {
+            Self::Leaf { bucket } => f(bucket),
+            Self::Internal { left, right, .. } => {
+                left.for_each_bucket_mut(f);
+                right.for_each_bucket_mut(f);
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tree-level query functions (equivalent to C++ dht namespace functions)
+// ---------------------------------------------------------------------------
+
+/// Find the leaf tree node whose bucket range contains `key`.
+///
+/// Equivalent to C++ `dht::findTreeNodeFor()`.
+fn find_tree_node_for<'a>(root: &'a BucketTreeNode, key: &[u8; 20]) -> &'a BucketTreeNode {
+    match root {
+        BucketTreeNode::Leaf { .. } => root,
+        BucketTreeNode::Internal { .. } => {
+            let child = root.dig(key).expect("internal node must have children");
+            find_tree_node_for(child, key)
+        }
+    }
+}
+
+/// Find the mutable leaf tree node whose bucket range contains `key`.
+pub(super) fn find_tree_node_for_mut<'a>(
+    root: &'a mut BucketTreeNode,
+    key: &[u8; 20],
+) -> &'a mut BucketTreeNode {
+    match root {
+        BucketTreeNode::Leaf { .. } => root,
+        BucketTreeNode::Internal { .. } => {
+            let child = root.dig_mut(key).expect("internal node must have children");
+            find_tree_node_for_mut(child, key)
+        }
+    }
+}
+
+/// Find the bucket whose range contains `key`.
+///
+/// Equivalent to C++ `dht::findBucketFor()`.
+pub(super) fn find_bucket_for<'a>(root: &'a BucketTreeNode, key: &[u8; 20]) -> &'a Bucket {
+    let leaf = find_tree_node_for(root, key);
+    match leaf {
+        BucketTreeNode::Leaf { bucket } => bucket,
+        BucketTreeNode::Internal { .. } => unreachable!("find_tree_node_for returned internal"),
+    }
+}
+
+/// Find the mutable bucket whose range contains `key`.
+pub(super) fn find_bucket_for_mut<'a>(
+    root: &'a mut BucketTreeNode,
+    key: &[u8; 20],
+) -> &'a mut Bucket {
+    let leaf = find_tree_node_for_mut(root, key);
+    match leaf {
+        BucketTreeNode::Leaf { bucket } => bucket,
+        BucketTreeNode::Internal { .. } => unreachable!("find_tree_node_for returned internal"),
+    }
+}
+
+/// Collect up to K closest good nodes to `key` from the routing tree.
+///
+/// This is the tree-based equivalent of C++ `dht::findClosestKNodes()`.
+/// It traverses the tree to find the leaf bucket containing `key`,
+/// then collects nodes from the parent's subtree and walks upward
+/// until K nodes are found.
+pub(super) fn find_closest_k_nodes(root: &BucketTreeNode, key: &[u8; 20]) -> Vec<DhtNode> {
+    let mut nodes = BinaryHeap::with_capacity(K);
+    collect_closest_from_tree(root, key, &mut nodes);
+    let mut result: Vec<DhtNode> = nodes.into_iter().map(|candidate| candidate.node).collect();
+    result.sort_by(|a, b| {
+        a.distance_to(key)
+            .cmp(&b.distance_to(key))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    result
+}
+
+/// Candidate retained by the fixed-size top-K heap.
+///
+/// `BinaryHeap` keeps the farthest retained node at its root, so a new node
+/// can replace it in O(log K) without sorting the complete routing table.
+struct ClosestCandidate {
+    distance: usize,
+    node: DhtNode,
+}
+
+impl PartialEq for ClosestCandidate {
+    fn eq(&self, other: &Self) -> bool {
+        self.distance == other.distance && self.node.id == other.node.id
+    }
+}
+
+impl Eq for ClosestCandidate {}
+
+impl PartialOrd for ClosestCandidate {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ClosestCandidate {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.distance
+            .cmp(&other.distance)
+            .then_with(|| self.node.id.cmp(&other.node.id))
+    }
+}
+
+/// Collect closest nodes by walking the bucket tree and retaining only K.
+///
+/// The tree still has to visit each leaf because XOR distance does not map to
+/// the lexicographic bucket ranges directly. The bounded heap changes the
+/// expensive selection step from O(N log N) plus a full temporary node list to
+/// O(N log K) with at most K retained node clones.
+fn collect_closest_from_tree(
+    root: &BucketTreeNode,
+    key: &[u8; 20],
+    nodes: &mut BinaryHeap<ClosestCandidate>,
+) {
+    match root {
+        BucketTreeNode::Leaf { bucket } => {
+            for node in bucket.nodes() {
+                if node.is_bad() {
+                    continue;
+                }
+                let candidate = ClosestCandidate {
+                    distance: node.distance_to(key),
+                    node: node.clone(),
+                };
+                if nodes.len() < K {
+                    nodes.push(candidate);
+                } else if nodes.peek().is_some_and(|farthest| candidate < *farthest) {
+                    nodes.pop();
+                    nodes.push(candidate);
+                }
+            }
+        }
+        BucketTreeNode::Internal { left, right, .. } => {
+            collect_closest_from_tree(left, key, nodes);
+            collect_closest_from_tree(right, key, nodes);
+        }
+    }
+}
+
+/// Enumerate all leaf buckets in the tree (in-order traversal).
+///
+/// Equivalent to C++ `dht::enumerateBucket()`.
+pub(super) fn enumerate_buckets<'a>(root: &'a BucketTreeNode, buckets: &mut Vec<&'a Bucket>) {
+    match root {
+        BucketTreeNode::Leaf { bucket } => {
+            buckets.push(bucket);
+        }
+        BucketTreeNode::Internal { left, right, .. } => {
+            enumerate_buckets(left, buckets);
+            enumerate_buckets(right, buckets);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::SocketAddr;
+
+    fn make_local_node() -> DhtNode {
+        DhtNode::new([0u8; 20], "127.0.0.1:6881".parse::<SocketAddr>().unwrap())
+    }
+
+    #[test]
+    fn test_leaf_node_creation() {
+        let local = make_local_node();
+        let bucket = Bucket::new(&local);
+        let node = BucketTreeNode::new_leaf(bucket);
+
+        assert!(matches!(node, BucketTreeNode::Leaf { .. }));
+    }
+
+    #[test]
+    fn test_is_in_range() {
+        let local = make_local_node();
+        let bucket = Bucket::new(&local);
+        let node = BucketTreeNode::new_leaf(bucket);
+
+        // The initial bucket covers the full ID space [0x00..0xFF]
+        let zero_id = [0u8; 20];
+        let max_id = [0xFFu8; 20];
+        assert!(node.is_in_range(&zero_id));
+        assert!(node.is_in_range(&max_id));
+    }
+
+    #[test]
+    fn test_find_tree_node_for() {
+        let local = make_local_node();
+        let bucket = Bucket::new(&local);
+        let root = BucketTreeNode::new_leaf(bucket);
+
+        let key = [0x42u8; 20];
+        let found = find_tree_node_for(&root, &key);
+        assert!(matches!(found, BucketTreeNode::Leaf { .. }));
+    }
+
+    #[test]
+    fn test_enumerate_buckets_single() {
+        let local = make_local_node();
+        let bucket = Bucket::new(&local);
+        let root = BucketTreeNode::new_leaf(bucket);
+
+        let mut buckets = Vec::new();
+        enumerate_buckets(&root, &mut buckets);
+        assert_eq!(buckets.len(), 1);
+    }
+}
