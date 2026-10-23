@@ -1,6 +1,7 @@
 import { ThemeSettings } from "../themes/theme.slint";
 import { FileType, FileTypeIcon } from "FileTypeIcon.slint";
 import { HoldTouchArea } from "HoldHint.slint";
+import { Shine } from "Shine.slint";
 import { LinkBackend, LinkOptions } from "../globals/Links.slint";
 
 export { FileType }
@@ -90,6 +91,8 @@ component CardFrame inherits Rectangle {
     in property <FileType> file_type;
     in property <bool> muted: false;
     in property <bool> selected: false;
+    // Room on the right for a button the card puts over it.
+    in property <length> trailing: 0px;
     callback clicked();
     callback long_pressed();
 
@@ -98,7 +101,10 @@ component CardFrame inherits Rectangle {
         : (ta.pressed ? ThemeSettings.surface.darker(0.08) : ThemeSettings.surface);
     border-width: root.selected ? 2px : 0px;
     border-color: ThemeSettings.primary_accent;
-    animate background, border-width { duration: 150ms; }
+    // A tap's quick; a theme change follows the page's fade.
+    animate background { duration: ta.pressed ? 150ms : ThemeSettings.fade; easing: ease-in-out; }
+    animate border-width { duration: 150ms; }
+    clip: true;
 
     ta := HoldTouchArea {
         tapped => { root.clicked(); }
@@ -107,6 +113,7 @@ component CardFrame inherits Rectangle {
 
     HorizontalLayout {
         padding: 12px;
+        padding-right: 12px + root.trailing;
         spacing: 12px;
 
         // The icon and the check badge are both always there and crossfade,
@@ -137,6 +144,12 @@ component CardFrame inherits Rectangle {
             spacing: 6px;
             @children
         }
+    }
+
+    // A sweep of the new colour when the accent changes.
+    Shine {
+        width: 100%;
+        height: 100%;
     }
 }
 
@@ -193,6 +206,7 @@ export component DownloadingCard inherits Rectangle {
 
         ProgressBar {
             progress: root.item.progress;
+            // Material 3's progress indicators take the main colour.
             fill_color: ThemeSettings.primary_accent;
         }
     }
@@ -266,14 +280,21 @@ export component StoppedCard inherits Rectangle {
 export component CompletedCard inherits Rectangle {
     in property <DownloadItem> item;
     in property <bool> selected;
+    // Hides the book's button while picking downloads.
+    in property <bool> selecting: false;
     callback clicked();
     callback long_pressed();
+    // A saved book's "Check for new chapters".
+    callback update_book();
+
+    private property <bool> book: root.item.backend == LinkBackend.Book && !root.selecting;
 
     height: 68px;
 
     CardFrame {
         file_type: root.item.file_type;
         selected: root.selected;
+        trailing: root.book ? 40px : 0px;
         clicked => { root.clicked(); }
         long_pressed => { root.long_pressed(); }
 
@@ -283,6 +304,28 @@ export component CompletedCard inherits Rectangle {
 
         CardDetail {
             text: root.item.size + " · " + root.item.date;
+        }
+    }
+
+    // Over the card's right end, a 48 touch target.
+    if root.book: Rectangle {
+        x: parent.width - self.width - 4px;
+        width: 48px;
+        height: 48px;
+        border-radius: 24px;
+        background: update_ta.pressed ? ThemeSettings.text_color.transparentize(90%) : transparent;
+        Path {
+            width: 24px;
+            height: 24px;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            commands: "M20 11a8.1 8.1 0 0 0 -15.5 -2M4 5v4h4M4 13a8.1 8.1 0 0 0 15.5 2M20 19v-4h-4";
+            stroke: ThemeSettings.text_color.transparentize(25%);
+            stroke-width: 2px;
+            fill: transparent;
+        }
+        update_ta := TouchArea {
+            clicked => { root.update_book(); }
         }
     }
 }

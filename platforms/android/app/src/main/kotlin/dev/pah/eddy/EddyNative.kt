@@ -29,6 +29,10 @@ object EddyNative {
     // (JSON from YtdlRuntime.setup).
     @JvmStatic external fun setRuntime(json: String)
 
+    // The progress notification's buttons: 0 pauses, 1 cancels every
+    // running or queued download.
+    @JvmStatic external fun controlDownloads(action: Int)
+
     // Downloads still running or queued.
     @JvmStatic external fun activeDownloads(): Int
 
@@ -38,11 +42,16 @@ object EddyNative {
     @JvmStatic external fun status(): String?
 
     // Downloads that ended since the last call, one per line:
-    // "1 or 0 (succeeded)\tname\tmessage\tstaging folder\tpicked folder's tree URI"
-    // (the last two set when the files still need copying into that folder).
+    // "1 or 0 (succeeded)\tname\tmessage\tstaging folder\tpicked folder's tree URI\tid"
+    // (the folders set when the files still need copying into that folder;
+    // id is the download's record).
     // Null if Rust couldn't make the string (it logs why, and keeps them for
     // the next call).
     @JvmStatic external fun takeFinished(): String?
+
+    // A finished download's copy in its picked folder (a document URI), so
+    // the list can open it there.
+    @JvmStatic external fun delivered(id: Long, uri: String)
 
     // Saves shared text, or a shared file's links, as pending. Returns how
     // many links were added.

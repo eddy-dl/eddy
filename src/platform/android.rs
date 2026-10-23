@@ -197,7 +197,19 @@ pub fn get_default_download_location() -> String {
     .unwrap_or_else(|_| String::from("/storage/emulated/0/Download"))
 }
 
+/// Material You's main accent (Android 12+), for the System accent.
 pub fn system_accent() -> Option<slint::Color> {
+    system_color("system_accent1_500")
+}
+
+/// Material You's tertiary accent, the System accent's second colour (its
+/// secondary palette is only a muted copy of the main one).
+pub fn system_second_accent() -> Option<slint::Color> {
+    system_color("system_accent3_500")
+}
+
+/// One of Android's system colours (`android.R.color.<name>`), if it has it.
+fn system_color(name: &str) -> Option<slint::Color> {
     with_env(|env, activity| {
         let resources = env
             .call_method(
@@ -207,7 +219,7 @@ pub fn system_accent() -> Option<slint::Color> {
                 &[],
             )?
             .l()?;
-        let name = env.new_string("system_accent1_500")?;
+        let name = env.new_string(name)?;
         let def_type = env.new_string("color")?;
         let def_pkg = env.new_string("android")?;
         let res_id = env
@@ -524,7 +536,7 @@ pub extern "system" fn Java_dev_pah_eddy_EddyNative_status<'caller>(
 }
 
 /// Downloads that ended since the last call, one per line:
-/// "1 or 0 (succeeded)\tname\tmessage\tstaging folder\tpicked folder's tree URI".
+/// "1 or 0 (succeeded)\tname\tmessage\tstaging folder\tpicked folder's tree URI\tid".
 /// The last two are set when the files still have to be copied into the
 /// picked folder (the service does that, then deletes the staging folder).
 #[unsafe(no_mangle)]
@@ -541,7 +553,7 @@ pub extern "system" fn Java_dev_pah_eddy_EddyNative_takeFinished<'caller>(
                 Some(d) => (d.staging.to_string_lossy().into_owned(), d.tree_uri.clone()),
                 None => (String::new(), String::new()),
             };
-            format!("{}\t{}\t{}\t{}\t{}", f.ok as u8, clean(&f.name), clean(&f.message), staging, tree)
+            format!("{}\t{}\t{}\t{}\t{}\t{}", f.ok as u8, clean(&f.name), clean(&f.message), staging, tree, f.id)
         })
         .collect();
     let text = text.join("\n");
@@ -554,6 +566,34 @@ pub extern "system" fn Java_dev_pah_eddy_EddyNative_takeFinished<'caller>(
         crate::downloader::return_finished(finished);
     }
     text
+}
+
+/// A staged download's copy in its picked folder (a document URI): the list
+/// opens it from there.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pah_eddy_EddyNative_delivered<'caller>(
+    mut unowned_env: EnvUnowned<'caller>,
+    _class: JClass<'caller>,
+    id: jni::sys::jlong,
+    uri: JString<'caller>,
+) {
+    let uri = unowned_env
+        .with_env(|env| -> jni::errors::Result<_> { uri.try_to_string(env) })
+        .resolve::<LogErrorAndDefault>();
+    if !uri.is_empty() {
+        crate::downloads::delivered(id, &uri);
+    }
+}
+
+/// The progress notification's Pause (0) and Cancel (1): every running or
+/// queued download.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pah_eddy_EddyNative_controlDownloads<'caller>(
+    _unowned_env: EnvUnowned<'caller>,
+    _class: JClass<'caller>,
+    action: jint,
+) {
+    crate::downloads::control_all(action == 1);
 }
 
 /// How many downloads are still going, so the service knows when to stop.
@@ -680,6 +720,30 @@ pub fn open_file(path: &str) {
     }
 }
 
+/// Deletes a document (a download's copy in a picked folder).
+pub fn delete_document(uri: &str) {
+    let result = with_env(|env, activity| {
+        let uri = env.new_string(uri)?;
+        env.call_method(activity, jni_str!("deleteDocument"), jni_sig!("(Ljava/lang/String;)V"), &[JValue::Object(&uri)])?;
+        Ok(())
+    });
+    if let Err(e) = result {
+        log::error!("Couldn't delete the document: {e}");
+    }
+}
+
+/// Opens a web page in the browser.
+pub fn open_url(url: &str) {
+    let result = with_env(|env, activity| {
+        let url = env.new_string(url)?;
+        env.call_method(activity, jni_str!("openUrl"), jni_sig!("(Ljava/lang/String;)V"), &[JValue::Object(&url)])?;
+        Ok(())
+    });
+    if let Err(e) = result {
+        log::error!("Couldn't open the link: {e}");
+    }
+}
+
 pub fn get_app_data_dir() -> String {
     let result = with_env(|env, context| {
         let file_obj = env
@@ -795,6 +859,10 @@ pub fn ytdlp_command() -> Option<std::process::Command> {
             command.arg(r.ytdlp.as_ref()?);
         }
         command.envs(&r.env);
+        // The community plugin, next to Eddy's yt-dlp (ytdlp_plugin.rs).
+        if let Some(dir) = own.parent().filter(|d| crate::ytdlp_plugin::installed(d)) {
+            command.arg("--plugin-dirs").arg(crate::ytdlp_plugin::plugins_dir(dir));
+        }
         if let Some(ffmpeg) = &r.ffmpeg {
             command.args(["--ffmpeg-location", ffmpeg]);
         }

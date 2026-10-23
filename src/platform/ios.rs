@@ -12,6 +12,10 @@ pub fn system_accent() -> Option<slint::Color> {
     None
 }
 
+pub fn system_second_accent() -> Option<slint::Color> {
+    None
+}
+
 pub fn get_default_download_location() -> String {
     String::from("Documents")
 }
@@ -40,6 +44,10 @@ pub fn start_download(_request: &crate::downloader::DownloadRequest) -> Result<(
 }
 
 pub fn open_file(_path: &str) {}
+
+pub fn open_url(_url: &str) {}
+
+pub fn delete_document(_uri: &str) {}
 
 pub fn has_all_files_access() -> bool {
     false

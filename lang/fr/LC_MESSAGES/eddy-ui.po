@@ -24,8 +24,8 @@ msgstr "Paramètres"
 msgid "Add Link(s)"
 msgstr "Ajouter des liens"
 
-msgid "Add from file (.txt), (.torrent)"
-msgstr "Ajouter depuis un fichier (.txt), (.torrent)"
+msgid "Add from file"
+msgstr "Ajouter depuis un fichier"
 
 msgid "General"
 msgstr "Général"
@@ -50,7 +50,6 @@ msgstr "Activer le retour haptique pour certaines actions"
 
 msgid "Download Location"
 msgstr "Emplacement des téléchargements"
-
 
 msgid "Sort & filter · {}"
 msgstr "Trier et filtrer · {}"
@@ -358,9 +357,6 @@ msgstr "Format audio"
 msgid "Items"
 msgstr "Éléments"
 
-msgid "Python & yt-dlp"
-msgstr "Python et yt-dlp"
-
 msgid "Get"
 msgstr "Obtenir"
 
@@ -369,7 +365,6 @@ msgstr "Mettre à jour"
 
 msgid "Install"
 msgstr "Installer"
-
 
 msgid "Joins video and audio, converts to audio, saves streams"
 msgstr "Assemble vidéo et audio, convertit en audio, enregistre les flux"
@@ -425,30 +420,19 @@ msgstr "Outils média"
 msgid "Media from most sites needs these. Eddy can install them in its own folder; copies you already have are used too."
 msgstr "Les médias de la plupart des sites en ont besoin. Eddy peut les installer dans son propre dossier ; ceux déjà installés sont aussi utilisés."
 
-
-
 msgid "Cookies"
 msgstr "Cookies"
 
 msgid "Couldn't read that file"
 msgstr "Impossible de lire ce fichier"
 
-msgid "That isn't a cookies.txt (Netscape format)"
-msgstr "Ce n'est pas un cookies.txt (format Netscape)"
-
 msgid "Couldn't save the cookies"
 msgstr "Impossible d'enregistrer les cookies"
-
-msgid "Add a cookies.txt exported from your browser, for sites that need you logged in."
-msgstr "Ajoutez un cookies.txt exporté depuis votre navigateur, pour les sites où il faut être connecté."
 
 msgid "{n} cookie"
 msgid_plural "{n} cookies"
 msgstr[0] "{n} cookie"
 msgstr[1] "{n} cookies"
-
-msgid "Remove"
-msgstr "Retirer"
 
 msgid "Advanced"
 msgstr "Avancé"
@@ -479,8 +463,6 @@ msgstr "Livres"
 
 msgid "Book"
 msgstr "Livre"
-
-
 
 msgid "Author notes"
 msgstr "Notes d'auteur"
@@ -520,7 +502,6 @@ msgid_plural "{n} chapters"
 msgstr[0] "{n} chapitre"
 msgstr[1] "{n} chapitres"
 
-
 msgid "Speed limit"
 msgstr "Limite de vitesse"
 
@@ -541,7 +522,6 @@ msgstr "Navigateur"
 
 msgid "Custom"
 msgstr "Personnalisé"
-
 
 msgid "Category folders"
 msgstr "Dossiers par catégorie"
@@ -599,7 +579,6 @@ msgstr "Nouveau dossier"
 msgid "Use this folder"
 msgstr "Utiliser ce dossier"
 
-
 msgid "Eddy downloads it ({}) from GitHub and uses it instead of the one in the Python package."
 msgstr "Eddy le télécharge ({}) depuis GitHub et l'utilise à la place de celui du paquet Python."
 
@@ -608,3 +587,113 @@ msgstr "Fait tourner yt-dlp"
 
 msgid "Downloads media from most sites"
 msgstr "Télécharge les médias de la plupart des sites"
+
+msgid "Default"
+msgstr "Par défaut"
+
+msgid "Select all"
+msgstr "Tout sélectionner"
+
+msgid "Invert selection"
+msgstr "Inverser la sélection"
+
+msgid "About"
+msgstr "À propos"
+
+msgid "Saved before · no new chapters"
+msgstr "Déjà enregistré · aucun nouveau chapitre"
+
+msgid "Saved before · {n} new chapter"
+msgid_plural "Saved before · {n} new chapters"
+msgstr[0] "Déjà enregistré · {n} nouveau chapitre"
+msgstr[1] "Déjà enregistré · {n} nouveaux chapitres"
+
+msgid "Reset"
+msgstr "Réinitialiser"
+
+msgid "Version, developer, source code"
+msgstr "Version, développeur, code source"
+
+msgid "Version {}"
+msgstr "Version {}"
+
+msgid "A download manager for files, torrents, media and web novels, built with Rust and Slint."
+msgstr "Un gestionnaire de téléchargements pour les fichiers, les torrents, les médias et les romans en ligne, fait avec Rust et Slint."
+
+msgid "Developer"
+msgstr "Développeur"
+
+msgid "Source code"
+msgstr "Code source"
+
+msgid "Slint {} · slint.dev"
+msgstr "Slint {} · slint.dev"
+
+msgid "The logo's font is Pacifico, under the SIL Open Font License."
+msgstr "La police du logo est Pacifico, sous licence SIL Open Font License."
+
+msgid "Font"
+msgstr "Police"
+
+msgid "System font"
+msgstr "Police du système"
+
+msgid "The font your phone uses, from the next time Eddy opens."
+msgstr "La police de votre téléphone, dès la prochaine ouverture d'Eddy."
+
+msgid "No cookies in that: paste a cookies.txt or a cookie extension's JSON export"
+msgstr "Aucun cookie là-dedans : collez un cookies.txt ou l'export JSON d'une extension de cookies"
+
+msgid "No cookies saved"
+msgstr "Aucun cookie enregistré"
+
+msgid "Paste a cookies.txt here, or a cookie extension's JSON export"
+msgstr "Collez ici un cookies.txt, ou l'export JSON d'une extension de cookies"
+
+msgid "From file"
+msgstr "Depuis un fichier"
+
+msgid "Undo changes"
+msgstr "Annuler les modifications"
+
+msgid "Remove cookies"
+msgstr "Supprimer les cookies"
+
+msgid "Only on this device: they're sent to the sites they're for, nowhere else."
+msgstr "Uniquement sur cet appareil : ils ne sont envoyés qu'aux sites concernés, nulle part ailleurs."
+
+msgid "Paste or pick a cookies.txt from your browser, for sites that need you logged in."
+msgstr "Collez ou choisissez un cookies.txt de votre navigateur, pour les sites où il faut être connecté."
+
+msgid "Downloads at once"
+msgstr "Téléchargements simultanés"
+
+msgid "Every download starts straight away."
+msgstr "Chaque téléchargement démarre tout de suite."
+
+msgid "Others wait in Queued and start, oldest first, as these finish."
+msgstr "Les autres attendent dans la file et démarrent, du plus ancien au plus récent, à mesure que ceux-ci se terminent."
+
+msgid "Lime"
+msgstr "Citron vert"
+
+msgid "Teal"
+msgstr "Bleu sarcelle"
+
+msgid "Pairs"
+msgstr "Duos"
+
+msgid "Sunset"
+msgstr "Coucher de soleil"
+
+msgid "Lagoon"
+msgstr "Lagon"
+
+msgid "Meadow"
+msgstr "Prairie"
+
+msgid "Berry"
+msgstr "Baies"
+
+msgid "Dusk"
+msgstr "Crépuscule"

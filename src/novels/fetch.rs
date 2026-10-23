@@ -104,6 +104,45 @@ fn is_challenge(body: &str) -> bool {
     body.contains("<title>Just a moment...</title>") || body.contains("cf-chl-")
 }
 
+/// POSTs `body` to a site's API (same pause, retries and headers), for
+/// sites whose chapter lists come from one (Wuxiaworld's gRPC-web). Returns
+/// the answer's bytes.
+pub async fn post(url: &str, content_type: &str, extra: &[(&str, &str)], body: Vec<u8>) -> Result<Vec<u8>, String> {
+    let mut wait = Duration::from_secs(2);
+    for attempt in 1..=ATTEMPTS {
+        let response = {
+            let mut last = LAST.lock().await;
+            if let Some(at) = *last {
+                let since = at.elapsed();
+                if since < PAUSE {
+                    tokio::time::sleep(PAUSE - since).await;
+                }
+            }
+            let mut request = crate::extractors::http::client()
+                .post(url)
+                .header("User-Agent", USER_AGENT)
+                .header("Content-Type", content_type)
+                .body(body.clone());
+            for (name, value) in extra {
+                request = request.header(*name, *value);
+            }
+            let response = request.send().await;
+            *last = Some(Instant::now());
+            response
+        };
+        match response {
+            Ok(r) if (r.status().as_u16() == 429 || r.status().is_server_error()) && attempt < ATTEMPTS => {}
+            Ok(r) if r.status().is_success() => return r.bytes().await.map(|b| b.to_vec()).map_err(|e| e.to_string()),
+            Ok(r) => return Err(format!("The site answered {}", r.status())),
+            Err(e) if attempt < ATTEMPTS => log::warn!("novel API {url} failed ({e}), retrying"),
+            Err(e) => return Err(e.to_string()),
+        }
+        tokio::time::sleep(wait).await;
+        wait *= 2;
+    }
+    Err("The site kept refusing".to_string())
+}
+
 /// An image's bytes (same pause and headers), with its content type.
 pub async fn bytes(url: &str, referer: Option<&str>) -> Result<(Vec<u8>, String), String> {
     {

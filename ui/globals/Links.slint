@@ -34,7 +34,7 @@ export struct TorrentFile {
 export struct LinkOptions {
     speed_kbps: int, // 0 = no limit
     connections: int, // 1–16
-    ua_mode: int, // 0 = a browser's, 1 = aria2's, 2 = ua_custom
+    ua_mode: int, // 0 = aria2's own, 1 = a browser's, 2 = ua_custom
     ua_custom: string,
     category: bool, // into a Video / Music / Documents… folder
 }
@@ -73,6 +73,10 @@ export struct PendingLink {
     book_images: bool,
     book_note_images: bool,
     book_small_images: bool,
+    // Saved before (the download it was saved by; 0 if not): downloading
+    // updates it. `book_new`: chapters added since.
+    book_saved_id: int,
+    book_new: int,
 }
 
 export global Links {

@@ -1,17 +1,23 @@
 //! The downloads lists: every download Eddy started, kept in the database,
 //! with its state (downloading, queued, paused, failed, cancelled, done)
 //! and, while it runs, its live progress from aria2 or its job. The lists'
-//! actions (pause, resume, cancel, delete, open, rename) act on these.
+//! actions (pause, resume, cancel, delete, open, rename) act on these. Only
+//! so many run at once (Settings); the others are Queued, oldest first.
 //!
 //! On Android this lives in the main process, where the download service
 //! runs too; the share popup's downloads reach it through the service.
 
 use crate::downloader::{self, Backend, DownloadRequest, Handle};
-use crate::{DownloadItem, DownloadState, DownloaderApp, FileType, ItemAction, LinkBackend, SelectionAction};
+use crate::{
+    DownloadItem, DownloadState, DownloaderApp, FileFilter, FileType, ItemAction, LinkBackend, ListOptions, SelectionAction,
+    SortKey, TabListOptions,
+};
+use slint::ComponentHandle;
 use serde::{Deserialize, Serialize};
 use slint::{Model, ModelRc, VecModel};
 use std::rc::Rc;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 /// Where a download is at, as saved.
@@ -59,6 +65,11 @@ pub struct Saved {
     /// A new name for an unfinished download, given to the file once it's
     /// done.
     pub rename_to: Option<String>,
+    /// A web novel's book, once saved: the library (see `saved_book`).
+    pub book: Option<crate::novels::SavedBook>,
+    /// A folder picked for an unfinished download (as `request.folder`
+    /// takes it): its files move there once it's done (`apply_move`).
+    pub move_to: Option<String>,
 }
 
 /// A record and what's running it.
@@ -75,6 +86,10 @@ struct Entry {
 }
 
 static ENTRIES: Mutex<Option<Vec<Entry>>> = Mutex::new(None);
+
+/// How many downloads run at once (Settings → Downloads → Downloading); 0
+/// for no limit. The rest are Queued until one ends.
+static MAX_CONCURRENT: AtomicUsize = AtomicUsize::new(crate::preferences::DEFAULT_MAX_CONCURRENT as usize);
 
 /// The entries, loaded from the database the first time. Downloads that
 /// were running when the app last stopped are paused now.
@@ -124,6 +139,176 @@ pub fn register(request: &DownloadRequest) -> i64 {
         with_entries(|entries| entries.push(Entry { id, saved, handle: None, retired: Vec::new(), last: None, speed: 0.0 }));
     }
     id
+}
+
+// --- The queue ---
+
+/// A new limit; more may start now.
+pub fn set_max_concurrent(max: usize) {
+    if MAX_CONCURRENT.swap(max, Ordering::SeqCst) != max {
+        pump();
+    }
+}
+
+/// Whether `id` may run alongside the others running.
+fn has_slot(entries: &[Entry], id: i64) -> bool {
+    let max = MAX_CONCURRENT.load(Ordering::SeqCst);
+    max == 0 || entries.iter().filter(|e| e.id != id && e.saved.state == State::Active).count() < max
+}
+
+/// Whether `request`'s download may start now. If not, it's Queued until
+/// `pump` starts it. Its record takes the request: a saved book being
+/// updated comes back with the preview's options.
+pub fn take_slot(request: &DownloadRequest) -> bool {
+    with_entries(|entries| {
+        let free = has_slot(entries, request.id);
+        if let Some(entry) = entries.iter_mut().find(|e| e.id == request.id) {
+            let state = if free { State::Active } else { State::Queued };
+            let same_request = serde_json::to_string(&entry.saved.request).ok() == serde_json::to_string(request).ok();
+            if entry.saved.state != state || !same_request {
+                if entry.saved.state == State::Completed {
+                    // Saved again (a book's update): back in Downloading.
+                    entry.saved.message.clear();
+                    entry.saved.ended = 0;
+                }
+                entry.saved.state = state;
+                entry.saved.request = request.clone();
+                // A pending move shows where it's going instead.
+                if entry.saved.move_to.is_none() {
+                    entry.saved.folder = folder_display(request);
+                }
+                save(entry);
+            }
+        }
+        free
+    })
+}
+
+// --- Books ---
+
+/// A book download saved its book.
+pub fn book_saved(id: i64, book: crate::novels::SavedBook) {
+    with_entries(|entries| {
+        if let Some(entry) = entries.iter_mut().find(|e| e.id == id) {
+            entry.saved.book = Some(book);
+            save(entry);
+        }
+    });
+}
+
+/// The download a book was saved by, if it was: (its id, how many chapters
+/// the book had then, the file's name without .epub).
+pub fn saved_book(site: crate::novels::Site, book_id: &str) -> Option<(i64, usize, String)> {
+    with_entries(|entries| {
+        entries
+            .iter()
+            .filter(|e| e.saved.state == State::Completed)
+            .filter_map(|e| {
+                let book = e.saved.book.as_ref().filter(|b| b.site == site && b.id == book_id)?;
+                Some((e.id, book.chapters, e.saved.name.trim_end_matches(".epub").to_string(), e.saved.ended))
+            })
+            // The latest, if it was saved more than once.
+            .max_by_key(|(.., ended)| *ended)
+            .map(|(id, chapters, name, _)| (id, chapters, name))
+    })
+}
+
+/// "Check for new chapters" on a saved book: fetches its chapter list and,
+/// with new chapters, saves it again in its place (the chapters it had
+/// come from the cache). Runs in the background; says how it went.
+fn update_book(id: i64) {
+    let found = with_entries(|entries| {
+        let entry = entries.iter().find(|e| e.id == id && e.saved.state == State::Completed)?;
+        // Saved before Eddy kept count: everything counts as new (the cache
+        // still has the chapters).
+        Some((entry.saved.request.clone(), entry.saved.book.as_ref().map(|b| b.chapters)))
+    });
+    let Some((request, chapters)) = found else {
+        return;
+    };
+    crate::platform::show_toast("Checking for new chapters…");
+    downloader::runtime().spawn(async move {
+        let result = crate::novels::book(&request.url).await;
+        let _ = slint::invoke_from_event_loop(move || {
+            let book = match result {
+                Ok(book) => book,
+                Err(e) => return crate::platform::show_toast(&format!("Couldn't check: {e}")),
+            };
+            let new = book.chapters.len().saturating_sub(chapters.unwrap_or(0));
+            if new == 0 {
+                return crate::platform::show_toast("No new chapters");
+            }
+            let message = match (chapters, new) {
+                (None, _) => "Updating".to_string(),
+                (_, 1) => "1 new chapter: updating".to_string(),
+                _ => format!("{new} new chapters: updating"),
+            };
+            crate::platform::show_toast(&message);
+            let mut request = request;
+            // Through to the last chapter, wherever it started.
+            if let Ok(mut options) = serde_json::from_str::<crate::novels::NovelOptions>(&request.format) {
+                options.to = 0;
+                request.format = serde_json::to_string(&options).unwrap_or(request.format);
+            }
+            if let Err(e) = crate::platform::start_download(&request) {
+                ended(id, None, &downloader::label_for(&request), false, &e, None);
+            }
+            refresh_now();
+        });
+    });
+}
+
+/// Downloads waiting their turn.
+pub fn queued_count() -> usize {
+    with_entries(|entries| entries.iter().filter(|e| e.saved.state == State::Queued).count())
+}
+
+/// Starts queued downloads, oldest first, while there's room. Call when one
+/// stops running (or the limit goes up); never with ENTRIES or the
+/// downloader's WATCHED locked.
+pub fn pump() {
+    let starts = with_entries(|entries| {
+        let max = MAX_CONCURRENT.load(Ordering::SeqCst);
+        let running = entries.iter().filter(|e| e.saved.state == State::Active).count();
+        let room = if max == 0 { usize::MAX } else { max.saturating_sub(running) };
+        let mut queued: Vec<&mut Entry> = entries.iter_mut().filter(|e| e.saved.state == State::Queued).collect();
+        queued.sort_by_key(|e| (e.saved.added, e.id));
+        queued
+            .into_iter()
+            .take(room)
+            .map(|entry| {
+                // Its place is kept while it starts.
+                entry.saved.state = State::Active;
+                save(entry);
+                (entry.id, entry.handle.clone(), entry.saved.request.clone())
+            })
+            .collect::<Vec<_>>()
+    });
+    for (id, handle, request) in starts {
+        // Paused in aria2: carry on with it.
+        if let Some(handle) = handle {
+            if downloader::unpause(&handle) {
+                continue;
+            }
+            retire(id, &handle);
+        }
+        if let Err(e) = downloader::start(&request) {
+            ended(id, None, &downloader::label_for(&request), false, &e, None);
+        }
+    }
+}
+
+/// Drops work a download is being started again without.
+fn retire(id: i64, handle: &Handle) {
+    downloader::cancel(handle);
+    with_entries(|entries| {
+        if let Some(entry) = entries.iter_mut().find(|e| e.id == id) {
+            if entry.handle.as_ref() == Some(handle) {
+                entry.handle = None;
+            }
+            entry.retired.push(handle.clone());
+        }
+    });
 }
 
 /// The work running a download (again, or for a torrent's files).
@@ -200,6 +385,23 @@ pub fn ended(id: i64, handle: Option<&Handle>, name: &str, ok: bool, message: &s
     })
 }
 
+/// A finished download's copy in its picked folder (Android: a document
+/// URI), which opening it uses.
+pub fn delivered(id: i64, uri: &str) {
+    with_entries(|entries| {
+        if let Some(entry) = entries.iter_mut().find(|e| e.id == id) {
+            entry.saved.path = Some(uri.to_string());
+            save(entry);
+        }
+    });
+}
+
+/// A copy in a picked folder: opened and deleted through Android, not
+/// renamed.
+fn is_document(path: &str) -> bool {
+    path.starts_with("content://")
+}
+
 // --- Actions ---
 
 fn pause(id: i64) {
@@ -229,6 +431,15 @@ fn resume(id: i64) {
         if !matches!(entry.saved.state, State::Paused | State::Failed | State::Cancelled) {
             return None;
         }
+        // No room: it waits its turn (keeping aria2's paused download).
+        if !has_slot(entries, id) {
+            let entry = entries.iter_mut().find(|e| e.id == id)?;
+            entry.saved.state = State::Queued;
+            entry.saved.message.clear();
+            save(entry);
+            return None;
+        }
+        let entry = entries.iter_mut().find(|e| e.id == id)?;
         // aria2 still has a paused download: carry on with it.
         if entry.saved.state == State::Paused {
             if let Some(handle) = &entry.handle {
@@ -284,7 +495,9 @@ fn delete(id: i64, files: bool) {
     };
     crate::db::delete_download(id);
     if files {
-        if let Some(path) = &entry.saved.path {
+        if let Some(uri) = entry.saved.path.as_ref().filter(|p| is_document(p)) {
+            crate::platform::delete_document(uri);
+        } else if let Some(path) = &entry.saved.path {
             let path = std::path::Path::new(path);
             let _ = if path.is_dir() { std::fs::remove_dir_all(path) } else { std::fs::remove_file(path) };
         }
@@ -314,7 +527,7 @@ fn rename(id: i64, name: &str) {
             save(entry);
             return;
         }
-        let Some(path) = entry.saved.path.clone() else {
+        let Some(path) = entry.saved.path.clone().filter(|p| !is_document(p)) else {
             crate::platform::show_toast("This one went into a picked folder; rename it there");
             return;
         };
@@ -354,7 +567,7 @@ fn change_options(id: i64, options: &crate::LinkOptions) {
             max_speed: options.speed_kbps.max(0) as u64 * 1024,
             connections: options.connections.clamp(1, 16) as u16,
             user_agent: match options.ua_mode {
-                1 => "aria2/1.37.0".to_string(),
+                1 => crate::extractors::http::UA_DESKTOP.to_string(),
                 2 => options.ua_custom.trim().to_string(),
                 _ => String::new(),
             },
@@ -364,7 +577,9 @@ fn change_options(id: i64, options: &crate::LinkOptions) {
                 true => crate::links::category_folder(file_type(entry.saved.file_type)).to_string(),
             },
         };
-        entry.saved.folder = folder_display(&entry.saved.request);
+        if entry.saved.move_to.is_none() {
+            entry.saved.folder = folder_display(&entry.saved.request);
+        }
         let running = matches!(entry.saved.state, State::Active | State::Queued);
         // Whatever's running (or paused in aria2) is replaced.
         if let Some(handle) = entry.handle.take() {
@@ -379,6 +594,192 @@ fn change_options(id: i64, options: &crate::LinkOptions) {
             ended(id, None, &downloader::label_for(&request), false, &e, None);
         }
     }
+}
+
+/// "Change folder": picks a folder for an unfinished download. It isn't
+/// moved now: once it's done, its files go there (`apply_move`).
+fn change_folder(id: i64) {
+    crate::platform::pick_download_folder(move |raw, display| {
+        let _ = slint::invoke_from_event_loop(move || {
+            with_entries(|entries| {
+                if let Some(entry) = entries.iter_mut().find(|e| e.id == id && e.saved.state != State::Completed) {
+                    entry.saved.move_to = Some(raw.clone());
+                    entry.saved.folder = display.clone();
+                    save(entry);
+                    crate::platform::show_toast("It moves there once it's done");
+                }
+            });
+            refresh_now();
+        });
+    });
+}
+
+/// A finished download with a folder picked since it started: moves what it
+/// saved (`path`, its first file; a torrent's whole folder) there. Returns
+/// where it is now and what's still to be copied into a picked folder.
+/// Plain renames happen straight away; a copy across drives runs on its own
+/// thread, and the record follows when it's done.
+pub fn apply_move(id: i64, path: Option<std::path::PathBuf>, deliver: Option<downloader::Deliver>)
+    -> (Option<std::path::PathBuf>, Option<downloader::Deliver>) {
+    let found = with_entries(|entries| {
+        let entry = entries.iter_mut().find(|e| e.id == id)?;
+        let to = entry.saved.move_to.take()?;
+        let from_folder = entry.saved.request.folder.clone();
+        entry.saved.request.folder = to.clone();
+        save(entry);
+        Some((to, from_folder, entry.saved.request.settings.subfolder.clone()))
+    });
+    let (Some((to, from_folder, subfolder)), Some(path)) = (found, path.clone()) else {
+        return (path, deliver);
+    };
+    let in_sub = |dir: &std::path::Path| {
+        if subfolder.trim().is_empty() { dir.to_path_buf() } else { dir.join(crate::novels::clean::safe_file_name(&subfolder)) }
+    };
+    // Where it was written, and the top item there to take along (a
+    // torrent's folder, or the file itself).
+    let old_dir = match &deliver {
+        Some(d) => d.staging.clone(),
+        None => in_sub(crate::storage::resolve(&from_folder).write_dir()),
+    };
+    let rel = path.strip_prefix(&old_dir).map(|r| r.to_path_buf()).unwrap_or_else(|_| path.file_name().map(Into::into).unwrap_or_default());
+    let Some(top) = rel.components().next().map(|c| old_dir.join(c)) else {
+        return (Some(path), deliver);
+    };
+    match crate::storage::resolve(&to) {
+        // A picked folder only reached through Android: the usual copy, from
+        // a staging folder of its own.
+        crate::storage::SaveTarget::Staged { tree_uri, staging } => {
+            let dir = in_sub(&staging);
+            if std::fs::create_dir_all(&dir).is_err() || move_item(id, &top, &dir.join(top.file_name().unwrap_or_default()), false).is_err() {
+                return (Some(path), deliver);
+            }
+            (None, Some(downloader::Deliver { staging, tree_uri }))
+        }
+        crate::storage::SaveTarget::Dir(dir) => {
+            let dir = in_sub(&dir);
+            if std::fs::create_dir_all(&dir).is_err() {
+                crate::platform::show_toast("Couldn't make the new folder; it stayed where it was");
+                return (Some(path), deliver);
+            }
+            let new_top = dir.join(top.file_name().unwrap_or_default());
+            let staging = deliver.as_ref().map(|d| d.staging.clone());
+            match move_item(id, &top, &new_top, true) {
+                Ok(true) => {
+                    // Its staging folder, emptied.
+                    if let Some(staging) = staging {
+                        let _ = std::fs::remove_dir(staging);
+                    }
+                    (Some(dir.join(&rel)), None)
+                }
+                // Copying across drives: the record follows once it's done.
+                Ok(false) => (Some(path), None),
+                Err(()) => (Some(path), deliver),
+            }
+        }
+    }
+}
+
+/// Moves `from` to `to`: Ok(true) when renamed, Ok(false) when it's being
+/// copied across drives in the background (with `background`), Err when it
+/// couldn't.
+fn move_item(id: i64, from: &std::path::Path, to: &std::path::Path, background: bool) -> Result<bool, ()> {
+    if std::fs::rename(from, to).is_ok() {
+        return Ok(true);
+    }
+    let copy = {
+        let (from, to) = (from.to_path_buf(), to.to_path_buf());
+        move || -> std::io::Result<()> {
+            copy_all(&from, &to)?;
+            if from.is_dir() { std::fs::remove_dir_all(&from) } else { std::fs::remove_file(&from) }
+        }
+    };
+    if !background {
+        return copy().map(|_| true).map_err(|_| ());
+    }
+    let (from, to) = (from.to_path_buf(), to.to_path_buf());
+    std::thread::spawn(move || match copy() {
+        Ok(()) => with_entries(|entries| {
+            if let Some(entry) = entries.iter_mut().find(|e| e.id == id) {
+                // Its first file, wherever it is inside what moved.
+                let now = entry.saved.path.as_ref().and_then(|p| std::path::Path::new(p).strip_prefix(&from).ok().map(|r| to.join(r)));
+                entry.saved.path = now.or(Some(to.clone())).map(|p| p.to_string_lossy().into_owned());
+                save(entry);
+            }
+        }),
+        Err(e) => {
+            log::warn!("couldn't move {} to {}: {e}", from.display(), to.display());
+            crate::platform::show_toast("Couldn't move it to the new folder; it stayed where it was");
+        }
+    });
+    Ok(false)
+}
+
+fn copy_all(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    if from.is_dir() {
+        std::fs::create_dir_all(to)?;
+        for entry in std::fs::read_dir(from)? {
+            let entry = entry?;
+            copy_all(&entry.path(), &to.join(entry.file_name()))?;
+        }
+        Ok(())
+    } else {
+        std::fs::copy(from, to).map(|_| ())
+    }
+}
+
+/// Restarts an unfinished download after `change` (a new folder or link):
+/// whatever's running (or paused in aria2) is dropped, and a download that
+/// was running starts again; a paused one stays paused, with the change.
+/// `change` gets the file aria2 was writing, if it was, before it stops.
+fn restart_with(id: i64, change: impl FnOnce(&mut Saved, Option<std::path::PathBuf>) -> Result<(), String>) {
+    let restart = with_entries(|entries| {
+        let entry = entries.iter_mut().find(|e| e.id == id)?;
+        if entry.saved.state == State::Completed {
+            return None;
+        }
+        let file = entry.handle.as_ref().and_then(downloader::aria_file);
+        let running = matches!(entry.saved.state, State::Active | State::Queued);
+        if let Some(handle) = entry.handle.take() {
+            downloader::cancel(&handle);
+            entry.retired.push(handle);
+        }
+        if let Err(e) = change(&mut entry.saved, file) {
+            crate::platform::show_toast(&e);
+        }
+        if entry.saved.move_to.is_none() {
+            entry.saved.folder = folder_display(&entry.saved.request);
+        }
+        if !running && entry.saved.state == State::Failed {
+            // Ready to try again with the change.
+            entry.saved.message.clear();
+        }
+        save(entry);
+        running.then(|| entry.saved.request.clone())
+    });
+    if let Some(request) = restart {
+        if let Err(e) = crate::platform::start_download(&request) {
+            ended(id, None, &downloader::label_for(&request), false, &e, None);
+        }
+    }
+}
+
+/// "Refresh link": a new link to the same file (one that expired, say).
+/// The file keeps its name, so aria2 carries on with what it has.
+fn refresh_link(id: i64, url: &str) {
+    let url = url.trim().to_string();
+    if !url.contains("://") {
+        crate::platform::show_toast("That isn't a link");
+        return;
+    }
+    restart_with(id, |saved, file| {
+        saved.request.url = url;
+        if saved.request.filename.is_empty() {
+            saved.request.filename = file
+                .and_then(|f| f.file_name().map(|n| n.to_string_lossy().into_owned()))
+                .unwrap_or_else(|| saved.name.clone());
+        }
+        Ok(())
+    });
 }
 
 // --- The lists ---
@@ -406,26 +807,71 @@ pub fn install(ui: &DownloaderApp) {
             ItemAction::Delete => delete(id, value == "files"),
             ItemAction::Open => open(id),
             ItemAction::Rename => rename(id, &value),
-            ItemAction::ChangeFolder | ItemAction::RefreshLink => {
-                crate::platform::show_toast("Not available yet");
-            }
+            ItemAction::UpdateBook => update_book(id),
+            ItemAction::ChangeFolder => change_folder(id),
+            ItemAction::RefreshLink => refresh_link(id, &value),
         }
+        // A paused, cancelled or deleted one makes room.
+        pump();
         refresh_now();
     });
 
+    // Each tab's sort and filter (the list options sheet).
+    let ui_weak = ui.as_weak();
     let refresh = move || {
-        let items = items();
-        let pick = |states: &[DownloadState]| -> Vec<DownloadItem> {
-            items.iter().filter(|i| states.contains(&i.state)).cloned().collect()
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
         };
-        let mut active = pick(&[DownloadState::Active]);
-        active.extend(pick(&[DownloadState::Queued]));
-        let mut done = pick(&[DownloadState::Completed]);
-        done.reverse(); // newest first
-        sync(&downloading, active);
-        sync(&stopped, pick(&[DownloadState::Paused, DownloadState::Failed, DownloadState::Cancelled]));
-        sync(&completed, done);
+        let options = ui.global::<ListOptions>();
+        let rows = items();
+        // The rows in `states`, each state's own after the one before, sorted
+        // and filtered by `options` within it.
+        let pick = |states: &[DownloadState], options: &TabListOptions| -> Vec<DownloadItem> {
+            let mut picked = Vec::new();
+            for state in states {
+                let mut group: Vec<&Row> =
+                    rows.iter().filter(|r| r.item.state == *state && matches_filter(&r.item, options.filter)).collect();
+                group.sort_by(|a, b| {
+                    let order = match options.sort {
+                        SortKey::Name => a.item.filename.to_lowercase().cmp(&b.item.filename.to_lowercase()),
+                        SortKey::Size => a.size.cmp(&b.size),
+                        SortKey::Progress => a.item.progress.total_cmp(&b.item.progress),
+                        _ => a.added.cmp(&b.added),
+                    };
+                    if options.ascending { order } else { order.reverse() }
+                });
+                picked.extend(group.into_iter().map(|r| r.item.clone()));
+            }
+            picked
+        };
+        sync(&downloading, pick(&[DownloadState::Active, DownloadState::Queued], &options.get_downloading()));
+        sync(&stopped, pick(&[DownloadState::Paused, DownloadState::Failed, DownloadState::Cancelled], &options.get_stopped()));
+        sync(&completed, pick(&[DownloadState::Completed], &options.get_completed()));
     };
+    // Each tab's choice is kept, so the lists come back sorted the same way.
+    let list_options = ui.global::<ListOptions>();
+    for tab in 0..3 {
+        if let Some(saved) = load_list_options(tab) {
+            match tab {
+                0 => list_options.set_downloading(saved),
+                1 => list_options.set_stopped(saved),
+                _ => list_options.set_completed(saved),
+            }
+        }
+    }
+    let ui_weak = ui.as_weak();
+    list_options.on_options_changed(move |tab| {
+        if let Some(ui) = ui_weak.upgrade() {
+            let options = ui.global::<ListOptions>();
+            let current = match tab {
+                0 => options.get_downloading(),
+                1 => options.get_stopped(),
+                _ => options.get_completed(),
+            };
+            save_list_options(tab, &current);
+        }
+        refresh_now();
+    });
     refresh();
     REFRESH.with(|r| *r.borrow_mut() = Some(Box::new(refresh.clone())));
     let timer = slint::Timer::default();
@@ -446,6 +892,16 @@ fn refresh_now() {
     });
 }
 
+/// The notification's buttons: pauses (or with `cancel`, cancels) every
+/// running or queued download. Any thread; the lists catch up on their own.
+pub fn control_all(cancel_them: bool) {
+    let ids: Vec<i64> =
+        with_entries(|entries| entries.iter().filter(|e| matches!(e.saved.state, State::Active | State::Queued)).map(|e| e.id).collect());
+    for id in ids {
+        if cancel_them { cancel(id) } else { pause(id) }
+    }
+}
+
 /// Acts on the selected downloads (the selection bar).
 pub fn act(ids: &[i32], action: SelectionAction, delete_files: bool) {
     for &id in ids {
@@ -457,6 +913,7 @@ pub fn act(ids: &[i32], action: SelectionAction, delete_files: bool) {
             SelectionAction::Delete => delete(id, delete_files),
         }
     }
+    pump();
     refresh_now();
 }
 
@@ -475,8 +932,81 @@ fn sync(model: &VecModel<DownloadItem>, items: Vec<DownloadItem>) {
     }
 }
 
+/// A list row, with what it's sorted by.
+struct Row {
+    item: DownloadItem,
+    /// When it was added (unix seconds).
+    added: u64,
+    /// Its size in bytes, 0 when unknown.
+    size: u64,
+}
+
+/// A tab's sort and filter, as kept: "<sort>,<ascending>,<filter>" (the
+/// enums' indexes).
+fn list_options_key(tab: i32) -> String {
+    format!("list_options_{tab}")
+}
+
+fn save_list_options(tab: i32, options: &TabListOptions) {
+    let sort = match options.sort {
+        SortKey::Name => 1,
+        SortKey::Size => 2,
+        SortKey::Progress => 3,
+        _ => 0,
+    };
+    let filter = match options.filter {
+        FileFilter::Video => 1,
+        FileFilter::Audio => 2,
+        FileFilter::Image => 3,
+        FileFilter::Document => 4,
+        FileFilter::Archive => 5,
+        _ => 0,
+    };
+    let value = format!("{sort},{},{filter}", options.ascending as u8);
+    if let Err(e) = crate::platform::save_pref(&list_options_key(tab), &value) {
+        log::warn!("couldn't save the list options: {e}");
+    }
+}
+
+fn load_list_options(tab: i32) -> Option<TabListOptions> {
+    let value = crate::platform::get_pref(&list_options_key(tab), "").ok()?;
+    let parts: Vec<u8> = value.split(',').map(|p| p.trim().parse().ok()).collect::<Option<_>>()?;
+    let [sort, ascending, filter] = parts.as_slice() else {
+        return None;
+    };
+    Some(TabListOptions {
+        sort: match sort {
+            1 => SortKey::Name,
+            2 => SortKey::Size,
+            3 => SortKey::Progress,
+            _ => SortKey::DateAdded,
+        },
+        ascending: *ascending == 1,
+        filter: match filter {
+            1 => FileFilter::Video,
+            2 => FileFilter::Audio,
+            3 => FileFilter::Image,
+            4 => FileFilter::Document,
+            5 => FileFilter::Archive,
+            _ => FileFilter::All,
+        },
+    })
+}
+
+/// Whether `item` is one the filter keeps.
+fn matches_filter(item: &DownloadItem, filter: FileFilter) -> bool {
+    match filter {
+        FileFilter::Video => item.file_type == FileType::Video,
+        FileFilter::Audio => item.file_type == FileType::Audio,
+        FileFilter::Image => item.file_type == FileType::Image,
+        FileFilter::Document => item.file_type == FileType::Document,
+        FileFilter::Archive => matches!(item.file_type, FileType::Archive | FileType::DiskImage),
+        _ => true,
+    }
+}
+
 /// Every download as the lists show it, with live progress.
-fn items() -> Vec<DownloadItem> {
+fn items() -> Vec<Row> {
     with_entries(|entries| {
         entries
             .iter_mut()
@@ -484,7 +1014,9 @@ fn items() -> Vec<DownloadItem> {
                 let mut state = entry.saved.state;
                 if let Some(handle) = &entry.handle {
                     if let Some((live, done, total, speed)) = downloader::progress(handle) {
-                        if matches!(state, State::Active | State::Queued) {
+                        // Queued in aria2's own queue (Eddy's queued ones are
+                        // paused there, or not started).
+                        if state == State::Active {
                             state = match live {
                                 Live::Queued => State::Queued,
                                 _ => State::Active,
@@ -497,7 +1029,7 @@ fn items() -> Vec<DownloadItem> {
                         entry.speed = if speed > 0.0 { speed } else { measured_speed(entry, done) };
                     }
                 }
-                view(entry, state)
+                Row { item: view(entry, state), added: entry.saved.added, size: entry.saved.total }
             })
             .collect()
     })
@@ -575,10 +1107,10 @@ fn options_of(settings: &crate::downloader::DownloadSettings) -> crate::LinkOpti
         connections: settings.connections() as i32,
         ua_mode: match ua {
             "" => 0,
-            "aria2/1.37.0" => 1,
+            ua if ua == crate::extractors::http::UA_DESKTOP => 1,
             _ => 2,
         },
-        ua_custom: if ua == "aria2/1.37.0" { "".into() } else { ua.into() },
+        ua_custom: if ua == crate::extractors::http::UA_DESKTOP { "".into() } else { ua.into() },
         category: !settings.subfolder.is_empty(),
     }
 }

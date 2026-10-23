@@ -1,6 +1,7 @@
 import { ModernSwitch } from "../../components/Buttons.slint";
 import { AppSettings } from "../../globals/AppSettings.slint";
 import { ThemeSettings } from "../../themes/theme.slint";
+import { SettingsCard, SettingsLayout } from "../SettingsCard.slint";
 
 export component DownloadSettings inherits Rectangle {
     in property <color> text_color: #FFFFFF;
@@ -13,6 +14,8 @@ export component DownloadSettings inherits Rectangle {
     callback open_books();
     // Opens the Downloading page (every download's defaults).
     callback open_downloading();
+    // Opens the Cookies page.
+    callback open_cookies();
 
     TouchArea { }
 
@@ -22,18 +25,19 @@ export component DownloadSettings inherits Rectangle {
         content-height: dl_layout.preferred-height;
 
         dl_layout := VerticalLayout {
-            spacing: 24px;
+            spacing: SettingsLayout.spacing;
             alignment: start;
-            padding-left: 12px;
-            padding-right: 12px;
+            padding-left: SettingsLayout.side;
+            padding-right: SettingsLayout.side;
             padding-top: 8px;
             // Room under the last item, so it doesn't end at the edge.
             padding-bottom: 24px;
 
             // Full-row clickable download location setting
-            Rectangle {
-                border-radius: 8px;
-                background: dl_row_ta.has-hover ? ThemeSettings.hover_color : transparent;
+            SettingsCard {
+                first: true;
+                last: false;
+                highlighted: dl_row_ta.has-hover;
 
                 dl_row_ta := TouchArea {
                     clicked => {
@@ -43,6 +47,8 @@ export component DownloadSettings inherits Rectangle {
 
                 HorizontalLayout {
                     padding: 8px;
+                    padding-left: SettingsLayout.inset;
+                    padding-right: SettingsLayout.inset;
                     alignment: space-between;
                     spacing: 16px;
 
@@ -70,9 +76,10 @@ export component DownloadSettings inherits Rectangle {
 
             // Android only. The switch shows whether access is granted; the
             // row opens Android's screen to grant (or take back) it.
-            if AppSettings.is_mobile: Rectangle {
-                border-radius: 8px;
-                background: access_ta.has-hover ? ThemeSettings.hover_color : transparent;
+            if AppSettings.is_mobile: SettingsCard {
+                first: false;
+                last: false;
+                highlighted: access_ta.has-hover;
 
                 access_ta := TouchArea {
                     clicked => { AppSettings.request_all_files_access(); }
@@ -80,6 +87,8 @@ export component DownloadSettings inherits Rectangle {
 
                 HorizontalLayout {
                     padding: 8px;
+                    padding-left: SettingsLayout.inset;
+                    padding-right: SettingsLayout.inset;
                     spacing: 16px;
 
                     VerticalLayout {
@@ -122,18 +131,21 @@ export component DownloadSettings inherits Rectangle {
                 }
             }
 
-            // A cookies.txt for sites that need a login. Tapping picks one
-            // (replacing the old one); Remove forgets it.
-            Rectangle {
-                border-radius: 8px;
-                background: cookies_ta.has-hover ? ThemeSettings.hover_color : transparent;
+            // A cookies.txt for sites that need a login, pasted, edited or
+            // picked on a page of its own.
+            SettingsCard {
+                first: false;
+                last: true;
+                highlighted: cookies_ta.has-hover;
 
                 cookies_ta := TouchArea {
-                    clicked => { AppSettings.cookies_add(); }
+                    clicked => { root.open_cookies(); }
                 }
 
                 HorizontalLayout {
                     padding: 8px;
+                    padding-left: SettingsLayout.inset;
+                    padding-right: SettingsLayout.inset;
                     spacing: 16px;
 
                     VerticalLayout {
@@ -159,9 +171,9 @@ export component DownloadSettings inherits Rectangle {
                         }
                         Text {
                             text: AppSettings.cookies_error == 1 ? @tr("Couldn't read that file")
-                                : AppSettings.cookies_error == 2 ? @tr("That isn't a cookies.txt (Netscape format)")
+                                : AppSettings.cookies_error == 2 ? @tr("No cookies in that: paste a cookies.txt or a cookie extension's JSON export")
                                 : AppSettings.cookies_error == 3 ? @tr("Couldn't save the cookies")
-                                : AppSettings.cookies_count == 0 ? @tr("Add a cookies.txt exported from your browser, for sites that need you logged in.")
+                                : AppSettings.cookies_count == 0 ? @tr("Paste or pick a cookies.txt from your browser, for sites that need you logged in.")
                                 : @tr("{n} cookie" | "{n} cookies" % AppSettings.cookies_count) + " · " + AppSettings.cookies_sites;
                             font-size: 13px;
                             color: AppSettings.cookies_error != 0 ? #e5534b
@@ -171,34 +183,26 @@ export component DownloadSettings inherits Rectangle {
                         }
                     }
 
-                    if AppSettings.cookies_count > 0: VerticalLayout {
+                    VerticalLayout {
                         alignment: center;
-                        Rectangle {
-                            width: remove_label.preferred-width + 24px;
-                            height: 32px;
-                            border-radius: 16px;
-                            border-width: 1px;
-                            border-color: root.text_color.transparentize(60%);
-                            background: remove_ta.has-hover ? ThemeSettings.hover_color : transparent;
-                            remove_label := Text {
-                                text: @tr("Remove");
-                                font-size: 13px;
-                                font-weight: 600;
-                                color: root.text_color;
-                                vertical-alignment: center;
-                            }
-                            remove_ta := TouchArea {
-                                clicked => { AppSettings.cookies_remove(); }
-                            }
+                        Image {
+                            source: @image-url("../../icons/arrow_right.svg");
+                            width: 16px;
+                            height: 16px;
+                            colorize: root.text_color.transparentize(40%);
                         }
                     }
                 }
             }
 
+            // Between the groups.
+            Rectangle { height: SettingsLayout.group_gap; }
+
             // Every download's defaults, on a page of their own.
-            Rectangle {
-                border-radius: 8px;
-                background: downloading_ta.has-hover ? ThemeSettings.hover_color : transparent;
+            SettingsCard {
+                first: true;
+                last: false;
+                highlighted: downloading_ta.has-hover;
 
                 downloading_ta := TouchArea {
                     clicked => { root.open_downloading(); }
@@ -206,6 +210,8 @@ export component DownloadSettings inherits Rectangle {
 
                 HorizontalLayout {
                     padding: 8px;
+                    padding-left: SettingsLayout.inset;
+                    padding-right: SettingsLayout.inset;
                     spacing: 16px;
 
                     VerticalLayout {
@@ -250,9 +256,10 @@ export component DownloadSettings inherits Rectangle {
             }
 
             // How web novels are saved, on a page of their own.
-            Rectangle {
-                border-radius: 8px;
-                background: books_ta.has-hover ? ThemeSettings.hover_color : transparent;
+            SettingsCard {
+                first: false;
+                last: AppSettings.helper_packages.length == 0;
+                highlighted: books_ta.has-hover;
 
                 books_ta := TouchArea {
                     clicked => { root.open_books(); }
@@ -260,6 +267,8 @@ export component DownloadSettings inherits Rectangle {
 
                 HorizontalLayout {
                     padding: 8px;
+                    padding-left: SettingsLayout.inset;
+                    padding-right: SettingsLayout.inset;
                     spacing: 16px;
 
                     VerticalLayout {
@@ -304,9 +313,10 @@ export component DownloadSettings inherits Rectangle {
             }
 
             // yt-dlp and friends, on a page of their own.
-            if AppSettings.helper_packages.length > 0: Rectangle {
-                border-radius: 8px;
-                background: packages_ta.has-hover ? ThemeSettings.hover_color : transparent;
+            if AppSettings.helper_packages.length > 0: SettingsCard {
+                first: false;
+                last: true;
+                highlighted: packages_ta.has-hover;
 
                 packages_ta := TouchArea {
                     clicked => { root.open_packages(); }
@@ -314,6 +324,8 @@ export component DownloadSettings inherits Rectangle {
 
                 HorizontalLayout {
                     padding: 8px;
+                    padding-left: SettingsLayout.inset;
+                    padding-right: SettingsLayout.inset;
                     spacing: 16px;
 
                     VerticalLayout {

@@ -1,6 +1,8 @@
 import { Palette, StyleMetrics } from "std-widgets.slint";
 export enum ThemeMode { System, Light, Dark }
-export enum AccentColor { MutedRed, Green, Pink, Purple, Yellow, Orange, Blue, Greyscale, System }
+// Single accents, then the ready-made pairs (a main colour and a second,
+// see `secondary_accent`).
+export enum AccentColor { MutedRed, Green, Pink, Purple, Yellow, Orange, Blue, Teal, Lime, Greyscale, System, Sunset, Lagoon, Meadow, Berry, Dusk }
 
 export global ThemeSettings {
     in-out property <ThemeMode> mode: ThemeMode.System;
@@ -9,19 +11,43 @@ export global ThemeSettings {
 
     in-out property <bool> system_is_dark: false;
     in-out property <color> system_accent: Palette.accent-background;
+    // The system's second accent (Android's Material You tertiary), if it
+    // has one: the System accent is a pair then.
+    in-out property <color> system_second_accent: system_accent;
+    in-out property <bool> system_has_second: false;
+
+    // How long colours take to change with the theme (the pages' fade);
+    // cards and sheets follow it.
+    out property <duration> fade: 300ms;
+    // Sweeps the cards (see Shine): a new accent once its picker closes
+    // (so the sweep isn't hidden behind it), light or dark mode, AMOLED.
+    // `shine` counts the sweeps; `shine_kind` is what the last one was for.
+    in-out property <int> shine: 0;
+    out property <int> shine_kind: 0; // 0 accent, 1 light, 2 dark, 3 AMOLED black
+    public function sweep(kind: int) {
+        self.shine_kind = kind;
+        self.shine += 1;
+    }
 
     out property <bool> is_dark: mode == ThemeMode.Dark || (mode == ThemeMode.System && system_is_dark);
 
     property <color> primary_base: 
-        accent == AccentColor.MutedRed ? #e07a5f :
+        accent == AccentColor.MutedRed ? #c85450 :
         accent == AccentColor.Green ? #81b29a :
-        accent == AccentColor.Pink ? #f28482 :
+        accent == AccentColor.Pink ? #e27aa6 :
         accent == AccentColor.Purple ? #9c89b8 :
-        accent == AccentColor.Yellow ? #f2cc8f :
+        accent == AccentColor.Yellow ? #e8c75a :
         accent == AccentColor.Orange ? #f4a261 :
         accent == AccentColor.Blue ? #3d5a80 :
+        accent == AccentColor.Teal ? #2a9d8f :
+        accent == AccentColor.Lime ? #a7c957 :
+        accent == AccentColor.Sunset ? #c85450 :
+        accent == AccentColor.Lagoon ? #2a9d8f :
+        accent == AccentColor.Meadow ? #a7c957 :
+        accent == AccentColor.Berry ? #9c89b8 :
+        accent == AccentColor.Dusk ? #3d5a80 :
         accent == AccentColor.Greyscale ? #9e9e9e :
-        accent == AccentColor.System ? system_accent : #e07a5f;
+        accent == AccentColor.System ? system_accent : #c85450;
 
     // Neutral base palette
     property <color> neutral_dark_bg: #121214;
@@ -37,9 +63,39 @@ export global ThemeSettings {
         (amoled_dark ? #111111 : neutral_dark_surface.mix(primary_base, 88%)) :
         neutral_light_surface.mix(primary_base, 95%);
 
+    // Settings rows' cards: apart from both the page and the surface a
+    // scrolled header takes.
+    out property <color> card: is_dark ?
+        (amoled_dark ? #1c1c1c : #2c2c30.mix(primary_base, 88%)) :
+        #ffffff.mix(primary_base, 98%);
+
     out property <color> text_color: is_dark ? #ffffff : #111111;
 
     out property <color> primary_accent: primary_base;
+    // A pair's second colour (the logo's wave runs into it, and the
+    // secondary container below comes from it); a single accent's own
+    // colour otherwise.
+    out property <bool> is_pair: accent == AccentColor.Sunset || accent == AccentColor.Lagoon
+        || accent == AccentColor.Meadow || accent == AccentColor.Berry || accent == AccentColor.Dusk
+        || (accent == AccentColor.System && system_has_second);
+    out property <color> secondary_accent:
+        accent == AccentColor.Sunset ? #f4a261 :
+        accent == AccentColor.Lagoon ? #4ea8de :
+        accent == AccentColor.Meadow ? #2a9d8f :
+        accent == AccentColor.Berry ? #e27aa6 :
+        accent == AccentColor.Dusk ? #9c89b8 :
+        accent == AccentColor.System && system_has_second ? system_second_accent :
+        primary_base;
+    // Material You's container tones of the second colour: a soft tint to
+    // fill with (tone ~90 in light, ~30 in dark) and a deep shade for what's
+    // on it (~10 / ~90). As in Material 3: selected chips, the + button, the
+    // selected tab's pill and the selected settings item.
+    out property <color> secondary_container: is_dark
+        ? secondary_accent.mix(#000000, 45%)
+        : secondary_accent.mix(#ffffff, 32%);
+    out property <color> on_secondary_container: is_dark
+        ? secondary_accent.mix(#ffffff, 28%)
+        : secondary_accent.mix(#000000, 38%);
 
     out property <color> secondary_muted_bg: is_dark ?
         (amoled_dark ? #18181a : neutral_dark_surface.mix(primary_base, 90%)) :

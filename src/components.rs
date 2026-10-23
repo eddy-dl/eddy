@@ -206,6 +206,15 @@ fn check() {
     }
     let abi = crate::platform::helper_apps().map(|(_, abi)| abi).unwrap_or_default();
     ask_ytdlp_version();
+    // A yt-dlp from before the plugin came along gets it now.
+    let own = crate::platform::own_ytdlp();
+    if let Some(dir) = own.parent().map(std::path::Path::to_path_buf).filter(|d| own.is_file() && !crate::ytdlp_plugin::installed(d)) {
+        crate::downloader::runtime().spawn(async move {
+            if let Err(e) = crate::ytdlp_plugin::install(&dir).await {
+                log::warn!(target: "ytdlp", "couldn't install the yt-dlp community plugin: {e}");
+            }
+        });
+    }
     crate::downloader::runtime().spawn(async move {
         let result = fetch_releases(&abi).await;
         if let Err(e) = &result {
@@ -305,6 +314,12 @@ fn update_ytdlp(release: Release) {
             let _ = slint::invoke_from_event_loop(refresh);
         })
         .await;
+        // And the community plugin (more sites, image ones especially).
+        if result.is_ok() {
+            if let Err(e) = crate::ytdlp_plugin::install(&dir).await {
+                log::warn!(target: "ytdlp", "couldn't install the yt-dlp community plugin: {e}");
+            }
+        }
         set_downloading("ytdlp", None);
         if let Err(e) = &result {
             log::error!(target: "ytdlp", "couldn't update yt-dlp: {e}");

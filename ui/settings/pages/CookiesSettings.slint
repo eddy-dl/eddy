@@ -1,0 +1,116 @@
+import { Note } from "../../components/Note.slint";
+import { TextArea } from "../../components/TextArea.slint";
+import { ActionButton } from "../../components/Buttons.slint";
+import { AppSettings } from "../../globals/AppSettings.slint";
+import { ThemeSettings } from "../../themes/theme.slint";
+import { SettingsLayout } from "../SettingsCard.slint";
+
+// Settings → Downloads → Cookies: the cookies.txt for sites that need a
+// login, pasted or edited here, or picked from a file.
+export component CookiesSettings inherits Rectangle {
+    in property <color> text_color: #FFFFFF;
+    // Room the on-screen keyboard takes at the bottom.
+    in property <length> keyboard_height: 0px;
+    out property <bool> scrolled: false;
+
+    // What's in the editor; the saved text replaces it whenever that
+    // changes (opening, saving, a picked file).
+    private property <string> saved: AppSettings.cookies_text;
+    private property <string> draft: AppSettings.cookies_text;
+    changed saved => { root.draft = root.saved; }
+    private property <bool> dirty: root.draft != root.saved;
+
+    TouchArea {
+        clicked => { park.focus(); }
+    }
+    park := FocusScope {
+        x: 0;
+        y: 0;
+        width: 0;
+        height: 0;
+    }
+
+    VerticalLayout {
+        padding-left: SettingsLayout.side;
+        padding-right: SettingsLayout.side;
+        padding-top: 8px;
+        padding-bottom: Math.max(16px, root.keyboard_height + 8px);
+        spacing: 12px;
+
+        // What's saved, or why the last try was refused.
+        Text {
+            text: AppSettings.cookies_error == 1 ? @tr("Couldn't read that file")
+                : AppSettings.cookies_error == 2 ? @tr("No cookies in that: paste a cookies.txt or a cookie extension's JSON export")
+                : AppSettings.cookies_error == 3 ? @tr("Couldn't save the cookies")
+                : AppSettings.cookies_count == 0 ? @tr("No cookies saved")
+                : @tr("{n} cookie" | "{n} cookies" % AppSettings.cookies_count) + " · " + AppSettings.cookies_sites;
+            font-size: 13px;
+            color: AppSettings.cookies_error != 0 ? #e5534b
+                : AppSettings.cookies_count > 0 ? ThemeSettings.primary_accent
+                : root.text_color.transparentize(40%);
+            wrap: word-wrap;
+        }
+
+        editor := TextArea {
+            vertical-stretch: 1;
+            text <=> root.draft;
+            placeholder-text: @tr("Paste a cookies.txt here, or a cookie extension's JSON export");
+            font-size: 12px;
+            font-family: "monospace";
+            // Cookie values are one long word: broken anywhere.
+            wrap: TextWrap.char-wrap;
+            input-method-hints: { capitalization: CapitalizationMode.none, auto-correct: false, auto-complete: false };
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            ActionButton {
+                text: @tr("Paste");
+                horizontal-stretch: 1;
+                height: 40px;
+                clicked => { editor.paste_all(); }
+            }
+            ActionButton {
+                text: @tr("From file");
+                horizontal-stretch: 1;
+                height: 40px;
+                clicked => { AppSettings.cookies_add(); }
+            }
+            ActionButton {
+                text: @tr("Clear");
+                horizontal-stretch: 1;
+                height: 40px;
+                clicked => { root.draft = ""; }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            ActionButton {
+                text: @tr("Undo changes");
+                horizontal-stretch: 1;
+                height: 48px;
+                opacity: root.dirty ? 1.0 : 0.45;
+                clicked => { root.draft = root.saved; }
+            }
+            ActionButton {
+                text: root.draft.is-empty && !root.saved.is-empty ? @tr("Remove cookies") : @tr("Save");
+                primary: true;
+                horizontal-stretch: 1;
+                height: 48px;
+                opacity: root.dirty ? 1.0 : 0.45;
+                clicked => {
+                    if (root.dirty) {
+                        park.focus();
+                        AppSettings.cookies_save(root.draft);
+                    }
+                }
+            }
+        }
+
+        Note {
+            text: @tr("Only on this device: they're sent to the sites they're for, nowhere else.");
+            text_color: root.text_color;
+        }
+    }
+}

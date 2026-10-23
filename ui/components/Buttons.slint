@@ -50,6 +50,8 @@ export component ActionButton inherits Rectangle {
 
 export component ColorCircle inherits Rectangle {
     in property <color> fill_color;
+    // A pair's second colour: the circle splits diagonally between the two.
+    in property <color> second_color: root.fill_color;
     in property <bool> is_active: false;
     property <bool> is-pulsing: ta.pressed;
     callback clicked;
@@ -57,7 +59,8 @@ export component ColorCircle inherits Rectangle {
     width: 48px;
     height: 48px;
     border-radius: 24px;
-    background: fill_color;
+    // A hard stop: two halves (one colour for a single accent).
+    background: @linear-gradient(135deg, root.fill_color 50%, root.second_color 50%);
 
     border-width: 0px;
     border-color: ThemeSettings.text_color;

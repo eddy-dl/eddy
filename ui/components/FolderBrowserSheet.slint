@@ -1,4 +1,4 @@
-import { LineEdit } from "std-widgets.slint";
+import { TextField } from "TextField.slint";
 import { ThemeSettings } from "../themes/theme.slint";
 import { ActionButton } from "Buttons.slint";
 import { SectionLabel } from "Chips.slint";
@@ -147,7 +147,7 @@ export component FolderBrowserSheet inherits Rectangle {
             // A new folder inside this one.
             if root.naming: HorizontalLayout {
                 spacing: 8px;
-                LineEdit {
+                TextField {
                     text <=> root.new_name;
                     placeholder-text: @tr("New folder's name");
                     horizontal-stretch: 1;

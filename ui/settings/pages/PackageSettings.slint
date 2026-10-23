@@ -1,23 +1,23 @@
+import { Note } from "../../components/Note.slint";
 import { AppSettings, HelperPackage } from "../../globals/AppSettings.slint";
 import { ThemeSettings } from "../../themes/theme.slint";
 import { ActionButton } from "../../components/Buttons.slint";
 import { AnimatedPopup } from "../../components/AnimatedPopup.slint";
+import { SettingsCard, SettingsLayout } from "../SettingsCard.slint";
 
 // One yt-dlp helper app: what it is, its state, and what tapping does.
-component HelperRow inherits Rectangle {
+component HelperRow inherits SettingsCard {
     in property <HelperPackage> package;
-    in property <color> text_color;
     callback clicked();
 
-    property <string> name: root.package.key == "python" ? @tr("Python & yt-dlp")
+    property <string> name: root.package.key == "python" ? "Python"
         : root.package.key == "ytdlp" ? "yt-dlp"
         : root.package.key == "ffmpeg" ? "FFmpeg" : "Deno";
     property <string> action: root.package.state == 1 ? @tr("Get")
         : root.package.state == 3 ? @tr("Update")
         : root.package.state == 5 ? @tr("Install") : "";
 
-    border-radius: 8px;
-    background: ta.has-hover ? ThemeSettings.hover_color : transparent;
+    highlighted: ta.has-hover;
 
     ta := TouchArea {
         clicked => { root.clicked(); }
@@ -25,6 +25,8 @@ component HelperRow inherits Rectangle {
 
     HorizontalLayout {
         padding: 8px;
+        padding-left: SettingsLayout.inset;
+        padding-right: SettingsLayout.inset;
         spacing: 16px;
 
         VerticalLayout {
@@ -106,7 +108,7 @@ export component PackageSettings inherits Rectangle {
 
     // The package the confirmation is about.
     private property <HelperPackage> confirming;
-    private property <string> confirming_name: root.confirming.key == "python" ? @tr("Python & yt-dlp")
+    private property <string> confirming_name: root.confirming.key == "python" ? "Python"
         : root.confirming.key == "ytdlp" ? "yt-dlp"
         : root.confirming.key == "ffmpeg" ? "FFmpeg" : "Deno";
 
@@ -195,29 +197,29 @@ export component PackageSettings inherits Rectangle {
         content-height: packages_layout.preferred-height;
 
         packages_layout := VerticalLayout {
-            spacing: 8px;
+            spacing: SettingsLayout.spacing;
             alignment: start;
-            padding-left: 12px;
-            padding-right: 12px;
+            padding-left: SettingsLayout.side;
+            padding-right: SettingsLayout.side;
             padding-top: 8px;
             // Room under the last item, so it doesn't end at the edge.
             padding-bottom: 24px;
 
             // Lined up with the rows' text.
             VerticalLayout {
-                padding-left: 8px;
-                padding-right: 8px;
+                padding-left: SettingsLayout.inset;
+                padding-right: SettingsLayout.inset;
                 padding-bottom: 8px;
-                Text {
+                Note {
                     text: AppSettings.is_mobile
                         ? @tr("Media from most sites needs these. They're separate apps, YTDLnis's packages: Eddy can fetch one for you, and you install it.")
                         : @tr("Media from most sites needs these. Eddy can install them in its own folder; copies you already have are used too.");
-                    font-size: 13px;
-                    color: root.text_color.transparentize(40%);
-                    wrap: word-wrap;
+                    text_color: root.text_color;
                 }
             }
-            for package in AppSettings.helper_packages: HelperRow {
+            for package[i] in AppSettings.helper_packages: HelperRow {
+                first: i == 0;
+                last: i == AppSettings.helper_packages.length - 1;
                 package: package;
                 text_color: root.text_color;
                 clicked => { root.helper_tapped(package); }

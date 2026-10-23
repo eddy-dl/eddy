@@ -1,0 +1,7 @@
+// Short messages on desktop, where there are no Android toasts: shown at
+// the bottom for a few seconds (MD3's snackbar). Rust sets `message` and
+// bumps `serial` for each one (platform::show_toast).
+export global Snackbar {
+    in property <string> message;
+    in property <int> serial;
+}

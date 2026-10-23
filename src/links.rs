@@ -367,7 +367,8 @@ fn start_link(id: i32, backend: Backend, format: String, filename: String, optio
         select_files,
         folder: link.folder_uri.to_string(),
         settings: download_settings(options, &link, audio),
-        id: 0,
+        // A book saved before is updated in place of a second copy.
+        id: if backend == Backend::Book { link.book_saved_id as i64 } else { 0 },
     };
     match crate::platform::start_download(&request) {
         Ok(()) => {
@@ -385,7 +386,7 @@ fn download_settings(options: &crate::LinkOptions, link: &PendingLink, audio: bo
         max_speed: options.speed_kbps.max(0) as u64 * 1024,
         connections: options.connections.clamp(1, 16) as u16,
         user_agent: match options.ua_mode {
-            1 => "aria2/1.37.0".to_string(),
+            1 => crate::extractors::http::UA_DESKTOP.to_string(),
             2 => options.ua_custom.trim().to_string(),
             _ => String::new(),
         },
@@ -547,6 +548,8 @@ struct Probe {
 #[derive(Clone, Debug)]
 struct BookMeta {
     site: crate::novels::Site,
+    /// The site's id for it (the library knows books by it).
+    id: String,
     chapters: usize,
     locked: usize,
     cover: Option<PathBuf>,
@@ -633,6 +636,12 @@ fn apply_probe(id: i32, result: Result<Probe, String>) {
                     link.book_small_images = defaults.small_images;
                     if let Some(thumb) = book.cover.as_deref().and_then(|p| slint::Image::load_from_path(p).ok()) {
                         link.thumbnail = thumb;
+                    }
+                    // Saved before: downloading updates that one, under its name.
+                    if let Some((saved_id, chapters, name)) = crate::downloads::saved_book(book.site, &book.id) {
+                        link.book_saved_id = saved_id as i32;
+                        link.book_new = book.chapters.saturating_sub(chapters) as i32;
+                        link.filename = name.into();
                     }
                 }
             }
@@ -725,7 +734,7 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
             formats: Vec::new(),
             files: Vec::new(),
             media: None,
-            book: Some(BookMeta { site: book.site, chapters: book.chapters.len(), locked, cover }),
+            book: Some(BookMeta { site: book.site, id: book.id.clone(), chapters: book.chapters.len(), locked, cover }),
         });
     }
 

@@ -1,4 +1,5 @@
-import { LineEdit } from "std-widgets.slint";
+import { TextField } from "TextField.slint";
+import { Note } from "Note.slint";
 import { ThemeSettings } from "../themes/theme.slint";
 import { Chip, SectionLabel } from "Chips.slint";
 import { SwitchRow } from "SwitchRow.slint";
@@ -11,7 +12,7 @@ export component DownloadOptionsEditor inherits VerticalLayout {
     in property <color> text_color: ThemeSettings.text_color;
     in-out property <int> speed_kbps; // 0 = no limit
     in-out property <int> connections; // 1–16
-    in-out property <int> ua_mode; // 0 browser, 1 aria2, 2 custom
+    in-out property <int> ua_mode; // 0 aria2's own, 1 browser, 2 custom
     in-out property <string> ua_custom;
     in-out property <bool> category;
     // Something was changed (settings save it).
@@ -26,7 +27,7 @@ export component DownloadOptionsEditor inherits VerticalLayout {
     SectionLabel { text: @tr("Speed limit"); }
     HorizontalLayout {
         spacing: 8px;
-        LineEdit {
+        TextField {
             text: root.speed_text;
             input-type: InputType.decimal;
             placeholder-text: @tr("No limit");
@@ -57,18 +58,18 @@ export component DownloadOptionsEditor inherits VerticalLayout {
             }
         }
     }
-    Text {
+    Note {
         text: @tr("More can be faster; some servers refuse more than one or two.");
-        font-size: root.label_size;
-        color: root.text_color.transparentize(40%);
-        wrap: word-wrap;
+        font_size: root.label_size;
+        text_color: root.text_color;
     }
 
     SectionLabel { text: @tr("User agent"); }
     HorizontalLayout {
         spacing: 8px;
+        // aria2's own: some servers drop requests that claim to be a browser.
         Chip {
-            text: @tr("Browser");
+            text: @tr("Default");
             selected: root.ua_mode == 0;
             clicked => {
                 root.ua_mode = 0;
@@ -76,7 +77,7 @@ export component DownloadOptionsEditor inherits VerticalLayout {
             }
         }
         Chip {
-            text: "aria2";
+            text: @tr("Browser");
             selected: root.ua_mode == 1;
             clicked => {
                 root.ua_mode = 1;
@@ -92,18 +93,17 @@ export component DownloadOptionsEditor inherits VerticalLayout {
             }
         }
     }
-    if root.ua_mode == 2: LineEdit {
+    if root.ua_mode == 2: TextField {
         text <=> root.ua_custom;
         placeholder-text: "Mozilla/5.0 (…)";
         font-size: 14px;
         input-method-hints: { capitalization: CapitalizationMode.none, auto-correct: false, auto-complete: false };
         edited => { root.changed(); }
     }
-    Text {
+    Note {
         text: @tr("Only used by direct downloads.");
-        font-size: root.label_size;
-        color: root.text_color.transparentize(40%);
-        wrap: word-wrap;
+        font_size: root.label_size;
+        text_color: root.text_color;
     }
 
     SwitchRow {

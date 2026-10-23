@@ -3,6 +3,7 @@ import { AppSettings } from "../../globals/AppSettings.slint";
 import { ThemeSettings } from "../../themes/theme.slint";
 import { AnimatedPopup } from "../../components/AnimatedPopup.slint";
 import { RadioRow } from "../../components/RadioRow.slint";
+import { SettingsCard, SettingsLayout } from "../SettingsCard.slint";
 
 export component GeneralSettings inherits Rectangle {
     in property <color> text_color: #FFFFFF;
@@ -95,17 +96,18 @@ export component GeneralSettings inherits Rectangle {
         content-height: gen_layout.preferred-height;
 
         gen_layout := VerticalLayout {
-            spacing: 24px;
+            spacing: SettingsLayout.spacing;
             alignment: start;
-            padding-left: 12px;
-            padding-right: 12px;
+            padding-left: SettingsLayout.side;
+            padding-right: SettingsLayout.side;
             padding-top: 8px; // Increased padding-top for comfortable spacing below the top bar
             // Room under the last item, so it doesn't end at the edge.
             padding-bottom: 24px;
 
-            Rectangle {
-                border-radius: 8px;
-                background: language_ta.has-hover ? ThemeSettings.hover_color : transparent;
+            SettingsCard {
+                first: true;
+                last: !AppSettings.is_mobile;
+                highlighted: language_ta.has-hover;
 
                 language_ta := TouchArea {
                     clicked => {
@@ -116,6 +118,8 @@ export component GeneralSettings inherits Rectangle {
 
                 HorizontalLayout {
                     padding: 8px;
+                    padding-left: SettingsLayout.inset;
+                    padding-right: SettingsLayout.inset;
                     alignment: space-between;
                     spacing: 16px;
 
@@ -141,9 +145,10 @@ export component GeneralSettings inherits Rectangle {
                 }
             }
 
-            if AppSettings.is_mobile: Rectangle {
-                border-radius: 8px;
-                background: haptic_ta.has-hover ? ThemeSettings.hover_color : transparent;
+            if AppSettings.is_mobile: SettingsCard {
+                first: false;
+                last: true;
+                highlighted: haptic_ta.has-hover;
 
                 // The whole row toggles the switch, not just the switch itself.
                 haptic_ta := TouchArea {
@@ -155,6 +160,8 @@ export component GeneralSettings inherits Rectangle {
 
                 HorizontalLayout {
                     padding: 8px;
+                    padding-left: SettingsLayout.inset;
+                    padding-right: SettingsLayout.inset;
                     alignment: space-between;
                     spacing: 16px;
 

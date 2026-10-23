@@ -11,7 +11,8 @@
 //!
 //! Eddy logs with `log` (also to logcat / the terminal as before); aria2-core
 //! with `tracing`, caught by a small layer. Each file stops at 1 MB, its
-//! older half kept as `.log.1`.
+//! older half kept as `.log.1`; and as the app starts, a file over 512 KB
+//! is cut to its newest 256 KB (`trim`).
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -36,6 +37,50 @@ pub fn init() {
         use tracing_subscriber::layer::SubscriberExt;
         let _ = tracing::subscriber::set_global_default(tracing_subscriber::registry().with(TracingFiles));
     });
+}
+
+/// A log file over this when the app starts is cut down to its newest
+/// TRIM_TO bytes.
+const TRIM_OVER: u64 = 512 * 1024;
+const TRIM_TO: u64 = 256 * 1024;
+
+/// Cuts the logs that grew too big down to their newest lines, once per
+/// run, in the background. Call once the app's folders are known.
+pub fn trim() {
+    static TRIM: Once = Once::new();
+    TRIM.call_once(|| {
+        std::thread::spawn(|| {
+            let Some(dir) = dir() else {
+                return;
+            };
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                return;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if entry.metadata().is_ok_and(|m| m.is_file() && m.len() > TRIM_OVER) {
+                    if let Err(e) = trim_file(&path) {
+                        log::warn!("couldn't trim {}: {e}", path.display());
+                    }
+                }
+            }
+        });
+    });
+}
+
+/// Keeps the file's last TRIM_TO bytes, from the start of a line.
+fn trim_file(path: &std::path::Path) -> std::io::Result<()> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path)?;
+    let len = file.metadata()?.len();
+    file.seek(SeekFrom::Start(len.saturating_sub(TRIM_TO)))?;
+    let mut tail = Vec::with_capacity(TRIM_TO as usize);
+    file.read_to_end(&mut tail)?;
+    // The first line is likely cut off part way.
+    let start = tail.iter().position(|&b| b == b'\n').map_or(0, |i| i + 1);
+    let tmp = path.with_extension("trim");
+    std::fs::write(&tmp, &tail[start..])?;
+    std::fs::rename(&tmp, path)
 }
 
 /// Which file a message goes to, by where it came from.

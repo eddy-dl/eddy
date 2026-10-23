@@ -6,8 +6,12 @@
 pub mod clean;
 pub mod epub;
 pub mod fetch;
+pub mod ao3;
 pub mod images;
 pub mod royalroad;
+pub mod sufficientvelocity;
+pub mod wattpad;
+pub mod wuxiaworld;
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -16,12 +20,20 @@ use std::path::{Path, PathBuf};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Site {
     RoyalRoad,
+    Ao3,
+    Wattpad,
+    SufficientVelocity,
+    Wuxiaworld,
 }
 
 impl Site {
     pub fn label(self) -> &'static str {
         match self {
             Site::RoyalRoad => "Royal Road",
+            Site::Ao3 => "AO3",
+            Site::Wattpad => "Wattpad",
+            Site::SufficientVelocity => "Sufficient Velocity",
+            Site::Wuxiaworld => "Wuxiaworld",
         }
     }
 
@@ -29,13 +41,29 @@ impl Site {
     fn key(self) -> &'static str {
         match self {
             Site::RoyalRoad => "royalroad",
+            Site::Ao3 => "ao3",
+            Site::Wattpad => "wattpad",
+            Site::SufficientVelocity => "sufficientvelocity",
+            Site::Wuxiaworld => "wuxiaworld",
         }
     }
 }
 
 /// The site a book link is on, if Eddy can read it.
 pub fn site_for(url: &str) -> Option<Site> {
-    royalroad::is_book_url(url).then_some(Site::RoyalRoad)
+    if royalroad::is_book_url(url) {
+        Some(Site::RoyalRoad)
+    } else if ao3::is_book_url(url) {
+        Some(Site::Ao3)
+    } else if wattpad::is_book_url(url) {
+        Some(Site::Wattpad)
+    } else if sufficientvelocity::is_book_url(url) {
+        Some(Site::SufficientVelocity)
+    } else if wuxiaworld::is_book_url(url) {
+        Some(Site::Wuxiaworld)
+    } else {
+        None
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -102,6 +130,10 @@ impl Default for NovelOptions {
 pub async fn book(url: &str) -> Result<Book, String> {
     match site_for(url).ok_or("Not a book link Eddy can read")? {
         Site::RoyalRoad => royalroad::book(url).await,
+        Site::Ao3 => ao3::book(url).await,
+        Site::Wattpad => wattpad::book(url).await,
+        Site::SufficientVelocity => sufficientvelocity::book(url).await,
+        Site::Wuxiaworld => wuxiaworld::book(url).await,
     }
 }
 
@@ -115,6 +147,10 @@ async fn chapter(book: &Book, chapter: &ChapterRef, options: &NovelOptions) -> R
         None => {
             let raw = match book.site {
                 Site::RoyalRoad => royalroad::chapter(&chapter.url).await?,
+                Site::Ao3 => ao3::chapter(&chapter.url).await?,
+                Site::Wattpad => wattpad::chapter(&chapter.url).await?,
+                Site::SufficientVelocity => sufficientvelocity::chapter(&chapter.url).await?,
+                Site::Wuxiaworld => wuxiaworld::chapter(&chapter.url).await?,
             };
             let cached = CachedChapter { body: raw.body, notes: raw.notes, hidden_classes: raw.hidden_classes };
             if let Some(dir) = cache.parent() {
@@ -168,15 +204,24 @@ pub fn wanted<'a>(book: &'a Book, options: &NovelOptions) -> Vec<&'a ChapterRef>
         .collect()
 }
 
+/// A saved book, for the library: which book it is, and how many chapters
+/// it had then (new ones are counted from it).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SavedBook {
+    pub site: Site,
+    pub id: String,
+    pub chapters: usize,
+}
+
 /// Saves the book as `<dir>/<name>.epub`, reporting (chapters done, total).
-/// Returns the file's path.
+/// Returns the file's path and the book.
 pub async fn download(
     url: &str,
     options: &NovelOptions,
     dir: &Path,
     name: Option<&str>,
     progress: impl Fn(usize, usize),
-) -> Result<PathBuf, String> {
+) -> Result<(PathBuf, SavedBook), String> {
     let book = book(url).await?;
     let chapters = wanted(&book, options);
     if chapters.is_empty() {
@@ -209,7 +254,7 @@ pub async fn download(
     let path = dir.join(file_name);
     let bytes = epub::pack(&book, &packed, cover, collected.into_images())?;
     tokio::fs::write(&path, bytes).await.map_err(|e| e.to_string())?;
-    Ok(path)
+    Ok((path, SavedBook { site: book.site, id: book.id.clone(), chapters: book.chapters.len() }))
 }
 
 /// "<title> - <author>".

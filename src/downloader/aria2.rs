@@ -420,21 +420,13 @@ impl AriaEngineClient {
     }
 }
 
-/// Whether the network can reach IPv6 at all. aria2 resolves a host itself
-/// and sticks to the addresses it got, so on a network without IPv6 (many
-/// mobile ones) a server with an IPv6 address fails every connection
-/// ("error sending request"). Connecting a UDP socket sends nothing; it just
-/// asks for a route.
-fn has_ipv6_route() -> bool {
-    std::net::UdpSocket::bind("[::]:0").and_then(|s| s.connect("[2001:4860:4860::8888]:53")).is_ok()
-}
-
 /// Speed, connections and user agent for a download.
 fn apply(options: &mut DownloadOptions, settings: &super::DownloadSettings) {
-    options.disable_ipv6 = !has_ipv6_route();
     let connections = settings.connections();
     options.max_connection_per_server = Some(connections);
     options.split = Some(connections);
     options.max_download_limit = (settings.max_speed > 0).then_some(settings.max_speed);
-    options.user_agent = Some(settings.user_agent().to_string());
+    // aria2's own unless one was picked: some servers drop requests that
+    // claim to be a browser.
+    options.user_agent = settings.user_agent().map(str::to_string);
 }

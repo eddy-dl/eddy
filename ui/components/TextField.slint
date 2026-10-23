@@ -1,0 +1,115 @@
+import { ThemeSettings } from "../themes/theme.slint";
+
+// A single-line text field in Eddy's colours (MD3's outlined text field).
+// Slint's LineEdit takes its colours from the system's light / dark mode,
+// not Eddy's theme, so it could be hard to see against Eddy's surfaces.
+// Long text scrolls with the cursor, as LineEdit's does.
+export component TextField inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    in property <string> placeholder-text;
+    in property <length> font-size: 14px;
+    in property <InputType> input-type: InputType.text;
+    in property <InputMethodHints> input-method-hints <=> input.input-method-hints;
+    out property <bool> has-focus: input.has-focus;
+
+    callback edited(string);
+    callback accepted(string);
+
+    // MD3 outlined text field: 56 tall, 4 corners, 16 inside.
+    min-width: 120px;
+    min-height: 56px;
+    vertical-stretch: 0;
+    border-radius: 4px;
+    border-width: input.has-focus ? 2px : 1px;
+    border-color: input.has-focus ? ThemeSettings.primary_accent : ThemeSettings.text_color.transparentize(55%);
+    background: transparent;
+    forward-focus: input;
+
+    // Holds the focus once the field lets go of it, so Back carries on up
+    // to whatever handles it around the field.
+    park := FocusScope {
+        x: 0;
+        y: 0;
+        width: 0;
+        height: 0;
+    }
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: root.text.is-empty ? 16px : 8px;
+        spacing: 8px;
+
+        // The text, clipped and scrolled to keep the cursor in view.
+        area := Rectangle {
+            horizontal-stretch: 1;
+            min-width: 1px;
+            clip: true;
+
+            Text {
+                width: 100%;
+                height: 100%;
+                vertical-alignment: center;
+                text: root.text == "" && input.preedit-text == "" ? root.placeholder-text : "";
+                font-size: root.font-size;
+                color: ThemeSettings.text_color.transparentize(50%);
+                overflow: elide;
+            }
+
+            input := TextInput {
+                property <length> scroll-x;
+
+                x: min(0px, max(parent.width - self.width - self.text-cursor-width, self.scroll-x));
+                width: max(parent.width - self.text-cursor-width, self.preferred-width);
+                height: 100%;
+                vertical-alignment: center;
+                single-line: true;
+                font-size: root.font-size;
+                color: ThemeSettings.text_color;
+                selection-background-color: ThemeSettings.primary_accent.transparentize(60%);
+                selection-foreground-color: ThemeSettings.text_color;
+                input-type: root.input-type;
+
+                cursor-position-changed(position) => {
+                    if position.x + self.scroll-x < 0px {
+                        self.scroll-x = -position.x;
+                    } else if position.x + self.scroll-x > parent.width - self.text-cursor-width {
+                        self.scroll-x = parent.width - position.x - self.text-cursor-width;
+                    }
+                }
+                // Back puts the field down (keyboard away) before it does
+                // anything else; the next Back goes on to the page.
+                key-pressed(event) => {
+                    if (event.text == Key.Back || event.text == Key.Escape) {
+                        park.focus();
+                        return accept;
+                    }
+                    return reject;
+                }
+                edited => { root.edited(self.text); }
+                accepted => { root.accepted(self.text); }
+            }
+        }
+
+        // Clears it, like LineEdit's.
+        if !root.text.is-empty: VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 32px;
+                height: 32px;
+                Image {
+                    source: @image-url("../icons/close.svg");
+                    width: 20px;
+                    height: 20px;
+                    colorize: ThemeSettings.text_color.transparentize(20%);
+                }
+                TouchArea {
+                    clicked => {
+                        input.text = "";
+                        root.edited("");
+                        input.focus();
+                    }
+                }
+            }
+        }
+    }
+}

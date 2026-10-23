@@ -1,4 +1,5 @@
-import { LineEdit, Spinner } from "std-widgets.slint";
+import { TextField } from "TextField.slint";
+import { Spinner } from "std-widgets.slint";
 import { ThemeSettings } from "../themes/theme.slint";
 import { FileTypeIcon } from "FileTypeIcon.slint";
 import { ActionButton } from "Buttons.slint";
@@ -14,8 +15,9 @@ component FormatRow inherits Rectangle {
     in property <bool> selected;
     callback clicked();
 
-    height: 44px;
-    border-radius: 8px;
+    // MD3's minimum touch target (compact for a list).
+    height: 48px;
+    border-radius: 16px;
     background: ta.pressed ? ThemeSettings.text_color.transparentize(92%) : transparent;
 
     HorizontalLayout {
@@ -74,8 +76,9 @@ component FileRow inherits Rectangle {
     in property <TorrentFile> file;
     callback clicked();
 
-    height: 40px;
-    border-radius: 8px;
+    // MD3's minimum touch target (compact for a list).
+    height: 48px;
+    border-radius: 16px;
     background: ta.pressed ? ThemeSettings.text_color.transparentize(92%) : transparent;
 
     HorizontalLayout {
@@ -242,13 +245,25 @@ export component LinkPreviewSheet inherits Rectangle {
 
     height: Math.min(root.content_height, root.available_height);
     background: ThemeSettings.surface;
+    animate background { duration: ThemeSettings.fade; easing: ease-in-out; }
     border-radius: 16px;
     clip: true;
     drop-shadow-blur: 12px;
     drop-shadow-color: #00000020;
 
+    // Takes the focus off a text field tapped away from (so the keyboard
+    // goes and Back works on the sheet again).
+    park := FocusScope {
+        x: 0;
+        y: 0;
+        width: 0;
+        height: 0;
+    }
+
     // Keeps taps on the sheet's gaps from reaching the backdrop behind it.
-    TouchArea { }
+    TouchArea {
+        clicked => { park.focus(); }
+    }
 
     // The thumbnail over the whole window; a tap or Back closes it.
     image_popup := PopupWindow {
@@ -290,10 +305,16 @@ export component LinkPreviewSheet inherits Rectangle {
             // Only scrollable when the content doesn't fit.
             interactive: layout.preferred-height > self.height;
 
+            // Taps between the rows.
+            TouchArea {
+                height: layout.preferred-height;
+                clicked => { park.focus(); }
+            }
+
             layout := VerticalLayout {
                 padding: 16px;
                 padding-bottom: 4px;
-                spacing: 10px;
+                spacing: 12px;
 
                 HorizontalLayout {
                     Text {
@@ -412,6 +433,14 @@ export component LinkPreviewSheet inherits Rectangle {
                         horizontal-stretch: 1;
                     }
                 }
+                // In the library already: downloading updates that copy.
+                if root.is_book && root.link.book_saved_id != 0: Text {
+                    text: root.link.book_new == 0 ? @tr("Saved before · no new chapters")
+                        : @tr("Saved before · {n} new chapter" | "Saved before · {n} new chapters" % root.link.book_new);
+                    font-size: 12px;
+                    color: ThemeSettings.primary_accent;
+                    wrap: word-wrap;
+                }
                 if root.is_book: HorizontalLayout {
                     spacing: 8px;
                     Text {
@@ -420,7 +449,7 @@ export component LinkPreviewSheet inherits Rectangle {
                         color: ThemeSettings.text_color;
                         vertical-alignment: center;
                     }
-                    LineEdit {
+                    TextField {
                         text <=> root.book_from;
                         input-type: InputType.number;
                         horizontal-stretch: 1;
@@ -432,7 +461,7 @@ export component LinkPreviewSheet inherits Rectangle {
                         color: ThemeSettings.text_color;
                         vertical-alignment: center;
                     }
-                    LineEdit {
+                    TextField {
                         text <=> root.book_to;
                         input-type: InputType.number;
                         horizontal-stretch: 1;
@@ -555,7 +584,7 @@ export component LinkPreviewSheet inherits Rectangle {
 
                 if root.backend != LinkBackend.Torrent: HorizontalLayout {
                     spacing: 6px;
-                    LineEdit {
+                    TextField {
                         text <=> root.filename_text;
                         edited => { root.name_edited = true; }
                         horizontal-stretch: 1;
@@ -573,8 +602,9 @@ export component LinkPreviewSheet inherits Rectangle {
 
                 // This download's speed, connections, user agent, folder.
                 Rectangle {
-                    height: 40px;
-                    border-radius: 8px;
+                    // MD3 one-line list item.
+                    height: 56px;
+                    border-radius: 16px;
                     background: ta_options.pressed ? ThemeSettings.text_color.transparentize(92%) : transparent;
                     ta_options := TouchArea {
                         clicked => { root.options_open = !root.options_open; }
@@ -676,7 +706,7 @@ export component LinkPreviewSheet inherits Rectangle {
                 clicked => { root.skip(); }
             }
             ActionButton {
-                text: @tr("Download");
+                text: root.is_book && root.link.book_saved_id != 0 ? @tr("Update") : @tr("Download");
                 primary: true;
                 horizontal-stretch: 1;
                 height: 48px;

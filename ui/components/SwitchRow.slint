@@ -1,21 +1,24 @@
 import { ModernSwitch } from "Buttons.slint";
 import { ThemeSettings } from "../themes/theme.slint";
+import { SettingsCard, SettingsLayout } from "../settings/SettingsCard.slint";
 
 // A setting that's on or off: title, an optional explanation, and a switch.
 // The whole row toggles it. `compact` is for sheets (smaller text).
-export component SwitchRow inherits Rectangle {
+export component SwitchRow inherits SettingsCard {
     in property <string> title;
     in property <string> subtitle;
     in property <bool> compact: false;
     // No inset at the sides: for rows inside an already padded layout.
     in property <bool> flush: false;
     in property <bool> enabled: true;
-    in property <color> text_color: ThemeSettings.text_color;
     in-out property <bool> checked;
     callback toggled();
 
-    border-radius: 8px;
-    background: ta.has-hover && root.enabled ? ThemeSettings.hover_color : transparent;
+    // MD3 list items: two-line in settings, one-line in sheets (compact).
+    // Sheets' rows stay flat; settings' join the page's cards.
+    plain: root.compact || root.flush;
+    min-height: root.compact ? 56px : 72px;
+    highlighted: ta.has-hover && root.enabled;
     opacity: root.enabled ? 1.0 : 0.45;
 
     ta := TouchArea {
@@ -28,8 +31,10 @@ export component SwitchRow inherits Rectangle {
 
     HorizontalLayout {
         padding: root.compact ? 4px : 8px;
-        padding-left: root.flush ? 0px : self.padding;
-        padding-right: root.flush ? 0px : self.padding;
+        // Settings rows: MD3 list items, 16 from the edge with the page's
+        // own 12.
+        padding-left: root.flush ? 0px : root.compact ? 4px : SettingsLayout.inset;
+        padding-right: self.padding-left;
         spacing: 16px;
 
         VerticalLayout {

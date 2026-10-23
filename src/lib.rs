@@ -17,6 +17,7 @@ pub mod platform;
 pub mod preferences;
 pub mod selection;
 pub mod storage;
+pub mod ytdlp_plugin;
 
 slint::include_modules!();
 
@@ -53,11 +54,19 @@ fn android_main(app: AndroidApp) {
             return;
         }
     };
+    // Logs that grew too big since last time (in the background).
+    logs::trim();
     let ui_weak = ui.as_weak();
     let update_system_accent = move || {
         if let Some(ui) = ui_weak.upgrade() {
+            let theme = ui.global::<ThemeSettings>();
             if let Some(accent) = platform::system_accent() {
-                ui.global::<ThemeSettings>().set_system_accent(accent);
+                theme.set_system_accent(accent);
+            }
+            let second = platform::system_second_accent();
+            theme.set_system_has_second(second.is_some());
+            if let Some(second) = second {
+                theme.set_system_second_accent(second);
             }
         }
     };
@@ -121,6 +130,9 @@ fn android_main(app: AndroidApp) {
     });
 
     app_settings.set_is_mobile(true);
+    app_settings.set_app_version(VERSION.into());
+    app_settings.set_slint_version(SLINT_VERSION.into());
+    app_settings.on_open_url(|url| platform::open_url(&url));
     app_settings.set_default_download_path(storage::default_display().into());
     app_settings.set_all_files_access(platform::has_all_files_access());
     app_settings.on_request_all_files_access(platform::request_all_files_access);

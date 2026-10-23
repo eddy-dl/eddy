@@ -1,5 +1,6 @@
+import { TextField } from "TextField.slint";
+import { DragHandle } from "DragHandle.slint";
 import { DownloadOptionsEditor } from "DownloadOptionsEditor.slint";
-import { LineEdit } from "std-widgets.slint";
 import { ThemeSettings } from "../themes/theme.slint";
 import { ActionButton } from "Buttons.slint";
 import { SectionLabel } from "Chips.slint";
@@ -9,7 +10,7 @@ import { LinkBackend, LinkOptions } from "../globals/Links.slint";
 
 // Things that can be done to one download. `Rename` and `RefreshLink` come
 // with the new name or link.
-export enum ItemAction { Pause, Resume, Cancel, Delete, Rename, ChangeFolder, RefreshLink, Open }
+export enum ItemAction { Pause, Resume, Cancel, Delete, Rename, ChangeFolder, RefreshLink, Open, UpdateBook }
 
 // One option: icon, label, and a detail line (the current value).
 component OptionRow inherits Rectangle {
@@ -19,8 +20,9 @@ component OptionRow inherits Rectangle {
     in property <bool> danger: false;
     callback clicked();
 
-    height: root.detail.is-empty ? 48px : 56px;
-    border-radius: 8px;
+    // MD3 list items: one-line 56, two-line 72.
+    height: root.detail.is-empty ? 56px : 72px;
+    border-radius: 16px;
     background: ta.pressed ? ThemeSettings.text_color.transparentize(92%) : transparent;
 
     HorizontalLayout {
@@ -85,6 +87,7 @@ export component DownloadOptionsSheet inherits Rectangle {
 
     // Called by the owner when the sheet opens, so it starts on the options.
     public function reset() {
+        handle.reset();
         root.editing = 0;
         root.copied = false;
     }
@@ -109,13 +112,35 @@ export component DownloadOptionsSheet inherits Rectangle {
 
     height: Math.min(layout.preferred-height, root.available_height);
     background: ThemeSettings.surface;
-    border-radius: 16px;
+    animate background { duration: ThemeSettings.fade; easing: ease-in-out; }
+    // How far its handle's been dragged, for the owner to add to its y,
+    // and whether it's being dragged (no animation then).
+    out property <length> drag_offset: handle.offset;
+    out property <bool> dragging: handle.dragging;
+    // Hangs from the top (the top navigation bar): dragged up to dismiss.
+    in property <bool> from_top: false;
+    // Dragged far enough by the handle.
+    callback dismiss_requested();
+
+    // MD3 bottom sheet: 28 corners.
+    border-radius: 28px;
     clip: true;
     drop-shadow-blur: 12px;
     drop-shadow-color: #00000020;
 
+    // Takes the focus off a text field tapped away from (so the keyboard
+    // goes and Back works on the sheet again).
+    park := FocusScope {
+        x: 0;
+        y: 0;
+        width: 0;
+        height: 0;
+    }
+
     // Keeps taps on the sheet's gaps from reaching the backdrop behind it.
-    TouchArea { }
+    TouchArea {
+        clicked => { park.focus(); }
+    }
 
     // Copies the link: TextInput is the one thing with clipboard access.
     link_copy := TextInput {
@@ -127,10 +152,18 @@ export component DownloadOptionsSheet inherits Rectangle {
 
     Flickable {
         content-height: layout.preferred-height;
+
+        // Taps between the rows.
+        TouchArea {
+            height: layout.preferred-height;
+            clicked => { park.focus(); }
+        }
         interactive: layout.preferred-height > root.height;
 
         layout := VerticalLayout {
             padding: 16px;
+            // Under the drag handle.
+            padding-top: 32px;
             spacing: 6px;
 
             // What it is and how far it got.
@@ -213,7 +246,7 @@ export component DownloadOptionsSheet inherits Rectangle {
                 if root.can_refresh: OptionRow {
                     label: @tr("Refresh link");
                     detail: @tr("Paste a new link if this one expired");
-                    commands: "M20 11a8 8 0 1 0 -2.3 5.7M20 5v6h-6";
+                    commands: "M20 11a8.1 8.1 0 0 0 -15.5 -2M4 5v4h4M4 13a8.1 8.1 0 0 0 15.5 2M20 19v-4h-4";
                     clicked => {
                         root.edit_text = "";
                         root.editing = 2;
@@ -303,7 +336,7 @@ export component DownloadOptionsSheet inherits Rectangle {
                     color: ThemeSettings.text_color.transparentize(35%);
                     wrap: word-wrap;
                 }
-                edit := LineEdit {
+                edit := TextField {
                     text <=> root.edit_text;
                     font-size: 14px;
                     input-method-hints: { capitalization: CapitalizationMode.none, auto-correct: false, auto-complete: false };
@@ -335,5 +368,14 @@ export component DownloadOptionsSheet inherits Rectangle {
                 }
             }
         }
+    }
+
+    // MD3 bottom sheet's drag handle: dragging it away dismisses the sheet.
+    handle := DragHandle {
+        // At the edge away from the bar it hangs from.
+        y: root.from_top ? root.height - self.height : 0px;
+        width: 100%;
+        upward: root.from_top;
+        dismissed => { root.dismiss_requested(); }
     }
 }

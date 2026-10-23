@@ -19,8 +19,13 @@
     <string name="download_started">Download started</string>
     <string name="results_channel">Finished downloads</string>
     <string name="no_active_downloads">No active downloads</string>
+    <string name="pause">Pause</string>
+    <string name="pause_all">Pause all</string>
+    <string name="cancel">Cancel</string>
+    <string name="cancel_all">Cancel all</string>
     <string name="downloaded_name">Downloaded %s</string>
     <string name="download_failed_name">Download failed: %s</string>
     <string name="cant_open_file">Couldn\'t open the file</string>
+    <string name="cant_delete_file">Couldn\'t delete the file</string>
     <string name="allow_installs">Allow Eddy to install apps, then tap the package again</string>
 </resources>

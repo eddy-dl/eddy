@@ -1,3 +1,4 @@
+import { DragHandle } from "DragHandle.slint";
 import { ThemeSettings } from "../themes/theme.slint";
 import { ListOptions, SortKey, FileFilter, TabListOptions } from "../globals/ListOptions.slint";
 import { Chip, SectionLabel } from "Chips.slint";
@@ -30,15 +31,43 @@ export component ListOptionsSheet inherits Rectangle {
     function set_ascending(ascending: bool) {
         root.apply({ sort: root.current.sort, ascending: ascending, filter: root.current.filter });
     }
+    // Newest first, everything shown: what a tab starts with.
+    private property <bool> is_default: root.current.sort == SortKey.DateAdded && !root.current.ascending
+        && root.current.filter == FileFilter.All;
+    function reset() {
+        root.apply({ sort: SortKey.DateAdded, ascending: false, filter: FileFilter.All });
+    }
     function set_filter(filter: FileFilter) {
         root.apply({ sort: root.current.sort, ascending: root.current.ascending, filter: filter });
     }
 
     height: Math.min(layout.preferred-height, root.available_height);
     background: ThemeSettings.surface;
-    border-radius: 16px;
+    animate background { duration: ThemeSettings.fade; easing: ease-in-out; }
+    // How far its handle's been dragged, for the owner to add to its y,
+    // and whether it's being dragged (no animation then).
+    out property <length> drag_offset: handle.offset;
+    out property <bool> dragging: handle.dragging;
+    // Hangs from the top (the top navigation bar): dragged up to dismiss.
+    in property <bool> from_top: false;
+    // Joined to its bar: square corners and no shadow on that side.
+    in property <bool> attached: false;
+    // Kept clear at the sides (it spans the screen: the cutout in landscape).
+    in property <length> side_inset: 0px;
+    // Dragged far enough by the handle.
+    callback dismiss_requested();
+    // Called by the owner as it opens, after a dismissal by dragging.
+    public function reset_drag() {
+        handle.reset();
+    }
+
+    // MD3 bottom sheet: 28 corners, square where it joins its bar.
+    border-top-left-radius: root.attached && root.from_top ? 0px : 28px;
+    border-top-right-radius: root.attached && root.from_top ? 0px : 28px;
+    border-bottom-left-radius: root.attached && !root.from_top ? 0px : 28px;
+    border-bottom-right-radius: root.attached && !root.from_top ? 0px : 28px;
     clip: true;
-    drop-shadow-blur: 12px;
+    drop-shadow-blur: root.attached ? 0px : 12px;
     drop-shadow-color: #00000020;
 
     // Keeps taps on the sheet's gaps from reaching the backdrop behind it.
@@ -51,13 +80,34 @@ export component ListOptionsSheet inherits Rectangle {
 
         layout := VerticalLayout {
             padding: 16px;
-            spacing: 10px;
+            padding-left: Math.max(16px, root.side_inset);
+            padding-right: Math.max(16px, root.side_inset);
+            // Clear of the drag handle (at the bottom when it hangs from the top).
+            padding-top: root.from_top ? 16px : 32px;
+            padding-bottom: root.from_top ? 32px : 16px;
+            spacing: 12px;
 
-            Text {
-                text: @tr("Sort & filter · {}", root.tab == 0 ? @tr("Downloading") : (root.tab == 1 ? @tr("Stopped") : @tr("Completed")));
-                font-size: 16px;
-                font-weight: 700;
-                color: ThemeSettings.text_color;
+            HorizontalLayout {
+                spacing: 8px;
+                // As tall with Reset as without, so the sheet doesn't jump.
+                min-height: 32px;
+                Text {
+                    text: @tr("Sort & filter · {}", root.tab == 0 ? @tr("Downloading") : (root.tab == 1 ? @tr("Stopped") : @tr("Completed")));
+                    font-size: 16px;
+                    font-weight: 700;
+                    color: ThemeSettings.text_color;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                }
+                // Back to the defaults; only once something's been changed.
+                if !root.is_default: Chip {
+                    text: @tr("Reset");
+                    horizontal-stretch: 0;
+                    width: 88px;
+                    height: 32px;
+                    clicked => { root.reset(); }
+                }
             }
 
             SectionLabel { text: @tr("Sort by"); }
@@ -140,5 +190,14 @@ export component ListOptionsSheet inherits Rectangle {
                 }
             }
         }
+    }
+
+    // MD3 bottom sheet's drag handle: dragging it away dismisses the sheet.
+    handle := DragHandle {
+        // At the edge away from the bar it hangs from.
+        y: root.from_top ? root.height - self.height : 0px;
+        width: 100%;
+        upward: root.from_top;
+        dismissed => { root.dismiss_requested(); }
     }
 }

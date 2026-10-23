@@ -26,6 +26,7 @@ class SharePopupActivity : GameActivity() {
     private var shared: SharedContent? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        SystemFont.apply(this)
         // Read before super.onCreate: that starts android_main, which asks
         // for these straight away.
         mode = if (intent?.component?.className?.endsWith(".DownloadShare") == true) MODE_DOWNLOAD else MODE_PREVIEW

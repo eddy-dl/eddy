@@ -29,7 +29,10 @@ pub fn start(request: &DownloadRequest, dir: &str, name: Option<String>, deliver
             return;
         }
         match result {
-            Ok(path) => {
+            Ok((path, saved)) => {
+                // Into the library: the preview and "Check for new chapters"
+                // know it from now on.
+                crate::downloads::book_saved(record, saved);
                 let file = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(label);
                 finished(record, file, true, String::new(), deliver, Some(path));
             }

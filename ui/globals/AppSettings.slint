@@ -14,6 +14,13 @@ export struct HelperPackage {
 export global AppSettings {
     in-out property <bool> is_mobile: false;
     in-out property <bool> haptic_feedback: false;
+    // Android: draw with the font picked for the phone (found as Eddy
+    // opens, so it shows from the next start).
+    in-out property <bool> system_font: false;
+    // Settings → About.
+    in property <string> app_version: "0.0.0";
+    in property <string> slint_version: "1.18.1";
+    callback open_url(string);
     in-out property <bool> bottom_navigation_bar: true;
     // Icon-only tab bar under the header instead of the bottom bar.
     in-out property <bool> top_navigation_bar: false;
@@ -40,9 +47,14 @@ export global AppSettings {
     // Instagram). `cookies_count` is 0 without one; `cookies_sites` lists a
     // few of its sites; `cookies_error` says why the last file was refused:
     // 0 it wasn't, 1 couldn't read it, 2 not a cookies.txt, 3 couldn't save it.
+    // A cookies.txt or a cookie extension's JSON export is taken; tabs
+    // turned into spaces on the way (pasting) are put back.
+    // `cookies_text` is the saved file, which Settings → Downloads → Cookies
+    // shows and edits.
     in property <int> cookies_count: 0;
     in property <string> cookies_sites: "";
     in property <int> cookies_error: 0;
+    in property <string> cookies_text: "";
     // Settings → Downloads → Downloading: every download's defaults (see
     // Links' LinkOptions).
     in-out property <int> dl_speed_kbps: 0;
@@ -50,6 +62,9 @@ export global AppSettings {
     in-out property <int> dl_ua_mode: 0;
     in-out property <string> dl_ua_custom: "";
     in-out property <bool> dl_category_folders: false;
+    // How many downloads run at once, 0 for no limit; the rest are queued.
+    // Not a per-download option.
+    in-out property <int> dl_max_concurrent: 3;
 
     // Settings → Downloads → Books: how a book is saved unless the preview
     // says otherwise.
@@ -70,6 +85,8 @@ export global AppSettings {
 
     // Picks a cookies.txt and keeps a copy of it.
     callback cookies_add();
+    // Keeps the text as the cookies (pasted or edited); empty removes them.
+    callback cookies_save(string);
     callback cookies_remove();
 
     // yt-dlp and friends. Android: YTDLnis's helper apps, which Eddy never

@@ -1,0 +1,54 @@
+import { ThemeSettings } from "../themes/theme.slint";
+
+// An MD3 bottom sheet's drag handle: drag it down (up for a sheet hanging
+// from the top) and the sheet follows; let go past `threshold` and it's
+// dismissed, otherwise it springs back. The owner adds `offset` to the
+// sheet's y (unanimated while `dragging`). A dismissed sheet keeps its
+// offset, so it closes from where it was let go; `reset()` when it opens.
+export component DragHandle inherits Rectangle {
+    // The sheet hangs from the top: dragging up dismisses it.
+    in property <bool> upward: false;
+    in property <length> threshold: 80px;
+    // How far the sheet's been dragged (down is positive).
+    out property <length> offset: 0px;
+    out property <bool> dragging: ta.pressed;
+    callback dismissed();
+
+    // Back to no offset, for when the sheet opens again.
+    public function reset() {
+        root.offset = 0px;
+    }
+
+    height: 32px;
+
+    Rectangle {
+        y: root.upward ? parent.height - self.height - 12px : 12px;
+        width: 32px;
+        height: 4px;
+        border-radius: 2px;
+        background: ThemeSettings.text_color.transparentize(70%);
+    }
+
+    ta := TouchArea {
+        moved => {
+            // The handle moves with the sheet, so each move adds what the
+            // finger did since the last one.
+            if (self.pressed) {
+                root.offset = root.upward
+                    ? Math.min(0px, root.offset + self.mouse-y - self.pressed-y)
+                    : Math.max(0px, root.offset + self.mouse-y - self.pressed-y);
+            }
+        }
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                if (Math.abs(root.offset) > root.threshold) {
+                    // Closes from here (the offset stays until it opens again).
+                    root.dismissed();
+                } else {
+                    // Not far enough: back up, animated.
+                    root.offset = 0px;
+                }
+            }
+        }
+    }
+}

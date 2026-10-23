@@ -84,7 +84,7 @@ pub struct DownloadSettings {
     pub max_speed: u64,
     /// Connections at once (1–16); 0 for the usual 16.
     pub connections: u16,
-    /// "" for a browser's (Eddy's usual one).
+    /// "" for aria2's own; otherwise what direct downloads say they are.
     pub user_agent: String,
     /// A folder inside the save folder for the file's category ("Video"…);
     /// "" for none.
@@ -96,8 +96,10 @@ impl DownloadSettings {
         if self.connections == 0 { 16 } else { self.connections.clamp(1, 16) }
     }
 
-    pub fn user_agent(&self) -> &str {
-        if self.user_agent.trim().is_empty() { crate::extractors::http::UA_DESKTOP } else { self.user_agent.trim() }
+    /// The user agent direct downloads send, if not aria2's own.
+    pub fn user_agent(&self) -> Option<&str> {
+        let ua = self.user_agent.trim();
+        (!ua.is_empty()).then_some(ua)
     }
 }
 
@@ -185,7 +187,9 @@ pub struct Finished {
 /// staying where it was saved. Downloads the user stopped don't get a
 /// notification.
 fn finished(id: i64, name: String, ok: bool, message: String, deliver: Option<Deliver>, path: Option<PathBuf>) {
-    finished_by(id, None, name, ok, message, deliver, path)
+    finished_by(id, None, name, ok, message, deliver, path);
+    // Its turn's over: the next queued one starts.
+    crate::downloads::pump();
 }
 
 /// `finished`, for the aria2 download `handle` (ignored when the download
@@ -197,6 +201,8 @@ fn finished_by(id: i64, handle: Option<&Handle>, name: String, ok: bool, message
         log::error!("download failed: {name}: {message}");
     }
     let deliver = deliver.filter(|_| ok);
+    // A folder picked while it downloaded: it moves there now.
+    let (path, deliver) = if ok { crate::downloads::apply_move(id, path, deliver) } else { (path, deliver) };
     // Staged files move into the picked folder, so the path won't hold.
     let path = if deliver.is_some() { None } else { path };
     if !crate::downloads::ended(id, handle, &name, ok, &message, path) {
@@ -249,6 +255,9 @@ pub fn take_finished() -> Vec<Finished> {
             _ => true,
         });
         watched.extend(followers);
+        drop(watched);
+        // Out of WATCHED's lock: starting the next ones takes it.
+        crate::downloads::pump();
     }
     std::mem::take(&mut *FINISHED.lock().unwrap_or_else(|e| e.into_inner()))
 }
@@ -290,12 +299,18 @@ pub fn summary() -> (usize, String, Option<f64>) {
 }
 
 /// Starts a download in the background, giving it a record in the
-/// downloads lists if it's new (`request.id` 0). On Android this runs inside
+/// downloads lists if it's new (`request.id` 0), or queues it when as many
+/// as Settings allows are already running. On Android this runs inside
 /// the download service, which keeps the app alive until downloads finish.
 pub fn start(request: &DownloadRequest) -> Result<(), String> {
     let mut request = request.clone();
     if request.id == 0 {
         request.id = crate::downloads::register(&request);
+    }
+    // Enough are running: it waits its turn (downloads::pump starts it).
+    if !crate::downloads::take_slot(&request) {
+        log::info!("queued {}", request.url);
+        return Ok(());
     }
     match launch(&request) {
         Ok(Some(handle)) => {
@@ -424,11 +439,23 @@ pub fn progress(handle: &Handle) -> Option<(crate::downloads::Live, u64, u64, f6
     }
 }
 
-/// Downloads still running or queued, across every backend. Doesn't start
-/// the engine just to ask.
+/// The file an aria2 download is writing (its first), once aria2 knows it.
+pub fn aria_file(handle: &Handle) -> Option<PathBuf> {
+    match handle {
+        Handle::Aria(gid) => {
+            let p = ENGINE.get()?.get_progress(gid)?;
+            (!p.filename.is_empty()).then(|| PathBuf::from(p.filename))
+        }
+        Handle::Job(_) => None,
+    }
+}
+
+/// Downloads still running or queued, across every backend and Eddy's own
+/// queue. Doesn't start the engine just to ask.
 pub fn active_count() -> usize {
     let aria = ENGINE.get().map(|e| e.active_count()).unwrap_or(0);
-    aria + media::jobs().len() + CHOOSING.load(Ordering::SeqCst)
+    // Queued ones too: the download service keeps going for them.
+    aria + media::jobs().len() + CHOOSING.load(Ordering::SeqCst) + crate::downloads::queued_count()
 }
 
 /// Downloads `url` to `dir/out` with aria2 (several connections, retries),

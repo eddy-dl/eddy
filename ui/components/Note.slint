@@ -1,0 +1,29 @@
+import { ThemeSettings } from "../themes/theme.slint";
+
+// A note under settings: a small (i), then the text.
+export component Note inherits HorizontalLayout {
+    in property <string> text;
+    in property <color> text_color: ThemeSettings.text_color;
+    in property <length> font_size: 13px;
+
+    spacing: 6px;
+
+    VerticalLayout {
+        alignment: start;
+        // In line with the text's first line.
+        padding-top: 1px;
+        Image {
+            source: @image-url("../icons/info.svg");
+            width: root.font_size + 1px;
+            height: root.font_size + 1px;
+            colorize: root.text_color.transparentize(40%);
+        }
+    }
+    Text {
+        text: root.text;
+        font-size: root.font_size;
+        color: root.text_color.transparentize(40%);
+        wrap: word-wrap;
+        horizontal-stretch: 1;
+    }
+}

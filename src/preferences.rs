@@ -6,6 +6,8 @@ use slint::ComponentHandle;
 const ACCENT_COLOR_KEY: &str = "accent_color";
 const AMOLED_KEY: &str = "amoled";
 const HAPTIC_FEEDBACK_KEY: &str = "enable_haptic_feedback";
+// Read by the Android app before Rust starts (SystemFont.kt).
+const SYSTEM_FONT_KEY: &str = "use_system_font";
 const THEME_MODE_KEY: &str = "theme_mode";
 const TOP_NAVIGATION_BAR_KEY: &str = "top_navigation_bar";
 const LANGUAGE_KEY: &str = "language";
@@ -20,6 +22,9 @@ const DL_CONNECTIONS_KEY: &str = "download_connections";
 const DL_UA_MODE_KEY: &str = "download_user_agent_mode";
 const DL_UA_CUSTOM_KEY: &str = "download_user_agent_custom";
 const DL_CATEGORY_KEY: &str = "download_category_folders";
+// How many downloads run at once (0: no limit); the rest wait their turn.
+const DL_MAX_CONCURRENT_KEY: &str = "download_max_concurrent";
+pub const DEFAULT_MAX_CONCURRENT: i32 = 3;
 
 // Locales with a bundled translation (English is the source language).
 const BUNDLED_LANGUAGES: &[&str] = &["en", "fr"];
@@ -66,6 +71,13 @@ fn parse_accent(s: &str) -> AccentColor {
         "yellow" => AccentColor::Yellow,
         "orange" => AccentColor::Orange,
         "blue" => AccentColor::Blue,
+        "teal" => AccentColor::Teal,
+        "lime" => AccentColor::Lime,
+        "sunset" => AccentColor::Sunset,
+        "lagoon" => AccentColor::Lagoon,
+        "meadow" => AccentColor::Meadow,
+        "berry" => AccentColor::Berry,
+        "dusk" => AccentColor::Dusk,
         "greyscale" => AccentColor::Greyscale,
         "system" => AccentColor::System,
         _ => AccentColor::MutedRed,
@@ -81,6 +93,13 @@ fn accent_to_str(accent: AccentColor) -> &'static str {
         AccentColor::Yellow => "yellow",
         AccentColor::Orange => "orange",
         AccentColor::Blue => "blue",
+        AccentColor::Teal => "teal",
+        AccentColor::Lime => "lime",
+        AccentColor::Sunset => "sunset",
+        AccentColor::Lagoon => "lagoon",
+        AccentColor::Meadow => "meadow",
+        AccentColor::Berry => "berry",
+        AccentColor::Dusk => "dusk",
         AccentColor::Greyscale => "greyscale",
         AccentColor::System => "system",
     }
@@ -123,6 +142,7 @@ pub fn load_preferences(ui_weak: slint::Weak<DownloaderApp>) {
         theme_settings.set_accent(accent_color);
         theme_settings.set_amoled_dark(amoled);
         app_settings.set_haptic_feedback(enable_haptic_feedback);
+        app_settings.set_system_font(platform::get_pref(SYSTEM_FONT_KEY, "false").ok().is_some_and(|v| v == "true"));
         app_settings.set_current_download_path(download_dir_display.into());
         apply_download_defaults(&app_settings);
         let novel = novel_defaults();
@@ -142,6 +162,9 @@ pub fn apply_download_defaults(settings: &AppSettings) {
     settings.set_dl_ua_mode(number(DL_UA_MODE_KEY, 0));
     settings.set_dl_ua_custom(platform::get_pref(DL_UA_CUSTOM_KEY, "").unwrap_or_default().into());
     settings.set_dl_category_folders(platform::get_pref(DL_CATEGORY_KEY, "false").ok().is_some_and(|v| v == "true"));
+    let max = number(DL_MAX_CONCURRENT_KEY, DEFAULT_MAX_CONCURRENT).max(0);
+    settings.set_dl_max_concurrent(max);
+    crate::downloads::set_max_concurrent(max as usize);
 }
 
 /// The Downloading defaults as a link's options ("Download now", Auto).
@@ -211,6 +234,10 @@ pub fn save_preferences(ui_weak: slint::Weak<DownloaderApp>) {
             eprintln!("failed to save top navigation bar preference: {e}");
         }
 
+        if let Err(e) = platform::save_pref(SYSTEM_FONT_KEY, &app_settings.get_system_font().to_string()) {
+            eprintln!("failed to save system font preference: {e}");
+        }
+
         if let Err(e) = platform::save_pref(LANGUAGE_KEY, &app_settings.get_language()) {
             eprintln!("failed to save language preference: {e}");
         }
@@ -221,11 +248,13 @@ pub fn save_preferences(ui_weak: slint::Weak<DownloaderApp>) {
             (DL_UA_MODE_KEY, app_settings.get_dl_ua_mode().to_string()),
             (DL_UA_CUSTOM_KEY, app_settings.get_dl_ua_custom().to_string()),
             (DL_CATEGORY_KEY, app_settings.get_dl_category_folders().to_string()),
+            (DL_MAX_CONCURRENT_KEY, app_settings.get_dl_max_concurrent().max(0).to_string()),
         ] {
             if let Err(e) = platform::save_pref(key, &value) {
                 eprintln!("failed to save {key}: {e}");
             }
         }
+        crate::downloads::set_max_concurrent(app_settings.get_dl_max_concurrent().max(0) as usize);
         for (key, value) in [
             (NOVEL_NOTES_KEY, app_settings.get_novel_author_notes()),
             (NOVEL_IMAGES_KEY, app_settings.get_novel_images()),
@@ -253,6 +282,11 @@ where
     theme_settings.set_amoled_dark(get(AMOLED_KEY, "false").parse().unwrap_or(false));
     if let Some(accent) = platform::system_accent() {
         theme_settings.set_system_accent(accent);
+    }
+    let second = platform::system_second_accent();
+    theme_settings.set_system_has_second(second.is_some());
+    if let Some(second) = second {
+        theme_settings.set_system_second_accent(second);
     }
     apply_language(&get(LANGUAGE_KEY, ""));
 }

@@ -29,6 +29,8 @@ class MainActivity : GameActivity() {
     external fun onFilePicked(path: String, displayName: String)
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Before super.onCreate, which starts Rust (and Slint's fonts).
+        SystemFont.apply(this)
         super.onCreate(savedInstanceState)
 
         // Edge to edge, like NativeActivity's window was: Slint pads the
@@ -116,13 +118,16 @@ class MainActivity : GameActivity() {
         runOnUiThread {
             val file = File(path)
             try {
-                val uri = FileProvider.getUriForFile(this, "$packageName.files", file)
-                val mime = MimeTypeMap.getSingleton()
-                    .getMimeTypeFromExtension(file.extension.lowercase()) ?: "*/*"
+                // A copy in a picked folder is a document URI already.
+                val content = path.startsWith("content://")
+                val uri = if (content) android.net.Uri.parse(path)
+                    else FileProvider.getUriForFile(this, "$packageName.files", file)
+                val mime = (if (content) contentResolver.getType(uri) else null)
+                    ?: MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension.lowercase()) ?: "*/*"
                 val intent = Intent(Intent.ACTION_VIEW)
                     .setDataAndType(uri, mime)
                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                startActivity(Intent.createChooser(intent, file.name))
+                startActivity(Intent.createChooser(intent, if (content) null else file.name))
             } catch (e: Exception) {
                 // Missing file, a folder FileProvider can't share, or no app for it.
                 Toast.makeText(this, getString(R.string.cant_open_file), Toast.LENGTH_LONG).show()
@@ -132,6 +137,26 @@ class MainActivity : GameActivity() {
 
     // A .txt of links or a .torrent; the result goes to onFilePicked.
     @Keep
+    // Deletes a download's copy in a picked folder (a document URI).
+    fun deleteDocument(uri: String) {
+        try {
+            android.provider.DocumentsContract.deleteDocument(contentResolver, android.net.Uri.parse(uri))
+        } catch (e: Exception) {
+            runOnUiThread { Toast.makeText(this, getString(R.string.cant_delete_file), Toast.LENGTH_LONG).show() }
+        }
+    }
+
+    // A web page, in the browser (Settings → About's links).
+    fun openUrl(url: String) {
+        runOnUiThread {
+            try {
+                startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)))
+            } catch (e: Exception) {
+                Toast.makeText(this, url, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
     fun openFilePicker() {
         runOnUiThread {
             val intent = Intent(this, FilePickerActivity::class.java)
