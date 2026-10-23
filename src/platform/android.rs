@@ -50,12 +50,8 @@ fn init_backend() {
     static BACKEND: Once = Once::new();
     BACKEND.call_once(|| {
         // android_main sets this up too, but the download service and share
-        // target run without it; init_once ignores the second call.
-        android_logger::init_once(
-            android_logger::Config::default()
-                .with_max_level(log::LevelFilter::Info)
-                .with_tag("eddy"),
-        );
+        // target run without it; it's set up once either way.
+        crate::logs::init();
 
         // HTTPS certificate checks (reqwest in aria2-core and the link checks)
         // go through Android's own verifier, which needs the app context to
@@ -201,7 +197,19 @@ pub fn get_default_download_location() -> String {
     .unwrap_or_else(|_| String::from("/storage/emulated/0/Download"))
 }
 
+/// Material You's main accent (Android 12+), for the System accent.
 pub fn system_accent() -> Option<slint::Color> {
+    system_color("system_accent1_500")
+}
+
+/// Material You's tertiary accent, the System accent's second colour (its
+/// secondary palette is only a muted copy of the main one).
+pub fn system_second_accent() -> Option<slint::Color> {
+    system_color("system_accent3_500")
+}
+
+/// One of Android's system colours (`android.R.color.<name>`), if it has it.
+fn system_color(name: &str) -> Option<slint::Color> {
     with_env(|env, activity| {
         let resources = env
             .call_method(
@@ -211,7 +219,7 @@ pub fn system_accent() -> Option<slint::Color> {
                 &[],
             )?
             .l()?;
-        let name = env.new_string("system_accent1_500")?;
+        let name = env.new_string(name)?;
         let def_type = env.new_string("color")?;
         let def_pkg = env.new_string("android")?;
         let res_id = env
@@ -279,9 +287,11 @@ pub fn set_bar_icons_dark(dark: bool) {
     });
 }
 
-pub fn trigger_haptic() {
+/// Vibrates through the activity showing (the app or the share popup),
+/// which checks the haptic feedback setting.
+pub fn trigger_haptic(kind: super::Haptic) {
     let _ = with_env(|env, activity| {
-        env.call_method(activity, jni_str!("triggerHaptic"), jni_sig!("()V"), &[])?;
+        env.call_method(activity, jni_str!("triggerHaptic"), jni_sig!("(I)V"), &[JValue::Int(kind as i32)])?;
         Ok(())
     });
 }
@@ -327,6 +337,14 @@ pub fn pick_download_folder<F>(on_picked: F)
 where
     F: Fn(String, String) + Send + 'static,
 {
+    // With "All files access", Eddy's own browser: Android's picker refuses
+    // the top of internal storage and of Download.
+    if has_all_files_access() {
+        let current = crate::db::raw_download_path().filter(|p| p.starts_with('/'));
+        crate::folders::browse(current.as_deref(), on_picked);
+        return;
+    }
+
     // Store the callback
     if let Ok(mut guard) = FOLDER_PICKER_CALLBACK.lock() {
         *guard = Some(Box::new(on_picked));
@@ -391,6 +409,18 @@ where
     }
 }
 
+/// Lets the user pick a cookies.txt (same picker). The picker's copy in the
+/// cache goes once `on_picked` has read it: cookies are private.
+pub fn pick_cookies_file<F>(on_picked: F)
+where
+    F: FnOnce(String, String) + Send + 'static,
+{
+    pick_link_file(move |path, name| {
+        on_picked(path.clone(), name);
+        let _ = std::fs::remove_file(&path);
+    });
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pah_eddy_MainActivity_onFilePicked<'caller>(
     mut unowned_env: EnvUnowned<'caller>,
@@ -424,10 +454,13 @@ pub fn start_download(request: &crate::downloader::DownloadRequest) -> Result<()
         let filename = env.new_string(&request.filename)?;
         let select_files = env.new_string(&request.select_files)?;
         let folder = env.new_string(&request.folder)?;
+        // The whole request, record id included (a resumed download keeps
+        // its place in the lists); the other arguments are for reading logs.
+        let settings = env.new_string(serde_json::to_string(request).unwrap_or_default())?;
         env.call_method(
             activity,
             jni_str!("startDownload"),
-            jni_sig!("(Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V"),
+            jni_sig!("(Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V"),
             &[
                 JValue::Object(&url),
                 JValue::Int(request.backend.index()),
@@ -435,6 +468,7 @@ pub fn start_download(request: &crate::downloader::DownloadRequest) -> Result<()
                 JValue::Object(&filename),
                 JValue::Object(&select_files),
                 JValue::Object(&folder),
+                JValue::Object(&settings),
             ],
         )?;
         Ok(())
@@ -453,6 +487,7 @@ pub extern "system" fn Java_dev_pah_eddy_EddyNative_startDownload<'caller>(
     filename: JString<'caller>,
     select_files: JString<'caller>,
     folder: JString<'caller>,
+    settings: JString<'caller>,
 ) -> jboolean {
     let request = unowned_env
         .with_env(|env| -> jni::errors::Result<_> {
@@ -463,7 +498,15 @@ pub extern "system" fn Java_dev_pah_eddy_EddyNative_startDownload<'caller>(
                 filename: filename.try_to_string(env)?,
                 select_files: select_files.try_to_string(env)?,
                 folder: folder.try_to_string(env)?,
+                settings: Default::default(),
+                id: 0,
+                resume: false,
             }))
+            // The whole request as JSON, when it's there.
+            .map(|request| {
+                let full = settings.try_to_string(env).ok().and_then(|json| serde_json::from_str::<crate::downloader::DownloadRequest>(&json).ok());
+                full.or(request)
+            })
         })
         .resolve::<LogErrorAndDefault>();
     let Some(request) = request else {
@@ -494,7 +537,7 @@ pub extern "system" fn Java_dev_pah_eddy_EddyNative_status<'caller>(
 }
 
 /// Downloads that ended since the last call, one per line:
-/// "1 or 0 (succeeded)\tname\tmessage\tstaging folder\tpicked folder's tree URI".
+/// "1 or 0 (succeeded)\tname\tmessage\tstaging folder\tpicked folder's tree URI\tid".
 /// The last two are set when the files still have to be copied into the
 /// picked folder (the service does that, then deletes the staging folder).
 #[unsafe(no_mangle)]
@@ -503,20 +546,65 @@ pub extern "system" fn Java_dev_pah_eddy_EddyNative_takeFinished<'caller>(
     _class: JClass<'caller>,
 ) -> JString<'caller> {
     let clean = |s: &str| s.replace(['\t', '\n'], " ");
-    let text: Vec<String> = crate::downloader::take_finished()
+    let finished = crate::downloader::take_finished();
+    let text: Vec<String> = finished
         .iter()
         .map(|f| {
             let (staging, tree) = match &f.deliver {
                 Some(d) => (d.staging.to_string_lossy().into_owned(), d.tree_uri.clone()),
                 None => (String::new(), String::new()),
             };
-            format!("{}\t{}\t{}\t{}\t{}", f.ok as u8, clean(&f.name), clean(&f.message), staging, tree)
+            format!("{}\t{}\t{}\t{}\t{}\t{}", f.ok as u8, clean(&f.name), clean(&f.message), staging, tree, f.id)
         })
         .collect();
     let text = text.join("\n");
-    unowned_env
+    let text = unowned_env
         .with_env(|env| -> jni::errors::Result<_> { env.new_string(text) })
-        .resolve::<LogErrorAndDefault>()
+        .resolve::<LogErrorAndDefault>();
+    // Kotlin gets null then (and skips this round); the results wait for
+    // the next one rather than being lost.
+    if text.is_null() {
+        crate::downloader::return_finished(finished);
+    }
+    text
+}
+
+/// A staged download's copy in its picked folder (a document URI): the list
+/// opens it from there.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pah_eddy_EddyNative_delivered<'caller>(
+    mut unowned_env: EnvUnowned<'caller>,
+    _class: JClass<'caller>,
+    id: jni::sys::jlong,
+    uri: JString<'caller>,
+) {
+    let uri = unowned_env
+        .with_env(|env| -> jni::errors::Result<_> { uri.try_to_string(env) })
+        .resolve::<LogErrorAndDefault>();
+    if !uri.is_empty() {
+        crate::downloads::delivered(id, &uri);
+    }
+}
+
+/// The progress notification's Pause (0) and Cancel (1): every running or
+/// queued download.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pah_eddy_EddyNative_controlDownloads<'caller>(
+    _unowned_env: EnvUnowned<'caller>,
+    _class: JClass<'caller>,
+    action: jint,
+) {
+    crate::downloads::control_all(action == 1);
+}
+
+/// The app's or the share popup's screen is going for good: link checks
+/// running for it are stopped (downloads carry on in the service).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pah_eddy_EddyNative_screenClosed<'caller>(
+    _unowned_env: EnvUnowned<'caller>,
+    _class: JClass<'caller>,
+) {
+    crate::children::stop_checks();
 }
 
 /// How many downloads are still going, so the service knows when to stop.
@@ -574,14 +662,6 @@ pub fn popup_share() -> Option<(i32, Shared)> {
     })
     .ok()
     .flatten()
-}
-
-/// Sizes the share popup's window to fit its content (logical pixels, i.e. dp).
-pub fn set_popup_height(height: f32) {
-    let _ = with_env(|env, activity| {
-        env.call_method(activity, jni_str!("setPopupHeight"), jni_sig!("(F)V"), &[JValue::Float(height)])?;
-        Ok(())
-    });
 }
 
 /// Closes the running activity (the share popup when it's done).
@@ -648,6 +728,49 @@ pub fn open_file(path: &str) {
     });
     if let Err(e) = result {
         log::error!("Couldn't open the file: {e}");
+    }
+}
+
+/// Shares downloads through Android's share sheet: their files (paths or
+/// document URIs), with `text` (their links) alongside, or the text alone.
+pub fn share(files: &[String], text: &str) {
+    let result = with_env(|env, activity| {
+        let files = env.new_string(files.join("\n"))?;
+        let text = env.new_string(text)?;
+        env.call_method(
+            activity,
+            jni_str!("shareItems"),
+            jni_sig!("(Ljava/lang/String;Ljava/lang/String;)V"),
+            &[JValue::Object(&files), JValue::Object(&text)],
+        )?;
+        Ok(())
+    });
+    if let Err(e) = result {
+        log::error!("Couldn't share: {e}");
+    }
+}
+
+/// Deletes a document (a download's copy in a picked folder).
+pub fn delete_document(uri: &str) {
+    let result = with_env(|env, activity| {
+        let uri = env.new_string(uri)?;
+        env.call_method(activity, jni_str!("deleteDocument"), jni_sig!("(Ljava/lang/String;)V"), &[JValue::Object(&uri)])?;
+        Ok(())
+    });
+    if let Err(e) = result {
+        log::error!("Couldn't delete the document: {e}");
+    }
+}
+
+/// Opens a web page in the browser.
+pub fn open_url(url: &str) {
+    let result = with_env(|env, activity| {
+        let url = env.new_string(url)?;
+        env.call_method(activity, jni_str!("openUrl"), jni_sig!("(Ljava/lang/String;)V"), &[JValue::Object(&url)])?;
+        Ok(())
+    });
+    if let Err(e) = result {
+        log::error!("Couldn't open the link: {e}");
     }
 }
 
@@ -740,21 +863,36 @@ fn with_runtime<T>(wait: std::time::Duration, f: impl FnOnce(&YtdlRuntime) -> Op
 const RUNTIME_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Whether yt-dlp can run (waits for the setup if it's still going).
+/// Python, and yt-dlp: the package's (older packages carry it) or Eddy's own.
 pub fn ytdlp_available() -> bool {
-    with_runtime(RUNTIME_WAIT, |r| Some(r.python.is_some() && r.ytdlp.is_some())).unwrap_or(false)
+    let own = own_ytdlp().is_file();
+    with_runtime(RUNTIME_WAIT, |r| Some(r.python.is_some() && (own || r.ytdlp.is_some()))).unwrap_or(false)
 }
 
 /// Like ytdlp_available, without waiting (for the UI thread).
 pub fn ytdlp_ready() -> bool {
-    with_runtime(std::time::Duration::ZERO, |r| Some(r.python.is_some() && r.ytdlp.is_some())).unwrap_or(false)
+    let own = own_ytdlp().is_file();
+    with_runtime(std::time::Duration::ZERO, |r| Some(r.python.is_some() && (own || r.ytdlp.is_some()))).unwrap_or(false)
 }
 
 /// yt-dlp, ready for its arguments: Python running the yt-dlp script, told
 /// where ffmpeg and a JS runtime are.
 pub fn ytdlp_command() -> Option<std::process::Command> {
+    // Eddy's own, newer yt-dlp when there is one (the Python package's
+    // ages; sites change): see components::update_ytdlp.
+    let own = own_ytdlp();
     with_runtime(RUNTIME_WAIT, |r| {
         let mut command = std::process::Command::new(r.python.as_ref()?);
-        command.arg(r.ytdlp.as_ref()?).envs(&r.env);
+        if own.is_file() {
+            command.arg(&own);
+        } else {
+            command.arg(r.ytdlp.as_ref()?);
+        }
+        command.envs(&r.env);
+        // The community plugin, next to Eddy's yt-dlp (ytdlp_plugin.rs).
+        if let Some(dir) = own.parent().filter(|d| crate::ytdlp_plugin::installed(d)) {
+            command.arg("--plugin-dirs").arg(crate::ytdlp_plugin::plugins_dir(dir));
+        }
         if let Some(ffmpeg) = &r.ffmpeg {
             command.args(["--ffmpeg-location", ffmpeg]);
         }
@@ -768,6 +906,11 @@ pub fn ytdlp_command() -> Option<std::process::Command> {
         }
         Some(command)
     })
+}
+
+/// Where Eddy keeps its own yt-dlp (one file, run by the Python package).
+pub fn own_ytdlp() -> std::path::PathBuf {
+    std::path::PathBuf::from(get_app_data_dir()).join("ytdl").join("yt-dlp")
 }
 
 /// Deno (the Instagram extractor's SnapSave fallback), if its helper is

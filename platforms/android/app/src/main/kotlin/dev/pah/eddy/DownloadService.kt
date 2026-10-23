@@ -32,13 +32,16 @@ class DownloadService : Service() {
         private const val NOTIFICATION_ID = 1
         private const val CHECK_INTERVAL_MS = 2000L
         private const val REQUEST_NOTIFICATIONS = 2001
+        // The progress notification's buttons (EddyNative.controlDownloads).
+        private const val ACTION_PAUSE = "dev.pah.eddy.PAUSE_ALL"
+        private const val ACTION_CANCEL = "dev.pah.eddy.CANCEL_ALL"
 
         // The main app's activity is open (same process as the service).
         @Volatile var mainAppOpen = false
 
         // Hands a download to the service, starting it if needed. Works from
         // any process (the share popup runs in its own).
-        fun start(activity: Activity, url: String, backend: Int, format: String, filename: String, selectFiles: String, folder: String) {
+        fun start(activity: Activity, url: String, backend: Int, format: String, filename: String, selectFiles: String, folder: String, settings: String) {
             askForNotifications(activity)
             val intent = Intent(activity, DownloadService::class.java).apply {
                 putExtra("url", url)
@@ -47,6 +50,7 @@ class DownloadService : Service() {
                 putExtra("filename", filename)
                 putExtra("select_files", selectFiles)
                 putExtra("folder", folder)
+                putExtra("settings", settings)
             }
             ContextCompat.startForegroundService(activity, intent)
         }
@@ -126,6 +130,13 @@ class DownloadService : Service() {
         val (active, name, permille) = status()
         ServiceCompat.startForeground(this, NOTIFICATION_ID, progressNotification(active, name, permille), type)
 
+        // Pause / Cancel on the progress notification: every running or
+        // queued download.
+        when (intent?.action) {
+            ACTION_PAUSE -> EddyNative.controlDownloads(0)
+            ACTION_CANCEL -> EddyNative.controlDownloads(1)
+        }
+
         if (intent?.hasExtra("popup_open") == true) {
             popupOpen = intent.getBooleanExtra("popup_open", false)
         }
@@ -140,6 +151,7 @@ class DownloadService : Service() {
                 intent.getStringExtra("filename") ?: "",
                 intent.getStringExtra("select_files") ?: "",
                 intent.getStringExtra("folder") ?: "",
+                intent.getStringExtra("settings") ?: "",
             )
             // Also shows the download arrived when notifications are off.
             val message = if (started) R.string.download_started else R.string.download_failed
@@ -163,7 +175,10 @@ class DownloadService : Service() {
 
     // (active downloads, first one's name, progress in thousandths or -1)
     private fun status(): Triple<Int, String, Int> {
-        val parts = EddyNative.status().split('\t')
+        val parts = EddyNative.status()?.split('\t')
+            // Rust couldn't say (it logs why): keep the count right at least,
+            // so the service doesn't stop under a running download.
+            ?: return Triple(EddyNative.activeDownloads(), "", -1)
         return Triple(
             parts.getOrNull(0)?.toIntOrNull() ?: 0,
             parts.getOrNull(1) ?: "",
@@ -174,6 +189,12 @@ class DownloadService : Service() {
     private fun openAppIntent(): PendingIntent = PendingIntent.getActivity(
         this, 0,
         Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        PendingIntent.FLAG_IMMUTABLE,
+    )
+
+    private fun controlIntent(action: String): PendingIntent = PendingIntent.getService(
+        this, action.hashCode(),
+        Intent(this, DownloadService::class.java).setAction(action),
         PendingIntent.FLAG_IMMUTABLE,
     )
 
@@ -195,13 +216,25 @@ class DownloadService : Service() {
             } else {
                 builder.setContentText(getString(R.string.starting_download)).setProgress(0, 0, true)
             }
+            val several = active > 1
+            builder.addAction(
+                R.drawable.ic_notification,
+                getString(if (several) R.string.pause_all else R.string.pause),
+                controlIntent(ACTION_PAUSE),
+            )
+            builder.addAction(
+                R.drawable.ic_notification,
+                getString(if (several) R.string.cancel_all else R.string.cancel),
+                controlIntent(ACTION_CANCEL),
+            )
         }
         return builder.build()
     }
 
     // One notification per download that finished or failed since last time.
     private fun postResults() {
-        for (line in EddyNative.takeFinished().split('\n')) {
+        val finished = EddyNative.takeFinished() ?: return
+        for (line in finished.split('\n')) {
             val parts = line.split('\t')
             if (parts.size < 2) continue
             val ok = parts[0] == "1"
@@ -209,14 +242,17 @@ class DownloadService : Service() {
             val message = parts.getOrNull(2) ?: ""
             val staging = parts.getOrNull(3) ?: ""
             val tree = parts.getOrNull(4) ?: ""
+            val id = parts.getOrNull(5)?.toLongOrNull() ?: 0L
             if (ok && staging.isNotEmpty() && tree.isNotEmpty()) {
                 // Copy into the picked folder off the main thread, then say so.
                 copying += 1
                 Thread {
-                    val error = TreeCopy.deliver(applicationContext, java.io.File(staging), tree)
+                    val delivered = TreeCopy.deliver(applicationContext, java.io.File(staging), tree)
+                    // Where it ended up, so the list can open it there.
+                    delivered.uri?.let { EddyNative.delivered(id, it.toString()) }
                     handler.post {
                         copying -= 1
-                        postResult(error == null, name, error ?: "")
+                        postResult(delivered.error == null, name, delivered.error ?: "")
                     }
                 }.start()
                 continue
@@ -226,6 +262,7 @@ class DownloadService : Service() {
     }
 
     private fun postResult(ok: Boolean, name: String, message: String) {
+        Haptics.play(this, if (ok) Haptics.DOWNLOADED else Haptics.FAILED)
         val notification = NotificationCompat.Builder(this, RESULTS_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(getString(if (ok) R.string.downloaded_name else R.string.download_failed_name, name))

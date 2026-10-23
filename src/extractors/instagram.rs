@@ -2,7 +2,8 @@
 //! instagram_dl. Three ways in, tried in order: the web GraphQL post query
 //! (with the page's tokens and an anonymous session), the embed page's JSON,
 //! and SnapSave. Stories only work through SnapSave. Share links are
-//! resolved first.
+//! resolved first. With the user's cookies.txt (Settings → Downloads), the
+//! GraphQL query goes as their logged-in session.
 
 use super::http::{self, CookieJar};
 use super::{Fetch, MediaInfo, MediaItem, MediaKind, MediaRequest, Quality, Service};
@@ -92,6 +93,7 @@ pub async fn get_info(url: &str) -> Result<MediaInfo, String> {
     for (index, m) in media.into_iter().enumerate() {
         let size = fetch_size(&m.source_url).await;
         items.push(MediaItem {
+            square_cover: false,
             index,
             kind: m.kind,
             ext: if m.kind == MediaKind::Video { "mp4" } else { "jpg" }.to_string(),
@@ -101,7 +103,7 @@ pub async fn get_info(url: &str) -> Result<MediaInfo, String> {
             duration: None,
         });
     }
-    Ok(MediaInfo { service: Service::Instagram, id, items, info_json: None })
+    Ok(MediaInfo { service: Service::Instagram, id, title: None, items, info_json: None })
 }
 
 pub async fn resolve(url: &str, request: &MediaRequest) -> Result<Vec<Fetch>, String> {
@@ -152,59 +154,13 @@ async fn fetch_raw_media(url: &str, shortcode: &str) -> Result<Vec<RawMedia>, St
 
 // --- SnapSave ---
 
-/// SnapSave obfuscates its answer behind an eval(); running it through Deno
-/// (on Android, YTDLnis's Deno helper app) gives the real HTML. Without Deno
-/// the raw answer is used, which sometimes still has the links.
-async fn deobfuscate_with_deno(raw_js: &str) -> String {
-    let script = format!(
-        r#"
-    const raw = {};
-    const fakeEvalHolder = {{ val: '' }};
-    const patched = raw.replace(/\beval\s*\(/, 'fakeEvalHolder.val=(');
-    try {{
-        const fn = new Function('fakeEvalHolder', patched);
-        fn(fakeEvalHolder);
-    }} catch (e) {{}}
-    const output = fakeEvalHolder.val || raw;
-    Deno.stdout.writeSync(new TextEncoder().encode(output));
-    "#,
-        serde_json::to_string(raw_js).unwrap_or_default()
-    );
-    let raw = raw_js.to_string();
-    tokio::task::spawn_blocking(move || {
-        use std::io::Write;
-        let Some(mut deno) = crate::platform::deno_command() else {
-            return raw;
-        };
-        let mut child = match deno
-            .args(["run", "-"])
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-        {
-            Ok(c) => c,
-            Err(_) => return raw,
-        };
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(script.as_bytes());
-        }
-        match child.wait_with_output() {
-            Ok(out) if out.status.success() => String::from_utf8(out.stdout).unwrap_or(raw),
-            _ => raw,
-        }
-    })
-    .await
-    .unwrap_or_default()
-}
-
 fn parse_download_html(html: &str) -> Vec<RawMedia> {
     let unescape = |u: &str| u.replace("&amp;", "&").replace(r"\u0026", "&");
     let mut results = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
     let video_re = Regex::new(r#"href=\\?["'](https?://[^"'\\]+/v2\?token=[^"'\\]+|[^"'\\]+\.mp4[^"'\\]*)"#).unwrap();
-    let videos: Vec<String> = video_re
+    let links: Vec<String> = video_re
         .captures_iter(html)
         .map(|c| unescape(&c[1]))
         .filter(|u| !u.is_empty() && seen.insert(u.clone()))
@@ -212,11 +168,11 @@ fn parse_download_html(html: &str) -> Vec<RawMedia> {
     let thumb_re = Regex::new(r#"src=\\?["'](https?://[^"'\\]+/thumb\?token=[^"'\\]+|[^"'\\]+\.jpg[^"'\\]*)"#).unwrap();
     let thumbs: Vec<String> = thumb_re.captures_iter(html).map(|c| unescape(&c[1])).filter(|u| !u.is_empty()).collect();
 
-    if !videos.is_empty() {
-        for (i, url) in videos.into_iter().enumerate() {
+    if !links.is_empty() {
+        for (i, url) in links.into_iter().enumerate() {
             results.push(RawMedia {
                 caption: String::new(),
-                kind: MediaKind::Video,
+                kind: snapsave_kind(&url),
                 thumbnail_url: thumbs.get(i).cloned().unwrap_or_else(|| url.clone()),
                 source_url: url,
             });
@@ -240,6 +196,22 @@ fn parse_download_html(html: &str) -> Vec<RawMedia> {
         }
     }
     results
+}
+
+/// Whether a SnapSave download link is a video or an image. Its /v2 links
+/// carry a JWT whose payload names the file ("….jpg" for an image post).
+fn snapsave_kind(url: &str) -> MediaKind {
+    let filename = url
+        .split_once("token=")
+        .and_then(|(_, token)| token.split(['&', '#']).next())
+        .and_then(|token| token.split('.').nth(1))
+        .and_then(|payload| URL_SAFE_NO_PAD.decode(payload.trim_end_matches('=')).ok())
+        .and_then(|json| serde_json::from_slice::<Value>(&json).ok())
+        .and_then(|claims| claims.get("filename").and_then(|f| f.as_str()).map(str::to_lowercase));
+    match filename {
+        Some(name) if [".jpg", ".jpeg", ".png", ".webp", ".heic"].iter().any(|ext| name.ends_with(ext)) => MediaKind::Image,
+        _ => MediaKind::Video,
+    }
 }
 
 async fn try_snapsave(url: &str) -> Result<Vec<RawMedia>, String> {
@@ -267,7 +239,7 @@ async fn try_snapsave(url: &str) -> Result<Vec<RawMedia>, String> {
         .text()
         .await
         .map_err(|e| e.to_string())?;
-    let decoded = if raw.contains("eval(") { deobfuscate_with_deno(&raw).await } else { raw };
+    let decoded = super::packed::decode(&raw).await;
     if decoded.contains("Unable to connect") || decoded.contains("error_api") {
         return Err("SnapSave: Instagram blocked the request".to_string());
     }
@@ -348,8 +320,15 @@ fn object_from_entries(name: &str, data: &str) -> Option<Value> {
 /// values when the page holds back), an anonymous session, and the query.
 async fn gql_request(shortcode: &str) -> Result<(reqwest::header::HeaderMap, String), String> {
     use reqwest::header::HeaderValue;
+    // The user's instagram.com cookies, if they added a cookies.txt: logged
+    // in, the post isn't behind the login wall.
+    let user_cookies = CookieJar::from_netscape_file(&http::cookie_file(), "instagram.com");
     let page = format!("https://www.instagram.com/p/{shortcode}/");
-    let html = match http::client().get(&page).headers(web_headers()).send().await {
+    let mut page_request = http::client().get(&page).headers(web_headers());
+    if !user_cookies.is_empty() {
+        page_request = page_request.header("Cookie", user_cookies.header());
+    }
+    let html = match page_request.send().await {
         Ok(r) if r.status().is_success() => r.text().await.unwrap_or_default(),
         _ => String::new(),
     };
@@ -364,7 +343,8 @@ async fn gql_request(shortcode: &str) -> Result<(reqwest::header::HeaderMap, Str
     let field = |v: &Option<Value>, key: &str| v.as_ref().and_then(|v| v.get(key)).and_then(|v| v.as_str()).map(str::to_string);
 
     let lsd = field(&lsd_data, "token").unwrap_or_else(|| random_base64(8));
-    let csrf = field(&security, "csrf_token");
+    // The CSRF header has to match the session's own csrftoken cookie.
+    let csrf = user_cookies.get("csrftoken").map(str::to_string).or_else(|| field(&security, "csrf_token"));
     let app_id = field(&web_config, "appId").unwrap_or_else(|| APP_ID.to_string());
     let bloks_version = field(&bloks, "versioningID").unwrap_or_else(|| BLOKS_VERSION_ID.to_string());
     let rollout_hash = field(&push_info, "rollout_hash").unwrap_or_else(|| ROLLOUT_HASH.to_string());
@@ -379,22 +359,25 @@ async fn gql_request(shortcode: &str) -> Result<(reqwest::header::HeaderMap, Str
         .map(|v| v.to_string())
         .unwrap_or_else(|| now_secs().to_string());
 
-    let mut cookie = Vec::new();
+    let mut cookie = CookieJar::default();
     if let Some(c) = &csrf {
-        cookie.push(format!("csrftoken={c}"));
+        cookie.set("csrftoken", c);
     }
     if let Some(d) = field(&polaris, "device_id") {
-        cookie.push(format!("ig_did={d}"));
+        cookie.set("ig_did", &d);
     }
-    cookie.push("wd=1280x720".to_string());
-    cookie.push("dpr=2".to_string());
+    cookie.set("wd", "1280x720");
+    cookie.set("dpr", "2");
     if let Some(m) = field(&polaris, "machine_id") {
-        cookie.push(format!("mid={m}"));
+        cookie.set("mid", &m);
     }
-    cookie.push("ig_nrcb=1".to_string());
+    cookie.set("ig_nrcb", "1");
+    cookie.merge(&user_cookies);
 
     let comet_req = number_from_query("__comet_req", &html).unwrap_or(7).to_string();
     let jazoest = number_from_query("jazoest", &html).unwrap_or_else(|| rand::thread_rng().gen_range(1..10001)).to_string();
+    // The logged-in user's id when the cookies have one, else anonymous.
+    let user_id = user_cookies.get("ds_user_id").unwrap_or("0").to_string();
     let session = format!("::{}", random_alpha(6));
     let dyn_value = random_base64(154);
     let csr_value = random_base64(154);
@@ -406,7 +389,7 @@ async fn gql_request(shortcode: &str) -> Result<(reqwest::header::HeaderMap, Str
     headers.insert("X-CSRFToken", value(csrf.as_deref().unwrap_or(""))?);
     headers.insert("X-Bloks-Version-Id", value(&bloks_version)?);
     headers.insert("x-asbd-id", HeaderValue::from_static(ASBD_ID));
-    headers.insert("cookie", value(&cookie.join("; "))?);
+    headers.insert("cookie", value(&cookie.header())?);
     headers.insert("Content-Type", HeaderValue::from_static("application/x-www-form-urlencoded"));
     headers.insert("X-FB-Friendly-Name", HeaderValue::from_static(POLARIS_ACTION));
 
@@ -427,9 +410,9 @@ async fn gql_request(shortcode: &str) -> Result<(reqwest::header::HeaderMap, Str
         ("__hsi", &hsi),
         ("__dyn", &dyn_value),
         ("__csr", &csr_value),
-        ("__user", "0"),
+        ("__user", &user_id),
         ("__comet_req", &comet_req),
-        ("av", "0"),
+        ("av", &user_id),
         ("dpr", "2"),
         ("lsd", &lsd),
         ("jazoest", &jazoest),

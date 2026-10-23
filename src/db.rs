@@ -53,6 +53,16 @@ pub fn init<P: AsRef<Path>>(app_dir: P) -> Result<()> {
         [],
     )?;
 
+    // The downloads lists: each download's record as JSON (see
+    // downloads::Saved), so new fields don't need migrations.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS download_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            data TEXT NOT NULL
+        )",
+        [],
+    )?;
+
     let _ = DB_CONNECTION.set(Mutex::new(conn));
     Ok(())
 }
@@ -132,5 +142,37 @@ pub fn raw_download_path() -> Option<String> {
             Some(row) => Some(row.get(0)?),
             None => None,
         })
+    })
+}
+
+/// Saves a new download's record; returns its id (0 if the database isn't
+/// open).
+pub fn insert_download(data: &str) -> i64 {
+    with_conn(|conn| {
+        conn.execute("INSERT INTO download_items (data) VALUES (?1)", params![data])?;
+        Ok(conn.last_insert_rowid())
+    })
+}
+
+pub fn update_download(id: i64, data: &str) {
+    with_conn(|conn| {
+        conn.execute("UPDATE download_items SET data = ?2 WHERE id = ?1", params![id, data])?;
+        Ok(())
+    })
+}
+
+pub fn delete_download(id: i64) {
+    with_conn(|conn| {
+        conn.execute("DELETE FROM download_items WHERE id = ?1", params![id])?;
+        Ok(())
+    })
+}
+
+/// Every download's (id, record), oldest first.
+pub fn downloads() -> Vec<(i64, String)> {
+    with_conn(|conn| {
+        let mut stmt = conn.prepare("SELECT id, data FROM download_items ORDER BY id")?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?.collect::<Result<Vec<(i64, String)>>>()?;
+        Ok(rows)
     })
 }

@@ -2,6 +2,12 @@ import { SettingsTab } from "Enums.slint";
 import { Sidebar } from "Sidebar.slint";
 import { GeneralSettings } from "pages/GeneralSettings.slint";
 import { DownloadSettings } from "pages/DownloadSettings.slint";
+import { PackageSettings } from "pages/PackageSettings.slint";
+import { AdvancedSettings } from "pages/AdvancedSettings.slint";
+import { BookSettings } from "pages/BookSettings.slint";
+import { DownloadingSettings } from "pages/DownloadingSettings.slint";
+import { CookiesSettings } from "pages/CookiesSettings.slint";
+import { AboutSettings } from "pages/AboutSettings.slint";
 import { AppSettings } from "../globals/AppSettings.slint";
 import { ThemeSettings } from "../themes/theme.slint"; 
 import { AppearanceSettings } from "pages/AppearanceSettings.slint";
@@ -24,12 +30,29 @@ export component SettingsPage inherits Rectangle {
     out property <bool> appearance_tab_is_active: root.active_tab == SettingsTab.Appearance;
     out property <bool> general_tab_is_active: root.active_tab == SettingsTab.General;
     out property <bool> download_tab_is_active: root.active_tab == SettingsTab.Download;
-    // Opening the Downloads settings looks for yt-dlp package updates.
-    changed download_tab_is_active => {
-        if (self.download_tab_is_active) {
+    out property <bool> packages_tab_is_active: root.active_tab == SettingsTab.Packages;
+    // Opening the yt-dlp packages page looks for package updates.
+    changed packages_tab_is_active => {
+        if (self.packages_tab_is_active) {
             AppSettings.helpers_check();
         }
     }
+    out property <bool> advanced_tab_is_active: root.active_tab == SettingsTab.Advanced;
+    out property <bool> about_tab_is_active: root.active_tab == SettingsTab.About;
+    out property <bool> books_tab_is_active: root.active_tab == SettingsTab.Books;
+    out property <bool> downloading_tab_is_active: root.active_tab == SettingsTab.Downloading;
+    out property <bool> cookies_tab_is_active: root.active_tab == SettingsTab.Cookies;
+    // Room the on-screen keyboard takes (the Cookies page's editor stays above it).
+    in property <length> keyboard_height: 0px;
+    // Inner pages of Downloads, which Back returns to.
+    private property <bool> inner_download_page: root.packages_tab_is_active || root.books_tab_is_active || root.downloading_tab_is_active || root.cookies_tab_is_active;
+    // Opening Advanced measures the download cache.
+    changed advanced_tab_is_active => {
+        if (self.advanced_tab_is_active) {
+            AppSettings.cache_refresh();
+        }
+    }
+    private property <string> packages_title: AppSettings.is_mobile ? @tr("yt-dlp packages") : @tr("Media tools");
 
     callback back_pressed();
 
@@ -48,8 +71,10 @@ export component SettingsPage inherits Rectangle {
             appearance_page.dismiss_popup();
         } else if (general_page.popup_open) {
             general_page.dismiss_popup();
-        } else if (download_page.popup_open) {
-            download_page.dismiss_popup();
+        } else if (packages_page.popup_open) {
+            packages_page.dismiss_popup();
+        } else if (root.inner_download_page) {
+            root.active_tab = SettingsTab.Download;
         } else if (!root.no_active_tab) {
             root.active_tab = SettingsTab.InActive;
         } else {
@@ -62,7 +87,13 @@ export component SettingsPage inherits Rectangle {
     private property <bool> page_scrolled:
         root.appearance_tab_is_active ? appearance_page.scrolled : (
         root.general_tab_is_active ? general_page.scrolled : (
-        root.download_tab_is_active ? download_page.scrolled : false));
+        root.download_tab_is_active ? download_page.scrolled : (
+        root.packages_tab_is_active ? packages_page.scrolled : (
+        root.advanced_tab_is_active ? advanced_page.scrolled : (
+        root.about_tab_is_active ? about_page.scrolled : (
+        root.books_tab_is_active ? books_page.scrolled : (
+        root.downloading_tab_is_active ? downloading_page.scrolled : (
+        root.cookies_tab_is_active ? cookies_page.scrolled : false))))))));
     private property <bool> sidebar_scrolled: sidebar.scrolled;
     private property <bool> left_header_tinted: root.is_landscape ? root.sidebar_scrolled : (root.no_active_tab ? root.sidebar_scrolled : root.page_scrolled);
     private property <bool> right_header_tinted: root.page_scrolled;
@@ -105,8 +136,10 @@ export component SettingsPage inherits Rectangle {
         z: 10;
     }
 
-    // Absolute positioned horizontal divider
+    // Absolute positioned horizontal divider (landscape: portrait's header
+    // is set apart by its tint once scrolled)
     Rectangle {
+        visible: root.is_landscape;
         height: 1px;
         width: root.is_landscape ? Math.max(12px, root.safe_area_left) + 260px : parent.width;
         x: 0px;
@@ -143,7 +176,7 @@ export component SettingsPage inherits Rectangle {
                     background: back_ta.has-hover ? ThemeSettings.hover_color : transparent;
 
                     Image {
-                        source: @image-url("../icons/arrow_back.svg");
+                        source: @image-url("../icons/rounded/arrow_back.svg");
                         width: 24px;
                         height: 24px;
                         colorize: root.text_color;
@@ -159,7 +192,10 @@ export component SettingsPage inherits Rectangle {
                 Text {
                     text: root.is_landscape ? @tr("Settings") : (
                         root.general_tab_is_active ? @tr("General") : (
-                        root.download_tab_is_active ? @tr("Downloads") : root.appearance_tab_is_active ? @tr("Appearance") : @tr("Settings")));
+                        root.download_tab_is_active ? @tr("Downloads") : root.packages_tab_is_active ? root.packages_title
+                        : root.advanced_tab_is_active ? @tr("Advanced") : root.about_tab_is_active ? @tr("About") : root.books_tab_is_active ? @tr("Books")
+                        : root.downloading_tab_is_active ? @tr("Downloading") : root.cookies_tab_is_active ? @tr("Cookies")
+                        : root.appearance_tab_is_active ? @tr("Appearance") : @tr("Settings")));
                     font-size: 22px;
                     font-weight: 700;
                     color: root.text_color;
@@ -182,7 +218,10 @@ export component SettingsPage inherits Rectangle {
 
                     Text {
                         text: root.general_tab_is_active ? @tr("General") : (
-                            root.download_tab_is_active ? @tr("Downloads") : root.appearance_tab_is_active ? @tr("Appearance") : "");
+                            root.download_tab_is_active ? @tr("Downloads") : root.packages_tab_is_active ? root.packages_title
+                            : root.advanced_tab_is_active ? @tr("Advanced") : root.about_tab_is_active ? @tr("About") : root.books_tab_is_active ? @tr("Books")
+                            : root.downloading_tab_is_active ? @tr("Downloading") : root.cookies_tab_is_active ? @tr("Cookies")
+                            : root.appearance_tab_is_active ? @tr("Appearance") : "");
                         font-size: 22px;
                         font-weight: 700;
                         color: root.text_color;
@@ -296,7 +335,8 @@ export component SettingsPage inherits Rectangle {
                     width: 100%;
                     height: 100%;
 
-                    x: root.download_tab_is_active ? 0px : parent.width;
+                    // Slides off to the left when its packages page opens.
+                    x: root.download_tab_is_active ? 0px : (root.inner_download_page ? -parent.width : parent.width);
                     opacity: root.download_tab_is_active ? 1.0 : 0.0;
 
                     animate x {
@@ -317,9 +357,195 @@ export component SettingsPage inherits Rectangle {
                             horizontal-stretch: 1;
                             height: 100%;
                             text_color: root.text_color;
+                            open_packages => { root.active_tab = SettingsTab.Packages; }
+                            open_books => { root.active_tab = SettingsTab.Books; }
+                            open_downloading => { root.active_tab = SettingsTab.Downloading; }
+                            open_cookies => { root.active_tab = SettingsTab.Cookies; }
+                        }
+                    }
+                }
+
+                // yt-dlp Packages Page Wrapper (inner page of Downloads)
+                Rectangle {
+                    width: 100%;
+                    height: 100%;
+
+                    x: root.packages_tab_is_active ? 0px : parent.width;
+                    opacity: root.packages_tab_is_active ? 1.0 : 0.0;
+
+                    animate x {
+                        duration: 300ms;
+                        easing: ease-out;
+                    }
+                    animate opacity {
+                        duration: 200ms;
+                        easing: ease-out-quad;
+                    }
+
+                    HorizontalLayout {
+                        padding-left: root.is_landscape ? 12px : 0px;
+                        width: 100%;
+                        height: 100%;
+
+                        packages_page := PackageSettings {
+                            horizontal-stretch: 1;
+                            height: 100%;
+                            text_color: root.text_color;
                             window_width: root.width;
                             window_height: root.height;
                             popup_back_pressed => { root.navigate_back(); }
+                        }
+                    }
+                }
+
+                // Books Page Wrapper (inner page of Downloads)
+                Rectangle {
+                    width: 100%;
+                    height: 100%;
+
+                    x: root.books_tab_is_active ? 0px : parent.width;
+                    opacity: root.books_tab_is_active ? 1.0 : 0.0;
+
+                    animate x {
+                        duration: 300ms;
+                        easing: ease-out;
+                    }
+                    animate opacity {
+                        duration: 200ms;
+                        easing: ease-out-quad;
+                    }
+
+                    HorizontalLayout {
+                        padding-left: root.is_landscape ? 12px : 0px;
+                        width: 100%;
+                        height: 100%;
+
+                        books_page := BookSettings {
+                            horizontal-stretch: 1;
+                            height: 100%;
+                            text_color: root.text_color;
+                        }
+                    }
+                }
+
+                // Downloading Page Wrapper (inner page of Downloads)
+                Rectangle {
+                    width: 100%;
+                    height: 100%;
+
+                    x: root.downloading_tab_is_active ? 0px : parent.width;
+                    opacity: root.downloading_tab_is_active ? 1.0 : 0.0;
+
+                    animate x {
+                        duration: 300ms;
+                        easing: ease-out;
+                    }
+                    animate opacity {
+                        duration: 200ms;
+                        easing: ease-out-quad;
+                    }
+
+                    HorizontalLayout {
+                        padding-left: root.is_landscape ? 12px : 0px;
+                        width: 100%;
+                        height: 100%;
+
+                        downloading_page := DownloadingSettings {
+                            horizontal-stretch: 1;
+                            height: 100%;
+                            text_color: root.text_color;
+                        }
+                    }
+                }
+
+                // Cookies Page Wrapper (inner page of Downloads)
+                Rectangle {
+                    width: 100%;
+                    height: 100%;
+
+                    x: root.cookies_tab_is_active ? 0px : parent.width;
+                    opacity: root.cookies_tab_is_active ? 1.0 : 0.0;
+
+                    animate x {
+                        duration: 300ms;
+                        easing: ease-out;
+                    }
+                    animate opacity {
+                        duration: 200ms;
+                        easing: ease-out-quad;
+                    }
+
+                    HorizontalLayout {
+                        padding-left: root.is_landscape ? 12px : 0px;
+                        width: 100%;
+                        height: 100%;
+
+                        cookies_page := CookiesSettings {
+                            horizontal-stretch: 1;
+                            height: 100%;
+                            text_color: root.text_color;
+                            // The page ends above the window's bottom padding.
+                            keyboard_height: Math.max(0px, root.keyboard_height - Math.max(12px, root.safe_area_bottom));
+                        }
+                    }
+                }
+
+                // Advanced Settings Page Wrapper
+                Rectangle {
+                    width: 100%;
+                    height: 100%;
+
+                    x: root.advanced_tab_is_active ? 0px : parent.width;
+                    opacity: root.advanced_tab_is_active ? 1.0 : 0.0;
+
+                    animate x {
+                        duration: 300ms;
+                        easing: ease-out;
+                    }
+                    animate opacity {
+                        duration: 200ms;
+                        easing: ease-out-quad;
+                    }
+
+                    HorizontalLayout {
+                        padding-left: root.is_landscape ? 12px : 0px;
+                        width: 100%;
+                        height: 100%;
+
+                        advanced_page := AdvancedSettings {
+                            horizontal-stretch: 1;
+                            height: 100%;
+                            text_color: root.text_color;
+                        }
+                    }
+                }
+
+                // About Page Wrapper
+                Rectangle {
+                    width: 100%;
+                    height: 100%;
+
+                    x: root.about_tab_is_active ? 0px : parent.width;
+                    opacity: root.about_tab_is_active ? 1.0 : 0.0;
+
+                    animate x {
+                        duration: 300ms;
+                        easing: ease-out;
+                    }
+                    animate opacity {
+                        duration: 200ms;
+                        easing: ease-out-quad;
+                    }
+
+                    HorizontalLayout {
+                        padding-left: root.is_landscape ? 12px : 0px;
+                        width: 100%;
+                        height: 100%;
+
+                        about_page := AboutSettings {
+                            horizontal-stretch: 1;
+                            height: 100%;
+                            text_color: root.text_color;
                         }
                     }
                 }

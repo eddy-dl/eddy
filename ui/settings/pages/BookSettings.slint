@@ -1,0 +1,80 @@
+import { Note } from "../../components/Note.slint";
+import { AppSettings } from "../../globals/AppSettings.slint";
+import { SwitchRow } from "../../components/SwitchRow.slint";
+import { SettingsCard, SettingsLayout } from "../SettingsCard.slint";
+
+// Settings → Downloads → Books: how web novels are saved unless the preview
+// says otherwise.
+export component BookSettings inherits Rectangle {
+    in property <color> text_color: #FFFFFF;
+    // True once the content has scrolled away from the top; tints the settings header.
+    out property <bool> scrolled: scroller.content-y < 0;
+
+    TouchArea { }
+
+    scroller := Flickable {
+        width: 100%;
+        height: 100%;
+        content-height: books_layout.preferred-height;
+
+        books_layout := VerticalLayout {
+            spacing: SettingsLayout.spacing;
+            alignment: start;
+            padding-left: SettingsLayout.side;
+            padding-right: SettingsLayout.side;
+            padding-top: 8px;
+            // Room under the last item, so it doesn't end at the edge.
+            padding-bottom: 24px;
+
+            SwitchRow {
+                title: @tr("Author notes");
+                first: true;
+                last: false;
+                subtitle: @tr("The author's notes before or after a chapter.");
+                text_color: root.text_color;
+                checked <=> AppSettings.novel_author_notes;
+                toggled => { AppSettings.preferences_changed(); }
+            }
+            SwitchRow {
+                title: @tr("Images");
+                first: false;
+                last: false;
+                subtitle: @tr("Pictures in chapters. Without them, books are smaller.");
+                text_color: root.text_color;
+                checked <=> AppSettings.novel_images;
+                toggled => { AppSettings.preferences_changed(); }
+            }
+            SwitchRow {
+                title: @tr("Images in author notes");
+                first: false;
+                last: false;
+                subtitle: @tr("Banners and buttons in the notes, usually not worth keeping.");
+                text_color: root.text_color;
+                enabled: AppSettings.novel_images && AppSettings.novel_author_notes;
+                checked <=> AppSettings.novel_author_note_images;
+                toggled => { AppSettings.preferences_changed(); }
+            }
+            SwitchRow {
+                title: @tr("Small images");
+                first: false;
+                last: true;
+                subtitle: @tr("Asks for smaller versions where the site has them. Animated GIFs are saved as a still either way, as e-book apps don't play them.");
+                text_color: root.text_color;
+                enabled: AppSettings.novel_images;
+                checked <=> AppSettings.novel_small_images;
+                toggled => { AppSettings.preferences_changed(); }
+            }
+
+            // Lined up with the rows' text.
+            VerticalLayout {
+                padding-left: SettingsLayout.inset;
+                padding-right: SettingsLayout.inset;
+                padding-top: 8px;
+                Note {
+                    text: @tr("Books are saved as EPUB, read by most e-book apps.");
+                    text_color: root.text_color;
+                }
+            }
+        }
+    }
+}

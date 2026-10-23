@@ -1,5 +1,6 @@
 # Rust
 /target/
+/patches/aria2_rust/target/
 
 # Android build output (Gradle, and the Rust library copied in by copyRustLibs)
 /platforms/android/.gradle/

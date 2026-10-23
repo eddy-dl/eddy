@@ -12,6 +12,10 @@ pub fn system_accent() -> Option<slint::Color> {
     None
 }
 
+pub fn system_second_accent() -> Option<slint::Color> {
+    None
+}
+
 pub fn get_default_download_location() -> String {
     String::from("Documents")
 }
@@ -29,11 +33,23 @@ where
 {
 }
 
+pub fn pick_cookies_file<F>(_on_picked: F)
+where
+    F: FnOnce(String, String) + Send + 'static,
+{
+}
+
 pub fn start_download(_request: &crate::downloader::DownloadRequest) -> Result<(), String> {
     Err("Downloads aren't supported on iOS yet".to_string())
 }
 
 pub fn open_file(_path: &str) {}
+
+pub fn open_url(_url: &str) {}
+
+pub fn delete_document(_uri: &str) {}
+
+pub fn share(_files: &[String], _text: &str) {}
 
 pub fn has_all_files_access() -> bool {
     false
@@ -46,7 +62,7 @@ pub fn get_app_data_dir() -> String {
 }
 
 pub fn open_native_url(_url: &str) {}
-pub fn trigger_haptic() {}
+pub fn trigger_haptic(_: super::Haptic) {}
 pub fn show_toast(_: &str) {}
 pub fn set_bar_icons_dark(_: bool) {}
 
@@ -79,3 +95,8 @@ pub fn ytdlp_ready() -> bool {
     false
 }
 
+/// Where Eddy would keep its own yt-dlp (Android's; desktop installs its
+/// tools through components_desktop instead).
+pub fn own_ytdlp() -> std::path::PathBuf {
+    std::path::PathBuf::from(get_app_data_dir()).join("yt-dlp")
+}

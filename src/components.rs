@@ -17,6 +17,14 @@ const RELEASES_URL: &str = "https://api.github.com/repos/deniscerri/ytdlnis-pack
 /// The helpers, in the order Settings lists them: (key, release tag prefix).
 const PACKAGES: [(&str, &str); 3] = [("python", "python-"), ("ffmpeg", "ffmpeg-"), ("deno", "deno-")];
 
+/// yt-dlp itself, kept up to date apart from the Python package (which
+/// bundles whatever was current when it was built): one file, run by the
+/// package's Python, so no installer.
+const YTDLP_RELEASE_URL: &str = "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest";
+
+/// The yt-dlp in use's version (None until asked; "" if it couldn't say).
+static YTDLP_VERSION: Mutex<Option<String>> = Mutex::new(None);
+
 /// A package's newest release build for this device.
 #[derive(Clone, Debug)]
 struct Release {
@@ -143,9 +151,40 @@ fn refresh() {
         })
         .collect();
 
+    let mut rows = rows;
+    // yt-dlp's own row, once Python's there to run it.
+    if installed.contains_key("python") {
+        let version = YTDLP_VERSION.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let release = match &releases {
+            Some(Ok(map)) => map.get("ytdlp").cloned(),
+            _ => None,
+        };
+        let state = match (in_progress.get("ytdlp"), &version, &release, &releases) {
+            (Some(p), ..) => (4, *p),
+            (None, None, ..) | (None, _, None, None) => (0, 0.0),
+            // None yet (newer Python packages don't carry it): Get.
+            (None, Some(v), _, _) if v.is_empty() => (1, 0.0),
+            (None, Some(v), Some(r), _) if r.version.as_str() > v.as_str() => (3, 0.0),
+            (None, Some(_), _, _) => (2, 0.0),
+        };
+        rows.insert(
+            1,
+            HelperPackage {
+                key: "ytdlp".into(),
+                installed: version.unwrap_or_default().into(),
+                latest: release.as_ref().map(|r| r.version.clone()).unwrap_or_default().into(),
+                size: release.as_ref().map(|r| crate::links::format_size(r.size)).unwrap_or_default().into(),
+                state: state.0,
+                progress: state.1,
+            },
+        );
+    }
+
     UI.with(|u| {
         if let Some(ui) = u.borrow().as_ref().and_then(|w| w.upgrade()) {
             ui.global::<AppSettings>().set_helper_packages(ModelRc::new(VecModel::from(rows)));
+            // yt-dlp may have just arrived (or gone).
+            ui.global::<crate::Links>().set_ytdlp_available(crate::platform::ytdlp_ready());
         }
     });
 }
@@ -166,6 +205,16 @@ fn check() {
         *at = Some(std::time::Instant::now());
     }
     let abi = crate::platform::helper_apps().map(|(_, abi)| abi).unwrap_or_default();
+    ask_ytdlp_version();
+    // A yt-dlp from before the plugin came along gets it now.
+    let own = crate::platform::own_ytdlp();
+    if let Some(dir) = own.parent().map(std::path::Path::to_path_buf).filter(|d| own.is_file() && !crate::ytdlp_plugin::installed(d)) {
+        crate::downloader::runtime().spawn(async move {
+            if let Err(e) = crate::ytdlp_plugin::install(&dir).await {
+                log::warn!(target: "ytdlp", "couldn't install the yt-dlp community plugin: {e}");
+            }
+        });
+    }
     crate::downloader::runtime().spawn(async move {
         let result = fetch_releases(&abi).await;
         if let Err(e) = &result {
@@ -213,7 +262,72 @@ async fn fetch_releases(abi: &str) -> Result<HashMap<String, Release>, String> {
             );
         }
     }
+    // yt-dlp's latest release (its one-file build).
+    if let Ok(latest) = crate::extractors::http::client()
+        .get(YTDLP_RELEASE_URL)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+    {
+        if let Some(release) = latest.text().await.ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) {
+            let asset = release["assets"].as_array().into_iter().flatten().find(|a| a["name"] == "yt-dlp");
+            if let Some(asset) = asset {
+                found.insert(
+                    "ytdlp".to_string(),
+                    Release {
+                        version: release["tag_name"].as_str().unwrap_or_default().to_string(),
+                        url: asset["browser_download_url"].as_str().unwrap_or_default().to_string(),
+                        size: asset["size"].as_u64().unwrap_or(0),
+                    },
+                );
+            }
+        }
+    }
     Ok(found)
+}
+
+/// Asks the yt-dlp in use for its version (in the background: Python takes
+/// a moment to start), then shows it.
+fn ask_ytdlp_version() {
+    std::thread::spawn(|| {
+        let version = crate::platform::ytdlp_command()
+            .and_then(|mut c| c.arg("--version").output().ok())
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default();
+        *YTDLP_VERSION.lock().unwrap_or_else(|e| e.into_inner()) = Some(version);
+        let _ = slint::invoke_from_event_loop(refresh);
+    });
+}
+
+/// Downloads the latest yt-dlp into Eddy's folder (it's used from then on).
+fn update_ytdlp(release: Release) {
+    set_downloading("ytdlp", Some(0.0));
+    refresh();
+    crate::downloader::runtime().spawn(async move {
+        let own = crate::platform::own_ytdlp();
+        let dir = own.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+        let result = crate::downloader::fetch_file(&release.url, &dir, "yt-dlp", |done, total| {
+            let total = if total > 0 { total } else { release.size.max(1) };
+            set_downloading("ytdlp", Some(done as f32 / total as f32));
+            let _ = slint::invoke_from_event_loop(refresh);
+        })
+        .await;
+        // And the community plugin (more sites, image ones especially).
+        if result.is_ok() {
+            if let Err(e) = crate::ytdlp_plugin::install(&dir).await {
+                log::warn!(target: "ytdlp", "couldn't install the yt-dlp community plugin: {e}");
+            }
+        }
+        set_downloading("ytdlp", None);
+        if let Err(e) = &result {
+            log::error!(target: "ytdlp", "couldn't update yt-dlp: {e}");
+            let message = format!("Couldn't update yt-dlp: {e}");
+            let _ = slint::invoke_from_event_loop(move || crate::platform::show_toast(&message));
+        }
+        ask_ytdlp_version();
+    });
 }
 
 /// Downloads a package's APK (the user confirmed), then opens the installer.
@@ -225,6 +339,10 @@ fn download(key: String) {
     let Some(release) = release else {
         return;
     };
+    if key == "ytdlp" {
+        update_ytdlp(release);
+        return;
+    }
     if is_cached(&key, &release) {
         install_cached(&key);
         return;
@@ -255,7 +373,6 @@ fn download(key: String) {
 }
 
 async fn fetch_apk(key: &str, release: &Release) -> Result<PathBuf, String> {
-    use tokio::io::AsyncWriteExt;
     let dir = apk_dir();
     tokio::fs::create_dir_all(&dir).await.map_err(|e| e.to_string())?;
     // Older downloads of this package go.
@@ -268,31 +385,20 @@ async fn fetch_apk(key: &str, release: &Release) -> Result<PathBuf, String> {
     }
 
     let path = apk_path(key, release);
-    let partial = path.with_extension("part");
-    let mut response = crate::extractors::http::client()
-        .get(&release.url)
-        .send()
-        .await
-        .and_then(|r| r.error_for_status())
-        .map_err(|e| e.to_string())?;
-    let total = response.content_length().unwrap_or(release.size).max(1);
-    let mut file = tokio::fs::File::create(&partial).await.map_err(|e| e.to_string())?;
-    let (mut done, mut shown) = (0u64, 0u32);
-    while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
-        file.write_all(&chunk).await.map_err(|e| e.to_string())?;
-        done += chunk.len() as u64;
+    let out = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    // With aria2: several connections, and it retries.
+    let shown = std::sync::atomic::AtomicU32::new(0);
+    crate::downloader::fetch_file(&release.url, &dir, &out, |done, total| {
+        let total = if total > 0 { total } else { release.size.max(1) };
         // Redraw the row once per percent.
         let percent = (done * 100 / total) as u32;
-        if percent != shown {
-            shown = percent;
+        if shown.swap(percent, std::sync::atomic::Ordering::Relaxed) != percent {
             set_downloading(key, Some(done as f32 / total as f32));
             let _ = slint::invoke_from_event_loop(refresh);
         }
-    }
-    file.flush().await.map_err(|e| e.to_string())?;
-    drop(file);
-    tokio::fs::rename(&partial, &path).await.map_err(|e| e.to_string())?;
-    Ok(path)
+    })
+    .await
+    .map(|_| path)
 }
 
 /// Opens the installer for an already downloaded APK.

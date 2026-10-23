@@ -1,9 +1,14 @@
-import { LineEdit, Spinner } from "std-widgets.slint";
+import { TextField } from "TextField.slint";
+import { CircularProgress } from "CircularProgress.slint";
 import { ThemeSettings } from "../themes/theme.slint";
+import { HoldTouchArea } from "HoldHint.slint";
 import { FileTypeIcon } from "FileTypeIcon.slint";
 import { ActionButton } from "Buttons.slint";
+import { SwitchRow } from "SwitchRow.slint";
+import { DownloadOptionsEditor } from "DownloadOptionsEditor.slint";
+import { AppSettings } from "../globals/AppSettings.slint";
 import { Chip, SectionLabel } from "Chips.slint";
-import { LinkBackend, LinkFormat, Links, PendingLink, ProbeState, TorrentFile } from "../globals/Links.slint";
+import { LinkBackend, LinkFormat, LinkOptions, Links, PendingLink, ProbeState, TorrentFile } from "../globals/Links.slint";
 
 // One quality option for a yt-dlp link: radio dot, label, detail on the right.
 component FormatRow inherits Rectangle {
@@ -11,8 +16,9 @@ component FormatRow inherits Rectangle {
     in property <bool> selected;
     callback clicked();
 
-    height: 44px;
-    border-radius: 8px;
+    // MD3's minimum touch target (compact for a list).
+    height: 48px;
+    border-radius: 16px;
     background: ta.pressed ? ThemeSettings.text_color.transparentize(92%) : transparent;
 
     HorizontalLayout {
@@ -66,14 +72,31 @@ component FormatRow inherits Rectangle {
     }
 }
 
-// One file inside a torrent: checkbox, path, size. Tapping toggles it.
+// One of several files (a torrent's, or a post's / playlist's items):
+// checkbox, thumbnail, name, size, and for a video whether it's saved as
+// audio. Tapping toggles it.
 component FileRow inherits Rectangle {
     in property <TorrentFile> file;
     callback clicked();
+    // A video item's Audio toggle (it doesn't change the selection).
+    callback audio_toggled();
+    // Its thumbnail tapped: it's shown big.
+    callback thumbnail_tapped();
+    // Held: a media item's own quality is picked.
+    callback held();
 
-    height: 40px;
-    border-radius: 8px;
+    private property <bool> has_thumbnail: root.file.thumbnail.width > 0;
+
+    // MD3's minimum touch target (compact for a list); taller with a
+    // thumbnail.
+    height: root.has_thumbnail ? 56px : 48px;
+    border-radius: 16px;
     background: ta.pressed ? ThemeSettings.text_color.transparentize(92%) : transparent;
+
+    ta := HoldTouchArea {
+        tapped => { root.clicked(); }
+        held => { root.held(); }
+    }
 
     HorizontalLayout {
         padding-left: 8px;
@@ -82,29 +105,46 @@ component FileRow inherits Rectangle {
 
         VerticalLayout {
             alignment: center;
+            // MD3 checkbox: 18 with 2 corners, outlined in on-surface-variant,
+            // or filled with the primary colour and a check.
             Rectangle {
-                width: 20px;
-                height: 20px;
-                border-radius: 5px;
+                width: 18px;
+                height: 18px;
+                border-radius: 2px;
                 border-width: root.file.selected ? 0px : 2px;
-                border-color: ThemeSettings.text_color.transparentize(50%);
+                border-color: ThemeSettings.text_color.transparentize(30%);
                 background: root.file.selected ? ThemeSettings.primary_accent : transparent;
                 animate background { duration: 150ms; }
 
-                Path {
-                    width: 14px;
-                    height: 14px;
+                Image {
+                    source: @image-url("../icons/rounded/check.svg");
+                    width: 16px;
+                    height: 16px;
                     x: (parent.width - self.width) / 2;
                     y: (parent.height - self.height) / 2;
-                    viewbox-width: 24;
-                    viewbox-height: 24;
-                    stroke: #ffffff;
-                    stroke-width: 3px;
-                    stroke-line-cap: round;
-                    stroke-line-join: round;
-                    fill: transparent;
-                    commands: "M5 12.5l4.5 4.5l9.5 -10";
+                    colorize: #ffffff;
                     opacity: root.file.selected ? 1 : 0;
+                }
+            }
+        }
+
+        if root.has_thumbnail: VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 44px;
+                height: 44px;
+                border-radius: 8px;
+                clip: true;
+                background: ThemeSettings.text_color.transparentize(92%);
+                opacity: root.file.selected ? 1.0 : 0.5;
+                Image {
+                    width: 100%;
+                    height: 100%;
+                    source: root.file.thumbnail;
+                    image-fit: cover;
+                }
+                TouchArea {
+                    clicked => { root.thumbnail_tapped(); }
                 }
             }
         }
@@ -124,10 +164,31 @@ component FileRow inherits Rectangle {
             color: ThemeSettings.text_color.transparentize(35%);
             vertical-alignment: center;
         }
-    }
 
-    ta := TouchArea {
-        clicked => { root.clicked(); }
+        // Videos: kept as video, or saved as just their audio.
+        if root.file.kind == 1: VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: audio_label.preferred-width + 20px;
+                height: 28px;
+                border-radius: 14px;
+                border-width: root.file.as_audio ? 0px : 1px;
+                border-color: ThemeSettings.text_color.transparentize(70%);
+                background: root.file.as_audio ? ThemeSettings.secondary_container : transparent;
+                animate background { duration: 150ms; }
+                audio_label := Text {
+                    text: root.file.as_audio ? @tr("Audio") : @tr("Video");
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: root.file.as_audio ? ThemeSettings.on_secondary_container : ThemeSettings.text_color;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+                TouchArea {
+                    clicked => { root.audio_toggled(); }
+                }
+            }
+        }
     }
 }
 
@@ -143,20 +204,60 @@ export component LinkPreviewSheet inherits Rectangle {
     // The height everything needs without scrolling.
     out property <length> content_height: layout.preferred-height + footer.preferred-height;
 
-    callback download(backend: LinkBackend, format: string, filename: string);
+    callback download(backend: LinkBackend, format: string, filename: string, options: LinkOptions);
+    // The window's size, so a thumbnail can be shown over all of it.
+    in property <length> window_width;
+    in property <length> window_height;
     callback skip();
 
     // The user's choices, reset whenever a different link is shown.
     private property <int> backend_index: 0;
     private property <int> format_index: 0;
+    // A mixed playlist's audio items: their bitrate (the video items take
+    // `format_index`).
+    private property <int> audio_index: 0;
+    // The quality and bitrate chosen, for the items' sizes (Rust works them
+    // out per item): told whenever either changes, or the items arrive.
+    private property <string> video_choice: root.link.formats.length == 0 ? ""
+        : root.link.formats[root.as_audio ? 0 : Math.min(root.format_index, root.link.formats.length - 1)].selector;
+    private property <string> audio_choice: root.as_audio && root.qualities.length > 0
+        ? root.qualities[Math.min(root.format_index, root.qualities.length - 1)].selector
+        : (root.link.audio_formats.length > 0 ? root.link.audio_formats[Math.min(root.audio_index, root.link.audio_formats.length - 1)].selector : "128");
+    private property <string> choices: root.link.id + "|" + root.link.files.length + "|" + root.video_choice + "|" + root.audio_choice;
+    changed choices => {
+        if (root.multi_media) {
+            Links.choose_quality(root.link.id, root.video_choice, root.audio_choice);
+        }
+    }
+    // The item being given its own quality (held), by its place in the list.
+    private property <int> held_item: -1;
     private property <string> filename_text: root.link.filename;
     private property <int> shown_id: root.link.id;
     changed shown_id => {
         root.backend_index = 0;
         root.format_index = 0;
+        root.audio_index = 0;
         root.audio_mode = false;
         root.filename_text = root.link.filename;
         root.name_edited = false;
+        root.reset_book();
+        root.reset_options();
+    }
+
+    // This download's options, from Settings → Downloads → Downloading.
+    private property <bool> options_open: false;
+    private property <int> opt_speed_kbps;
+    private property <int> opt_connections;
+    private property <int> opt_ua_mode;
+    private property <string> opt_ua_custom;
+    private property <bool> opt_category;
+    function reset_options() {
+        root.options_open = false;
+        root.opt_speed_kbps = AppSettings.dl_speed_kbps;
+        root.opt_connections = AppSettings.dl_connections;
+        root.opt_ua_mode = AppSettings.dl_ua_mode;
+        root.opt_ua_custom = AppSettings.dl_ua_custom;
+        root.opt_category = AppSettings.dl_category_folders;
     }
     // The name arrives once the link has been checked; take it unless the
     // user already typed one.
@@ -168,12 +269,46 @@ export component LinkPreviewSheet inherits Rectangle {
         }
     }
 
+    // Books: the chapter range and options, from the Books defaults once the
+    // link has been checked.
+    private property <bool> is_book: root.backend == LinkBackend.Book;
+    private property <string> book_from: "1";
+    private property <string> book_to: "";
+    private property <bool> book_notes: true;
+    private property <bool> book_images: true;
+    private property <bool> book_note_images: false;
+    private property <bool> book_small_images: false;
+    private property <int> book_chapters: root.link.book_chapters;
+    changed book_chapters => { root.reset_book(); }
+    init => {
+        root.reset_book();
+        root.reset_options();
+    }
+    function reset_book() {
+        root.book_from = "1";
+        root.book_to = root.link.book_chapters > 0 ? "" + root.link.book_chapters : "";
+        root.book_notes = root.link.book_notes;
+        root.book_images = root.link.book_images;
+        root.book_note_images = root.link.book_note_images;
+        root.book_small_images = root.link.book_small_images;
+    }
+    // "book|<from>|<to>|<notes>|<images>|<note images>|<small images>"
+    private property <string> book_format: "book|" + Math.max(1, root.book_from.to-float()) + "|" + Math.max(0, root.book_to.to-float())
+        + "|" + (root.book_notes ? "1" : "0") + "|" + (root.book_images ? "1" : "0")
+        + "|" + (root.book_note_images ? "1" : "0") + "|" + (root.book_small_images ? "1" : "0");
+
     private property <LinkBackend> backend: root.link.backends.length > 0
         ? root.link.backends[Math.min(root.backend_index, root.link.backends.length - 1)] : LinkBackend.Direct;
     // Media links: save a video as it is, or as audio (music is only audio).
     private property <bool> is_media: root.backend == LinkBackend.Media;
     private property <bool> audio_mode: false;
-    private property <bool> as_audio: root.is_media && (root.link.media_kind == 2 || root.audio_mode);
+    // Several items (a playlist, a post): each video is saved as video or
+    // as audio on its own; "Save as" sets them all.
+    private property <bool> multi: root.link.files.length > 1;
+    private property <bool> multi_media: root.is_media && root.multi;
+    private property <bool> all_audio: root.multi_media && root.link.files_selected > 0 && root.link.files_audio == root.link.files_selected;
+    private property <bool> some_audio: root.multi_media && root.link.files_audio > 0 && !root.all_audio;
+    private property <bool> as_audio: root.is_media && (root.link.media_kind == 2 || (root.multi_media ? root.all_audio : root.audio_mode));
     private property <int> codec_index: 0; // 0 = M4A, 1 = MP3
     private property <[LinkFormat]> qualities: root.as_audio ? root.link.audio_formats : root.link.formats;
     private property <bool> show_formats: root.is_media && root.qualities.length > 0;
@@ -190,13 +325,178 @@ export component LinkPreviewSheet inherits Rectangle {
 
     height: Math.min(root.content_height, root.available_height);
     background: ThemeSettings.surface;
+    animate background { duration: ThemeSettings.fade; easing: ease-in-out; }
     border-radius: 16px;
     clip: true;
     drop-shadow-blur: 12px;
     drop-shadow-color: #00000020;
 
+    // Takes the focus off a text field tapped away from (so the keyboard
+    // goes and Back works on the sheet again).
+    park := FocusScope {
+        x: 0;
+        y: 0;
+        width: 0;
+        height: 0;
+    }
+
     // Keeps taps on the sheet's gaps from reaching the backdrop behind it.
-    TouchArea { }
+    TouchArea {
+        clicked => { park.focus(); }
+    }
+
+    // The thumbnail over the whole window; a tap or Back closes it.
+    // One item's own quality (held in the list): its qualities, or as audio
+    // its bitrates, or back to the preview's.
+    private property <TorrentFile> held_file: root.held_item >= 0 && root.held_item < root.link.files.length
+        ? root.link.files[root.held_item] : { index: 0 };
+    quality_popup := PopupWindow {
+        x: (root.width - self.width) / 2;
+        y: Math.max(16px, (root.height - self.height) / 2);
+        width: Math.min(340px, root.width - 32px);
+        close-policy: PopupClosePolicy.close-on-click-outside;
+
+        Rectangle {
+            background: ThemeSettings.surface;
+            border-radius: 28px;
+            drop-shadow-blur: 16px;
+            drop-shadow-color: #00000040;
+        }
+        VerticalLayout {
+            padding: 20px;
+            spacing: 4px;
+            Text {
+                text: root.held_file.as_audio ? @tr("Bitrate for this one") : @tr("Quality for this one");
+                font-size: 16px;
+                font-weight: 700;
+                color: ThemeSettings.text_color;
+            }
+            Text {
+                text: root.held_file.path;
+                font-size: 12px;
+                color: ThemeSettings.text_color.transparentize(35%);
+                overflow: elide;
+            }
+            Rectangle { height: 8px; }
+            FormatRow {
+                format: { label: @tr("Same as the others"), detail: "" };
+                selected: root.held_file.quality == "";
+                clicked => {
+                    Links.set_item_quality(root.link.id, root.held_file.index, "");
+                    quality_popup.close();
+                }
+            }
+            for format in root.held_file.as_audio ? root.held_file.audio_formats : root.held_file.formats: FormatRow {
+                format: format;
+                selected: root.held_file.quality == format.selector;
+                clicked => {
+                    Links.set_item_quality(root.link.id, root.held_file.index, format.selector);
+                    quality_popup.close();
+                }
+            }
+        }
+    }
+
+    // The thumbnails over the whole window: several items' to swipe
+    // through, else the link's own. A tap or Back closes it.
+    private property <bool> gallery_items: root.multi && root.link.files.length > 0 && root.link.files[0].thumbnail.width > 0;
+    private property <int> gallery_count: root.gallery_items ? root.link.files.length : 1;
+    private property <int> gallery_index: 0;
+    function open_gallery(index: int) {
+        root.gallery_index = Math.max(0, Math.min(index, root.gallery_count - 1));
+        image_popup.show();
+    }
+
+    image_popup := PopupWindow {
+        // Popup coordinates are relative to the sheet.
+        x: -root.absolute-position.x;
+        y: -root.absolute-position.y;
+        width: root.window_width;
+        height: root.window_height;
+        // Taps are told from swipes here (see the TouchArea).
+        close-policy: PopupClosePolicy.no-auto-close;
+
+        Rectangle {
+            background: #000000e6;
+        }
+        // A strip of the pictures side by side: it follows the finger, and
+        // on release glides to the next one (or back). Only the one shown
+        // and its neighbours are drawn.
+        private property <length> scroll: -root.gallery_index * self.width + (swipe.pressed ? swipe.mouse-x - swipe.pressed-x : 0px);
+        animate scroll {
+            duration: swipe.pressed ? 0ms : 260ms;
+            easing: ease-out;
+        }
+        if !root.gallery_items: Image {
+            width: 100%;
+            height: 100%;
+            source: root.link.thumbnail;
+            image-fit: contain;
+        }
+        if root.gallery_items: Rectangle {
+            width: 100%;
+            height: 100%;
+            clip: true;
+            for file[i] in root.link.files: Rectangle {
+                x: i * parent.width + image_popup.scroll;
+                width: parent.width;
+                height: parent.height;
+                if Math.abs(i - root.gallery_index) <= 1: Image {
+                    width: 100%;
+                    height: 100%;
+                    source: file.thumbnail;
+                    image-fit: contain;
+                }
+            }
+        }
+        if root.gallery_count > 1: VerticalLayout {
+            // Clear of the navigation bar.
+            y: parent.height - self.preferred-height - 48px;
+            width: parent.width;
+            padding-left: 24px;
+            padding-right: 24px;
+            spacing: 4px;
+            Text {
+                text: (root.gallery_index + 1) + " / " + root.gallery_count;
+                color: #ffffff;
+                font-size: 14px;
+                font-weight: 600;
+                horizontal-alignment: center;
+            }
+            Text {
+                text: root.link.files[root.gallery_index].path;
+                color: #ffffffb0;
+                font-size: 12px;
+                horizontal-alignment: center;
+                overflow: elide;
+            }
+        }
+        swipe := TouchArea {
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.up) {
+                    let moved = self.mouse-x - self.pressed-x;
+                    if (moved < -60px && root.gallery_index < root.gallery_count - 1) {
+                        root.gallery_index += 1;
+                    } else if (moved > 60px && root.gallery_index > 0) {
+                        root.gallery_index -= 1;
+                    } else if (Math.abs(moved / 1px) < 12) {
+                        image_popup.close();
+                    }
+                }
+            }
+        }
+        // The popup holds key focus while open, so Back lands here.
+        FocusScope {
+            init => { self.focus(); }
+            key-pressed(event) => {
+                if (event.text == Key.Back || event.text == Key.Escape) {
+                    image_popup.close();
+                    return accept;
+                }
+                return reject;
+            }
+        }
+    }
 
     // The options scroll when they don't fit; Skip / Download stay put
     // underneath.
@@ -207,10 +507,16 @@ export component LinkPreviewSheet inherits Rectangle {
             // Only scrollable when the content doesn't fit.
             interactive: layout.preferred-height > self.height;
 
+            // Taps between the rows.
+            TouchArea {
+                height: layout.preferred-height;
+                clicked => { park.focus(); }
+            }
+
             layout := VerticalLayout {
                 padding: 16px;
                 padding-bottom: 4px;
-                spacing: 10px;
+                spacing: 12px;
 
                 HorizontalLayout {
                     Text {
@@ -228,7 +534,8 @@ export component LinkPreviewSheet inherits Rectangle {
                     }
                 }
 
-                // A media link's thumbnail, cropped to a banner.
+                // A media link's thumbnail (or a book's cover), cropped to a
+                // banner; tapping shows all of it.
                 if root.link.thumbnail.width > 0: Rectangle {
                     height: Math.min(180px, self.width * 9 / 16);
                     border-radius: 12px;
@@ -239,6 +546,9 @@ export component LinkPreviewSheet inherits Rectangle {
                         height: 100%;
                         source: root.link.thumbnail;
                         image-fit: cover;
+                    }
+                    TouchArea {
+                        clicked => { root.open_gallery(0); }
                     }
                 }
 
@@ -270,14 +580,17 @@ export component LinkPreviewSheet inherits Rectangle {
 
                         HorizontalLayout {
                             spacing: 6px;
-                            if root.link.state == ProbeState.Probing: Spinner {
-                                width: 14px;
-                                height: 14px;
-                                indeterminate: true;
+                            if root.link.state == ProbeState.Probing: VerticalLayout {
+                                alignment: center;
+                                CircularProgress {
+                                    width: 14px;
+                                    height: 14px;
+                                }
                             }
                             Text {
                                 text: root.link.state == ProbeState.Probing ? @tr("Checking link…")
                                     : root.link.state == ProbeState.Failed ? root.link.error
+                                    : root.link.book_chapters > 0 ? root.link.source + " · " + @tr("{n} chapter" | "{n} chapters" % root.link.book_chapters)
                                     : root.link.size != "" ? root.link.source + " · " + root.link.size
                                     : root.link.source + " · " + @tr("Size unknown");
                                 font-size: 12px;
@@ -296,6 +609,7 @@ export component LinkPreviewSheet inherits Rectangle {
                     spacing: 8px;
                     for backend[i] in root.link.backends: Chip {
                         text: backend == LinkBackend.Media ? (root.link.service.is-empty ? @tr("Media") : root.link.service)
+                            : backend == LinkBackend.Book ? (root.link.service.is-empty ? @tr("Book") : root.link.service)
                             : backend == LinkBackend.Torrent ? @tr("Torrent")
                             : @tr("Direct");
                         selected: root.backend == backend;
@@ -306,30 +620,126 @@ export component LinkPreviewSheet inherits Rectangle {
                     }
                 }
 
-                // Videos can be saved as just their audio.
-                if root.is_media && root.link.media_kind == 1: SectionLabel { text: @tr("Save as"); }
+                // Books: which chapters, and how.
+                if root.is_book: HorizontalLayout {
+                    spacing: 8px;
+                    SectionLabel {
+                        text: @tr("Chapters");
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: root.link.book_locked > 0
+                            ? @tr("{} · {} locked, not saved", root.link.book_chapters, root.link.book_locked)
+                            : "" + root.link.book_chapters;
+                        font-size: 12px;
+                        color: ThemeSettings.text_color.transparentize(35%);
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                }
+                // In the library already: downloading updates that copy.
+                if root.is_book && root.link.book_saved_id != 0: Text {
+                    text: root.link.book_new == 0 ? @tr("Saved before · no new chapters")
+                        : @tr("Saved before · {n} new chapter" | "Saved before · {n} new chapters" % root.link.book_new);
+                    font-size: 12px;
+                    color: ThemeSettings.primary_accent;
+                    wrap: word-wrap;
+                }
+                if root.is_book: HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: @tr("From");
+                        font-size: 14px;
+                        color: ThemeSettings.text_color;
+                        vertical-alignment: center;
+                    }
+                    TextField {
+                        text <=> root.book_from;
+                        input-type: InputType.number;
+                        horizontal-stretch: 1;
+                        font-size: 14px;
+                    }
+                    Text {
+                        text: @tr("to");
+                        font-size: 14px;
+                        color: ThemeSettings.text_color;
+                        vertical-alignment: center;
+                    }
+                    TextField {
+                        text <=> root.book_to;
+                        input-type: InputType.number;
+                        horizontal-stretch: 1;
+                        font-size: 14px;
+                    }
+                }
+                if root.is_book: VerticalLayout {
+                    SwitchRow {
+                        compact: true;
+                        title: @tr("Author notes");
+                        checked <=> root.book_notes;
+                    }
+                    SwitchRow {
+                        compact: true;
+                        title: @tr("Images");
+                        checked <=> root.book_images;
+                    }
+                    SwitchRow {
+                        compact: true;
+                        title: @tr("Images in author notes");
+                        enabled: root.book_images && root.book_notes;
+                        checked <=> root.book_note_images;
+                    }
+                    SwitchRow {
+                        compact: true;
+                        title: @tr("Small images");
+                        enabled: root.book_images;
+                        checked <=> root.book_small_images;
+                    }
+                }
+
+                // Videos can be saved as just their audio (several items: all
+                // of them; each can be changed in the list).
+                if root.is_media && root.link.media_kind == 1: HorizontalLayout {
+                    spacing: 8px;
+                    SectionLabel {
+                        text: @tr("Save as");
+                        vertical-alignment: center;
+                    }
+                    if root.some_audio: Text {
+                        text: @tr("{} of {} as audio", root.link.files_audio, root.link.files_selected);
+                        font-size: 12px;
+                        color: ThemeSettings.text_color.transparentize(35%);
+                        vertical-alignment: center;
+                    }
+                }
                 if root.is_media && root.link.media_kind == 1: HorizontalLayout {
                     spacing: 8px;
                     Chip {
                         text: @tr("Video");
-                        selected: !root.audio_mode;
+                        selected: root.multi_media ? root.link.files_audio == 0 : !root.audio_mode;
                         clicked => {
                             root.audio_mode = false;
                             root.format_index = 0;
+                            if (root.multi_media) {
+                                Links.set_all_audio(root.link.id, false);
+                            }
                         }
                     }
                     Chip {
                         text: @tr("Audio");
-                        selected: root.audio_mode;
+                        selected: root.multi_media ? root.all_audio : root.audio_mode;
                         clicked => {
                             root.audio_mode = true;
                             root.format_index = 0;
+                            if (root.multi_media) {
+                                Links.set_all_audio(root.link.id, true);
+                            }
                         }
                     }
                 }
 
-                if root.as_audio: SectionLabel { text: @tr("Audio format"); }
-                if root.as_audio: HorizontalLayout {
+                if root.as_audio || root.some_audio: SectionLabel { text: @tr("Audio format"); }
+                if root.as_audio || root.some_audio: HorizontalLayout {
                     spacing: 8px;
                     Chip {
                         text: "M4A";
@@ -343,13 +753,23 @@ export component LinkPreviewSheet inherits Rectangle {
                     }
                 }
 
-                if root.show_formats: SectionLabel { text: @tr("Quality"); }
+                if root.show_formats: SectionLabel { text: root.some_audio ? @tr("Video quality") : @tr("Quality"); }
 
                 if root.show_formats: VerticalLayout {
                     for format[i] in root.qualities: FormatRow {
                         format: format;
                         selected: root.format_index == i;
                         clicked => { root.format_index = i; }
+                    }
+                }
+
+                // Mixed: the audio items' bitrate too.
+                if root.some_audio && root.link.audio_formats.length > 0: SectionLabel { text: @tr("Audio quality"); }
+                if root.some_audio && root.link.audio_formats.length > 0: VerticalLayout {
+                    for format[i] in root.link.audio_formats: FormatRow {
+                        format: format;
+                        selected: root.audio_index == i;
+                        clicked => { root.audio_index = i; }
                     }
                 }
 
@@ -387,23 +807,35 @@ export component LinkPreviewSheet inherits Rectangle {
                 }
 
                 if root.show_files: VerticalLayout {
-                    for file in root.link.files: FileRow {
+                    for file[i] in root.link.files: FileRow {
                         file: file;
                         clicked => { Links.toggle_file(root.link.id, file.index); }
+                        audio_toggled => { Links.toggle_audio(root.link.id, file.index); }
+                        thumbnail_tapped => { root.open_gallery(i); }
+                        held => {
+                            if (root.is_media && (file.formats.length > 1 || (file.as_audio && file.audio_formats.length > 1))) {
+                                root.held_item = i;
+                                quality_popup.show();
+                            }
+                        }
                     }
                 }
 
-                if root.backend != LinkBackend.Torrent: SectionLabel { text: @tr("File name"); }
+                // Several files: they go in a folder of this name, each
+                // keeping its own. A single torrent file keeps its name.
+                if root.backend != LinkBackend.Torrent || root.multi: SectionLabel {
+                    text: root.show_files ? @tr("Folder name") : @tr("File name");
+                }
 
-                if root.backend != LinkBackend.Torrent: HorizontalLayout {
+                if root.backend != LinkBackend.Torrent || root.multi: HorizontalLayout {
                     spacing: 6px;
-                    LineEdit {
+                    TextField {
                         text <=> root.filename_text;
                         edited => { root.name_edited = true; }
                         horizontal-stretch: 1;
                         font-size: 14px;
                         input-method-hints: { capitalization: CapitalizationMode.none, auto-correct: false, auto-complete: false };
-                        placeholder-text: @tr("Chosen when the download starts");
+                        placeholder-text: root.show_files ? @tr("The playlist's or post's name") : @tr("Chosen when the download starts");
                     }
                     if root.torrent_file_direct: Text {
                         text: ".torrent";
@@ -411,6 +843,47 @@ export component LinkPreviewSheet inherits Rectangle {
                         color: ThemeSettings.text_color.transparentize(35%);
                         vertical-alignment: center;
                     }
+                }
+
+                // This download's speed, connections, user agent, folder.
+                Rectangle {
+                    // MD3 one-line list item.
+                    height: 56px;
+                    border-radius: 16px;
+                    background: ta_options.pressed ? ThemeSettings.text_color.transparentize(92%) : transparent;
+                    ta_options := TouchArea {
+                        clicked => { root.options_open = !root.options_open; }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        SectionLabel {
+                            text: @tr("Download options");
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: (root.opt_speed_kbps > 0 ? Math.round(root.opt_speed_kbps / 102.4) / 10 + " MB/s · " : "")
+                                + @tr("{n} connection" | "{n} connections" % root.opt_connections);
+                            font-size: 12px;
+                            color: ThemeSettings.text_color.transparentize(35%);
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: root.options_open ? "▲" : "▼";
+                            font-size: 12px;
+                            color: ThemeSettings.text_color.transparentize(35%);
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                if root.options_open: DownloadOptionsEditor {
+                    compact: true;
+                    speed_kbps <=> root.opt_speed_kbps;
+                    connections <=> root.opt_connections;
+                    ua_mode <=> root.opt_ua_mode;
+                    ua_custom <=> root.opt_ua_custom;
+                    category <=> root.opt_category;
                 }
 
                 SectionLabel { text: @tr("Save to"); }
@@ -434,17 +907,11 @@ export component LinkPreviewSheet inherits Rectangle {
 
                         VerticalLayout {
                             alignment: center;
-                            Path {
-                                width: 20px;
-                                height: 20px;
-                                viewbox-width: 24;
-                                viewbox-height: 24;
-                                stroke: ThemeSettings.text_color.transparentize(20%);
-                                stroke-width: 2px;
-                                stroke-line-cap: round;
-                                stroke-line-join: round;
-                                fill: transparent;
-                                commands: "M3 7a2 2 0 0 1 2 -2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2H5a2 2 0 0 1 -2 -2z";
+                            Image {
+                                source: @image-url("../icons/rounded/folder.svg");
+                                width: 24px;
+                                height: 24px;
+                                colorize: ThemeSettings.text_color.transparentize(25%);
                             }
                         }
                         Text {
@@ -478,7 +945,7 @@ export component LinkPreviewSheet inherits Rectangle {
                 clicked => { root.skip(); }
             }
             ActionButton {
-                text: @tr("Download");
+                text: root.is_book && root.link.book_saved_id != 0 ? @tr("Update") : @tr("Download");
                 primary: true;
                 horizontal-stretch: 1;
                 height: 48px;
@@ -488,11 +955,25 @@ export component LinkPreviewSheet inherits Rectangle {
                     if (root.can_download) {
                         root.download(root.backend,
                             // Audio: "audio|<kbps>|<codec>"; otherwise the quality's key.
-                            root.as_audio
+                            root.is_book ? root.book_format
+                            // Some items as video, some as audio: the video
+                            // quality, then the audio's ("mix|<quality>|<kbps>|<codec>").
+                            : root.some_audio
+                                ? "mix|" + (root.show_formats ? root.qualities[Math.min(root.format_index, root.qualities.length - 1)].selector : "best")
+                                    + "|" + (root.link.audio_formats.length > 0 ? root.link.audio_formats[Math.min(root.audio_index, root.link.audio_formats.length - 1)].selector : "0")
+                                    + "|" + (root.codec_index == 1 ? "mp3" : "m4a")
+                            : root.as_audio
                                 ? "audio|" + (root.qualities.length > 0 ? root.qualities[Math.min(root.format_index, root.qualities.length - 1)].selector : "0")
                                     + "|" + (root.codec_index == 1 ? "mp3" : "m4a")
                                 : root.show_formats ? root.qualities[Math.min(root.format_index, root.qualities.length - 1)].selector : "",
-                            root.torrent_file_direct && !root.filename_text.is-empty ? root.filename_text + ".torrent" : root.filename_text);
+                            root.torrent_file_direct && !root.filename_text.is-empty ? root.filename_text + ".torrent" : root.filename_text,
+                            {
+                                speed_kbps: root.opt_speed_kbps,
+                                connections: root.opt_connections,
+                                ua_mode: root.opt_ua_mode,
+                                ua_custom: root.opt_ua_custom,
+                                category: root.opt_category,
+                            });
                     }
                 }
             }

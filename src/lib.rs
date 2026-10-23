@@ -1,14 +1,24 @@
+pub mod cache;
+pub mod children;
 pub mod components;
+pub mod cookies;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod components_desktop;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub mod desktop_notify;
 pub mod db;
 pub mod downloader;
+pub mod downloads;
 pub mod extractors;
+pub mod folders;
 pub mod links;
+pub mod logs;
+pub mod novels;
 pub mod platform;
 pub mod preferences;
 pub mod selection;
 pub mod storage;
+pub mod ytdlp_plugin;
 
 slint::include_modules!();
 
@@ -22,14 +32,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 fn android_main(app: AndroidApp) {
-    use android_logger::Config;
-    use log::LevelFilter;
-
-    android_logger::init_once(
-        Config::default()
-            .with_max_level(LevelFilter::Info)
-            .with_tag("eddy"),
-    );
+    logs::init();
 
     log::info!("Starting Slint App on Android");
     platform::init(app.clone());
@@ -52,11 +55,20 @@ fn android_main(app: AndroidApp) {
             return;
         }
     };
+    // Logs that grew too big since last time (in the background).
+    logs::trim();
+    preferences::apply_font(&ui.global::<ThemeSettings>());
     let ui_weak = ui.as_weak();
     let update_system_accent = move || {
         if let Some(ui) = ui_weak.upgrade() {
+            let theme = ui.global::<ThemeSettings>();
             if let Some(accent) = platform::system_accent() {
-                ui.global::<ThemeSettings>().set_system_accent(accent);
+                theme.set_system_accent(accent);
+            }
+            let second = platform::system_second_accent();
+            theme.set_system_has_second(second.is_some());
+            if let Some(second) = second {
+                theme.set_system_second_accent(second);
             }
         }
     };
@@ -120,6 +132,9 @@ fn android_main(app: AndroidApp) {
     });
 
     app_settings.set_is_mobile(true);
+    app_settings.set_app_version(VERSION.into());
+    app_settings.set_slint_version(SLINT_VERSION.into());
+    app_settings.on_open_url(|url| platform::open_url(&url));
     app_settings.set_default_download_path(storage::default_display().into());
     app_settings.set_all_files_access(platform::has_all_files_access());
     app_settings.on_request_all_files_access(platform::request_all_files_access);
@@ -131,7 +146,11 @@ fn android_main(app: AndroidApp) {
     });
     links::install_main(&ui);
     selection::install(&ui);
+    downloads::install(&ui);
+    folders::install(&ui);
     components::install(&ui);
+    cookies::install(&ui);
+    cache::install(&ui);
     ui.run().expect("Failed to run Slint app");
     platform::deinit();
 }
@@ -153,7 +172,10 @@ fn run_share_popup() {
             return;
         }
     };
+    preferences::apply_font(&ui.global::<ThemeSettings>());
     preferences::load_theme(&ui);
+    preferences::apply_download_defaults(&ui.global::<AppSettings>());
+    folders::install(&ui);
     ui.set_mode(mode);
     links::install(&ui);
 
@@ -173,12 +195,6 @@ fn run_share_popup() {
     };
     links::on_empty(close);
     ui.on_close_requested(close);
-    // Heights go over in logical pixels (dp on Android); Kotlin converts
-    // them with the display density, which is right from the start (the
-    // window's scale factor isn't until it's shown).
-    ui.on_resize_requested(platform::set_popup_height);
-    // The first size: `init` runs before the handler above is set.
-    platform::set_popup_height(ui.get_wanted_height());
 
     if let Err(e) = ui.run() {
         log::error!("Share popup failed: {:?}", e);

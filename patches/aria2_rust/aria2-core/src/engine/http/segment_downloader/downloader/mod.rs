@@ -1,0 +1,280 @@
+//! HTTP segment downloader — range requests and streaming download logic.
+//!
+//! Contains the core `HttpSegmentDownloader` struct and its methods for
+//! probing range support, downloading byte ranges (buffered and streaming),
+//! and the `WriteChunk` type used to pipeline data to disk writers.
+
+use crate::constants;
+use crate::engine::http::cookie_helper::CookieHelper;
+use crate::error::{Aria2Error, RecoverableError, Result};
+use crate::http::HttpRequestPolicy;
+use crate::http::auth::{AuthConfigFactory, AuthResolveOptions};
+use crate::http::client_pool::ensure_rustls_provider;
+use crate::http::response_processor::range::parse_content_range_value;
+
+mod range;
+mod streaming;
+
+#[cfg(test)]
+#[path = "tests/mod.rs"]
+mod tests;
+
+#[derive(Debug, Clone)]
+pub(crate) struct RangeProbeResult {
+    pub(crate) supports_range: bool,
+    pub(crate) effective_url: String,
+    pub(crate) total_length: u64,
+    pub(crate) version: Option<reqwest::Version>,
+}
+
+pub struct WriteChunk {
+    pub offset: u64,
+    pub data: bytes::Bytes,
+}
+
+/// Internal failure metadata used by the concurrent scheduler. The public
+/// downloader API continues to expose only the existing `Aria2Error`.
+pub(crate) struct RangeDownloadFailure {
+    pub(crate) error: Aria2Error,
+    pub(crate) explicit_size_rejection: bool,
+    /// The response's Retry-After, for a 429 or 503.
+    pub(crate) retry_after: Option<std::time::Duration>,
+}
+
+/// Longest Retry-After honoured; a longer one is treated as this.
+const MAX_RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Parse Retry-After as delay-seconds or an HTTP date, capped.
+pub(crate) fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<std::time::Duration> {
+    let value = headers.get(reqwest::header::RETRY_AFTER)?.to_str().ok()?.trim();
+    let delay = match value.parse::<u64>() {
+        Ok(seconds) => std::time::Duration::from_secs(seconds),
+        Err(_) => {
+            let at = crate::http::cookie::parsing::parse_http_date(value)?;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()?
+                .as_secs() as i64;
+            std::time::Duration::from_secs(at.saturating_sub(now).max(0) as u64)
+        }
+    };
+    Some(delay.min(MAX_RETRY_AFTER))
+}
+
+impl From<Aria2Error> for RangeDownloadFailure {
+    fn from(error: Aria2Error) -> Self {
+        Self {
+            error,
+            explicit_size_rejection: false,
+            retry_after: None,
+        }
+    }
+}
+
+pub struct HttpSegmentDownloader {
+    pub client: reqwest::Client,
+    request_policy: HttpRequestPolicy,
+    cookie_helper: Option<CookieHelper>,
+    auth_options: Option<AuthResolveOptions>,
+    netrc_path: Option<String>,
+    last_peer_addr: std::sync::Mutex<Option<std::net::SocketAddr>>,
+    last_http_version: std::sync::Mutex<Option<reqwest::Version>>,
+}
+
+/// Validates that a partial response covers exactly the requested byte range.
+fn validate_content_range(
+    response: &reqwest::Response,
+    offset: u64,
+    length: u64,
+    expected_entity_length: u64,
+) -> Result<()> {
+    let Some(value) = response.headers().get(reqwest::header::CONTENT_RANGE) else {
+        return Err(Aria2Error::Recoverable(RecoverableError::CannotResume));
+    };
+    let value = value
+        .to_str()
+        .map_err(|_| Aria2Error::Recoverable(RecoverableError::CannotResume))?;
+    let Some((start, end, total)) = parse_content_range_value(value) else {
+        return Err(Aria2Error::Recoverable(RecoverableError::CannotResume));
+    };
+    if expected_entity_length != 0 && total != expected_entity_length {
+        return Err(Aria2Error::Recoverable(RecoverableError::CannotResume));
+    }
+    let expected_end = offset.saturating_add(length.saturating_sub(1));
+    if start != offset || end != expected_end || end < start {
+        return Err(Aria2Error::Recoverable(RecoverableError::CannotResume));
+    }
+    Ok(())
+}
+
+fn classify_range_status(status: reqwest::StatusCode, range_header: &str) -> Option<Aria2Error> {
+    let status_code = status.as_u16();
+    match status_code {
+        200 => Some(Aria2Error::Recoverable(RecoverableError::CannotResume)),
+        416 => Some(Aria2Error::Recoverable(
+            RecoverableError::RangeNotSatisfiable {
+                range: range_header.to_string(),
+            },
+        )),
+        401 | 407 => Some(Aria2Error::Recoverable(RecoverableError::HttpAuthFailed {
+            message: format!("authentication failed: HTTP {status}"),
+        })),
+        404 => Some(Aria2Error::Recoverable(RecoverableError::ResourceNotFound)),
+        code if code >= 500 || constants::RETRYABLE_HTTP_CODES.contains(&code) => {
+            Some(Aria2Error::Recoverable(RecoverableError::ServerError {
+                code,
+            }))
+        }
+        400.. => Some(Aria2Error::Recoverable(
+            RecoverableError::HttpProtocolError {
+                message: format!("HTTP error: {status}"),
+            },
+        )),
+        _ => None,
+    }
+}
+
+impl HttpSegmentDownloader {
+    /// Create a new `HttpSegmentDownloader`.
+    #[must_use]
+    pub fn new(client: &reqwest::Client) -> Self {
+        Self::new_with_policy(client, HttpRequestPolicy::default())
+    }
+
+    #[must_use]
+    pub fn new_with_policy(client: &reqwest::Client, request_policy: HttpRequestPolicy) -> Self {
+        ensure_rustls_provider();
+        Self {
+            client: client.clone(),
+            request_policy,
+            cookie_helper: None,
+            auth_options: None,
+            netrc_path: None,
+            last_peer_addr: std::sync::Mutex::new(None),
+            last_http_version: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// Attach the task cookie store used by the concurrent download path.
+    /// The helper is optional so the standalone range adapter keeps its
+    /// existing small interface.
+    pub fn with_cookie_helper(mut self, cookie_helper: CookieHelper) -> Self {
+        self.cookie_helper = Some(cookie_helper);
+        self
+    }
+
+    /// Attach per-download credentials for one bounded HTTP auth retry.
+    pub fn with_auth_options(
+        mut self,
+        auth_options: AuthResolveOptions,
+        netrc_path: Option<String>,
+    ) -> Self {
+        self.auth_options = Some(auth_options);
+        self.netrc_path = netrc_path;
+        self
+    }
+
+    /// Probe whether the server supports byte-range requests.
+    pub async fn supports_range(
+        &self,
+        url: &str,
+        cookie_header: Option<&str>,
+        headers: &[(String, String)],
+    ) -> Result<bool> {
+        self.request_policy.wait_before_request().await;
+        let authorization = self.auth_options.as_ref().and_then(|auth_options| {
+            let mut auth_factory = AuthConfigFactory::new();
+            if let Some(path) = &self.netrc_path {
+                let _ = auth_factory.load_netrc_file(std::path::Path::new(path));
+            }
+            let url = reqwest::Url::parse(url).ok()?;
+            auth_factory.resolve_basic_authorization(&url, auth_options)
+        });
+        let req = self.request_policy.apply_with_basic_auth(
+            self.client.head(url),
+            cookie_header,
+            headers,
+            authorization.as_deref(),
+        );
+        let resp = req.send().await.map_err(|e| {
+            Aria2Error::Recoverable(RecoverableError::TemporaryNetworkFailure {
+                message: format!("HEAD request failed: {}", e),
+            })
+        })?;
+
+        let status = resp.status();
+        if status.as_u16() >= 400 {
+            return Err(Aria2Error::Recoverable(RecoverableError::ServerError {
+                code: status.as_u16(),
+            }));
+        }
+
+        if let Some(accept_ranges) = resp.headers().get("Accept-Ranges")
+            && let Ok(value) = accept_ranges.to_str()
+        {
+            return Ok(value.to_lowercase().contains("bytes"));
+        }
+
+        Ok(false)
+    }
+
+    /// Download a byte range from a URL.
+    ///
+    /// Downloads the specified byte range from the given URL. If `progress_tx` is
+    /// provided, periodic progress updates (segment-relative bytes downloaded) will
+    /// be sent through the channel, enabling smooth progress reporting for RPC clients.
+    pub fn remote_addr(response: &reqwest::Response) -> Option<std::net::SocketAddr> {
+        response.remote_addr()
+    }
+
+    pub fn last_peer_addr(&self) -> Option<std::net::SocketAddr> {
+        self.last_peer_addr.lock().ok().and_then(|peer| *peer)
+    }
+
+    fn remember_peer(&self, peer: Option<std::net::SocketAddr>) {
+        if let Ok(mut slot) = self.last_peer_addr.lock() {
+            *slot = peer;
+        }
+    }
+
+    /// Clear per-request connection metadata before reusing this downloader.
+    pub fn clear_last_peer_addr(&self) {
+        self.remember_peer(None);
+    }
+
+    pub fn last_http_version(&self) -> Option<reqwest::Version> {
+        self.last_http_version
+            .lock()
+            .ok()
+            .and_then(|version| *version)
+    }
+
+    pub(crate) fn remember_http_version(&self, version: reqwest::Version) {
+        if let Ok(mut slot) = self.last_http_version.lock() {
+            *slot = Some(version);
+        }
+    }
+
+    pub fn clear_last_http_version(&self) {
+        if let Ok(mut slot) = self.last_http_version.lock() {
+            *slot = None;
+        }
+    }
+}
+
+#[cfg(test)]
+mod range_download_failure_tests {
+    use super::RangeDownloadFailure;
+    use crate::error::{Aria2Error, RecoverableError};
+
+    #[test]
+    fn ordinary_network_failures_do_not_signal_range_size_rejection() {
+        let failure = RangeDownloadFailure::from(Aria2Error::Recoverable(
+            RecoverableError::TemporaryNetworkFailure {
+                message: "connection reset".into(),
+            },
+        ));
+
+        assert!(!failure.explicit_size_rejection);
+    }
+}

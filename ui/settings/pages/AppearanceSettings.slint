@@ -12,14 +12,25 @@ import { AppSettings } from "../../globals/AppSettings.slint";
 import { StandardListView } from "std-widgets.slint";
 import { AnimatedPopup } from "../../components/AnimatedPopup.slint";
 import { RadioRow } from "../../components/RadioRow.slint";
+import { SwitchRow } from "../../components/SwitchRow.slint";
+import { SettingsCard, SettingsLayout } from "../SettingsCard.slint";
 
 // Helper component for Vertical Accent Selection Rows
 component AccentRow inherits Rectangle {
     in property <string> text;
     in property <color> fill_color;
+    in property <color> second_color: root.fill_color;
     in property <bool> is_active;
     in property <color> text_color;
     callback clicked;
+    // The selected row, as the picker opens: where it is, so the list can
+    // start there.
+    callback shown_active(y: length, height: length);
+    init => {
+        if (root.is_active) {
+            root.shown_active(root.y, root.height);
+        }
+    }
 
     height: 56px;
     border-radius: 8px;
@@ -34,6 +45,7 @@ component AccentRow inherits Rectangle {
 
         ColorCircle {
             fill_color: root.fill_color;
+            second_color: root.second_color;
             is_active: root.is_active;
             clicked => { root.clicked(); }
         }
@@ -51,13 +63,108 @@ component AccentRow inherits Rectangle {
     }
 }
 
+// The System accent's row: its swatch is split like a pair's when the
+// system gives two colours (Android's Material You).
+component SystemAccentRow inherits Rectangle {
+    in property <color> text_color;
+    // See AccentRow.
+    callback shown_active(y: length, height: length);
+    init => {
+        if (ThemeSettings.accent == AccentColor.System) {
+            root.shown_active(root.y, root.height);
+        }
+    }
+    height: 56px;
+    border-radius: 8px;
+    background: sys_ta.has-hover ? ThemeSettings.hover_color : transparent;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 16px;
+        alignment: start;
+        cross-axis-alignment: center;
+
+        accent_circle := Rectangle {
+            width: 48px;
+            height: 48px;
+            border-radius: 24px;
+            // Split, like a pair's, when the system gives two.
+            background: @linear-gradient(135deg, ThemeSettings.system_accent 50%,
+                (ThemeSettings.system_has_second ? ThemeSettings.system_second_accent : ThemeSettings.system_accent) 50%);
+            border-color: ThemeSettings.text_color;
+
+            border-width: 0px;
+
+            Text {
+                text: "S";
+                color: #ffffff;
+                font-weight: 700;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        Text {
+            text: @tr("System Accent");
+            color: root.text_color;
+            font-size: 16px;
+            vertical-alignment: center;
+        }
+    }
+
+    sys_ta := TouchArea {
+        clicked => {
+            ThemeSettings.accent = AccentColor.System;
+            AppSettings.preferences_changed();
+        }
+    }
+
+    states [
+        pulse-state when sys_ta.pressed: {
+            accent_circle.border-width: 6px;
+            in {
+                animate accent_circle.border-width {
+                    duration: 100ms;
+                    easing: ease-out;
+                }
+            }
+            out {
+                animate accent_circle.border-width {
+                    duration: 250ms;
+                    easing: ease-in-out;
+                }
+            }
+        }
+        active-state when ThemeSettings.accent == AccentColor.System: {
+            accent_circle.border-width: 4px;
+            in {
+                animate accent_circle.border-width {
+                    duration: 150ms;
+                    easing: ease-in-out;
+                }
+            }
+            out {
+                animate accent_circle.border-width {
+                    duration: 150ms;
+                    easing: ease-in-out;
+                }
+            }
+        }
+    ]
+}
+
 // Small accent label that groups the rows below it. Indented to line up
 // with the row titles, with extra room above to separate the groups.
 component SectionHeader inherits VerticalLayout {
     in property <string> text;
+    // The page's first: nothing above it to keep apart from.
+    in property <bool> first: false;
 
-    padding-left: 8px;
-    padding-top: 24px;
+    padding-left: SettingsLayout.inset;
+    padding-top: root.first ? 0px : 24px;
+    // Cards sit apart from their header.
+    padding-bottom: SettingsLayout.cards ? 8px : 0px;
 
     Text {
         text: root.text;
@@ -72,6 +179,10 @@ component SectionHeader inherits VerticalLayout {
 }
 
 export component AppearanceSettings inherits Rectangle {
+    // The accent when the picker opened (see the picker's `closed`).
+    private property <AccentColor> accent_before;
+    // Dark when the theme picker opened.
+    private property <bool> dark_before;
     in property <color> text_color: #FFFFFF;
 
     // Size of the whole window, so the popups' dimming covers all of it rather
@@ -114,6 +225,10 @@ export component AppearanceSettings inherits Rectangle {
             closed => {
                 theme_popup.close();
                 root.popup_open = false;
+                // Light or dark now: sunlight or moonlight across the cards.
+                if (ThemeSettings.is_dark != root.dark_before) {
+                    ThemeSettings.sweep(ThemeSettings.is_dark ? (ThemeSettings.amoled_dark ? 3 : 2) : 1);
+                }
             }
 
             theme_layout := VerticalLayout {
@@ -181,6 +296,10 @@ export component AppearanceSettings inherits Rectangle {
             closed => {
                 accent_popup.close();
                 root.popup_open = false;
+                // A new colour: the cards sweep with it, now they're in view.
+                if (ThemeSettings.accent != root.accent_before) {
+                    ThemeSettings.sweep(0);
+                }
             }
 
             accent_layout := VerticalLayout {
@@ -194,51 +313,26 @@ export component AppearanceSettings inherits Rectangle {
                     color: root.text_color;
                 }
 
-                Flickable {
+                accent_flick := Flickable {
                     vertical-stretch: 1;
                     content-height: accent_v_layout.preferred-height;
+
+                    // Opens on the selected colour, centred where the list allows.
+                    function reveal(y: length, height: length) {
+                        self.content-y = Math.max(Math.min(0px, self.height / 2 - y - height / 2), self.height - self.content-height);
+                    }
 
                     accent_v_layout := VerticalLayout {
                         spacing: 4px;
 
+                        // By hue, so neighbours blend; then the neutrals.
                         AccentRow {
                             text: @tr("Muted Red");
-                            fill_color: #e07a5f;
+                            fill_color: #c85450;
                             text_color: root.text_color;
                             is_active: ThemeSettings.accent == AccentColor.MutedRed;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
                             clicked => { ThemeSettings.accent = AccentColor.MutedRed; AppSettings.preferences_changed(); }
-                        }
-
-                        AccentRow {
-                            text: @tr("Green");
-                            fill_color: #81b29a;
-                            text_color: root.text_color;
-                            is_active: ThemeSettings.accent == AccentColor.Green;
-                            clicked => { ThemeSettings.accent = AccentColor.Green; AppSettings.preferences_changed(); }
-                        }
-
-                        AccentRow {
-                            text: @tr("Pink");
-                            fill_color: #f28482;
-                            text_color: root.text_color;
-                            is_active: ThemeSettings.accent == AccentColor.Pink;
-                            clicked => { ThemeSettings.accent = AccentColor.Pink; AppSettings.preferences_changed(); }
-                        }
-
-                        AccentRow {
-                            text: @tr("Purple");
-                            fill_color: #9c89b8;
-                            text_color: root.text_color;
-                            is_active: ThemeSettings.accent == AccentColor.Purple;
-                            clicked => { ThemeSettings.accent = AccentColor.Purple; AppSettings.preferences_changed(); }
-                        }
-
-                        AccentRow {
-                            text: @tr("Yellow");
-                            fill_color: #f2cc8f;
-                            text_color: root.text_color;
-                            is_active: ThemeSettings.accent == AccentColor.Yellow;
-                            clicked => { ThemeSettings.accent = AccentColor.Yellow; AppSettings.preferences_changed(); }
                         }
 
                         AccentRow {
@@ -246,7 +340,44 @@ export component AppearanceSettings inherits Rectangle {
                             fill_color: #f4a261;
                             text_color: root.text_color;
                             is_active: ThemeSettings.accent == AccentColor.Orange;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
                             clicked => { ThemeSettings.accent = AccentColor.Orange; AppSettings.preferences_changed(); }
+                        }
+
+                        AccentRow {
+                            text: @tr("Yellow");
+                            fill_color: #e8c75a;
+                            text_color: root.text_color;
+                            is_active: ThemeSettings.accent == AccentColor.Yellow;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
+                            clicked => { ThemeSettings.accent = AccentColor.Yellow; AppSettings.preferences_changed(); }
+                        }
+
+                        AccentRow {
+                            text: @tr("Lime");
+                            fill_color: #a7c957;
+                            text_color: root.text_color;
+                            is_active: ThemeSettings.accent == AccentColor.Lime;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
+                            clicked => { ThemeSettings.accent = AccentColor.Lime; AppSettings.preferences_changed(); }
+                        }
+
+                        AccentRow {
+                            text: @tr("Green");
+                            fill_color: #81b29a;
+                            text_color: root.text_color;
+                            is_active: ThemeSettings.accent == AccentColor.Green;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
+                            clicked => { ThemeSettings.accent = AccentColor.Green; AppSettings.preferences_changed(); }
+                        }
+
+                        AccentRow {
+                            text: @tr("Teal");
+                            fill_color: #2a9d8f;
+                            text_color: root.text_color;
+                            is_active: ThemeSettings.accent == AccentColor.Teal;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
+                            clicked => { ThemeSettings.accent = AccentColor.Teal; AppSettings.preferences_changed(); }
                         }
 
                         AccentRow {
@@ -254,95 +385,116 @@ export component AppearanceSettings inherits Rectangle {
                             fill_color: #3d5a80;
                             text_color: root.text_color;
                             is_active: ThemeSettings.accent == AccentColor.Blue;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
                             clicked => { ThemeSettings.accent = AccentColor.Blue; AppSettings.preferences_changed(); }
                         }
 
+                        AccentRow {
+                            text: @tr("Purple");
+                            fill_color: #9c89b8;
+                            text_color: root.text_color;
+                            is_active: ThemeSettings.accent == AccentColor.Purple;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
+                            clicked => { ThemeSettings.accent = AccentColor.Purple; AppSettings.preferences_changed(); }
+                        }
+
+                        AccentRow {
+                            text: @tr("Pink");
+                            fill_color: #e27aa6;
+                            text_color: root.text_color;
+                            is_active: ThemeSettings.accent == AccentColor.Pink;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
+                            clicked => { ThemeSettings.accent = AccentColor.Pink; AppSettings.preferences_changed(); }
+                        }
+
+                        // The neutral.
                         AccentRow {
                             text: @tr("Greyscale");
                             fill_color: #9e9e9e;
                             text_color: root.text_color;
                             is_active: ThemeSettings.accent == AccentColor.Greyscale;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
                             clicked => { ThemeSettings.accent = AccentColor.Greyscale; AppSettings.preferences_changed(); }
                         }
 
-                        Rectangle {
-                            height: 56px;
-                            border-radius: 8px;
-                            background: sys_ta.has-hover ? ThemeSettings.hover_color : transparent;
-
-                            HorizontalLayout {
-                                padding-left: 12px;
-                                padding-right: 12px;
-                                spacing: 16px;
-                                alignment: start;
-                                cross-axis-alignment: center;
-
-                                accent_circle := Rectangle {
-                                    width: 48px;
-                                    height: 48px;
-                                    border-radius: 24px;
-                                    background: ThemeSettings.system_accent;
-                                    border-color: ThemeSettings.text_color;
-
-                                    border-width: 0px;
-
-                                    Text {
-                                        text: "S";
-                                        color: #ffffff;
-                                        font-weight: 700;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                }
-
-                                Text {
-                                    text: @tr("System Accent");
-                                    color: root.text_color;
-                                    font-size: 16px;
-                                    vertical-alignment: center;
-                                }
-                            }
-
-                            sys_ta := TouchArea {
-                                clicked => {
-                                    ThemeSettings.accent = AccentColor.System;
-                                    AppSettings.preferences_changed();
-                                }
-                            }
-
-                            states [
-                                pulse-state when sys_ta.pressed: {
-                                    accent_circle.border-width: 6px;
-                                    in {
-                                        animate accent_circle.border-width {
-                                            duration: 100ms;
-                                            easing: ease-out;
-                                        }
-                                    }
-                                    out {
-                                        animate accent_circle.border-width {
-                                            duration: 250ms;
-                                            easing: ease-in-out;
-                                        }
-                                    }
-                                }
-                                active-state when ThemeSettings.accent == AccentColor.System: {
-                                    accent_circle.border-width: 4px;
-                                    in {
-                                        animate accent_circle.border-width {
-                                            duration: 150ms;
-                                            easing: ease-in-out;
-                                        }
-                                    }
-                                    out {
-                                        animate accent_circle.border-width {
-                                            duration: 150ms;
-                                            easing: ease-in-out;
-                                        }
-                                    }
-                                }
-                            ]
+                        // One colour: with the single accents.
+                        if !ThemeSettings.system_has_second: SystemAccentRow {
+                            text_color: root.text_color;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
                         }
+
+                        // Pairs: a main colour and a second (the logo's wave, and as
+                        // Material 3's secondary container: chips, the + button, the
+                        // selected tab and settings item).
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-top: 8px;
+                            Text {
+                                text: @tr("Pairs");
+                                font-size: 13px;
+                                font-weight: 700;
+                                color: ThemeSettings.primary_accent;
+                            }
+                        }
+
+                        AccentRow {
+                            text: @tr("Sunset");
+                            fill_color: #c85450;
+                            second_color: #f4a261;
+                            text_color: root.text_color;
+                            is_active: ThemeSettings.accent == AccentColor.Sunset;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
+                            clicked => { ThemeSettings.accent = AccentColor.Sunset; AppSettings.preferences_changed(); }
+                        }
+
+                        AccentRow {
+                            text: @tr("Lagoon");
+                            fill_color: #2a9d8f;
+                            second_color: #4ea8de;
+                            text_color: root.text_color;
+                            is_active: ThemeSettings.accent == AccentColor.Lagoon;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
+                            clicked => { ThemeSettings.accent = AccentColor.Lagoon; AppSettings.preferences_changed(); }
+                        }
+
+                        AccentRow {
+                            text: @tr("Meadow");
+                            fill_color: #a7c957;
+                            second_color: #2a9d8f;
+                            text_color: root.text_color;
+                            is_active: ThemeSettings.accent == AccentColor.Meadow;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
+                            clicked => { ThemeSettings.accent = AccentColor.Meadow; AppSettings.preferences_changed(); }
+                        }
+
+                        AccentRow {
+                            text: @tr("Berry");
+                            fill_color: #9c89b8;
+                            second_color: #e27aa6;
+                            text_color: root.text_color;
+                            is_active: ThemeSettings.accent == AccentColor.Berry;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
+                            clicked => { ThemeSettings.accent = AccentColor.Berry; AppSettings.preferences_changed(); }
+                        }
+
+                        AccentRow {
+                            text: @tr("Dusk");
+                            fill_color: #3d5a80;
+                            second_color: #9c89b8;
+                            text_color: root.text_color;
+                            is_active: ThemeSettings.accent == AccentColor.Dusk;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
+                            clicked => { ThemeSettings.accent = AccentColor.Dusk; AppSettings.preferences_changed(); }
+                        }
+
+                        // Two colours: a pair, so with the pairs.
+                        if ThemeSettings.system_has_second: SystemAccentRow {
+                            text_color: root.text_color;
+                            shown_active(y, height) => { accent_flick.reveal(y, height); }
+                        }
+
+
+
                     }
                 }
             }
@@ -355,20 +507,27 @@ export component AppearanceSettings inherits Rectangle {
         content-height: layout.preferred-height;
 
         layout := VerticalLayout {
-            spacing: 8px;
+            spacing: SettingsLayout.spacing;
             alignment: start;
-            padding-left: 12px;
-            padding-right: 12px;
+            padding-left: SettingsLayout.side;
+            padding-right: SettingsLayout.side;
             padding-top: 8px;
+            // Room under the last item, so it doesn't end at the edge.
+            padding-bottom: 24px;
 
-            SectionHeader { text: @tr("Color"); }
+            SectionHeader {
+                text: @tr("Color");
+                first: true;
+            }
 
-            Rectangle {
-                border-radius: 8px;
-                background: theme_ta.has-hover ? ThemeSettings.hover_color : transparent;
+            SettingsCard {
+                first: true;
+                last: false;
+                highlighted: theme_ta.has-hover;
 
                 theme_ta := TouchArea {
                     clicked => {
+                        root.dark_before = ThemeSettings.is_dark;
                         root.popup_open = true;
                         theme_popup.show();
                     }
@@ -376,6 +535,10 @@ export component AppearanceSettings inherits Rectangle {
 
                 HorizontalLayout {
                     padding: 8px;
+
+                    padding-left: SettingsLayout.inset;
+
+                    padding-right: SettingsLayout.inset;
                     alignment: space-between;
                     spacing: 16px;
 
@@ -410,19 +573,25 @@ export component AppearanceSettings inherits Rectangle {
                 }
             }
 
-            if ThemeSettings.is_dark: Rectangle {
-                border-radius: 8px;
-                background: amoled_ta.has-hover ? ThemeSettings.hover_color : transparent;
+            if ThemeSettings.is_dark: SettingsCard {
+                first: false;
+                last: false;
+                highlighted: amoled_ta.has-hover;
 
                 amoled_ta := TouchArea {
                     clicked => {
                         ThemeSettings.amoled_dark = !ThemeSettings.amoled_dark;
                         AppSettings.preferences_changed();
+                        ThemeSettings.sweep(ThemeSettings.amoled_dark ? 3 : 2);
                     }
                 }
 
                 HorizontalLayout {
                     padding: 8px;
+
+                    padding-left: SettingsLayout.inset;
+
+                    padding-right: SettingsLayout.inset;
                     alignment: space-between;
                     cross-axis-alignment: center;
                     spacing: 16px;
@@ -457,17 +626,22 @@ export component AppearanceSettings inherits Rectangle {
 
                     ModernSwitch {
                         checked <=> ThemeSettings.amoled_dark;
-                        toggled => { AppSettings.preferences_changed(); }
+                        toggled => {
+                            AppSettings.preferences_changed();
+                            ThemeSettings.sweep(ThemeSettings.amoled_dark ? 3 : 2);
+                        }
                     }
                 }
             }
 
-            Rectangle {
-                border-radius: 8px;
-                background: accent_ta.has-hover ? ThemeSettings.hover_color : transparent;
+            SettingsCard {
+                first: false;
+                last: true;
+                highlighted: accent_ta.has-hover;
 
                 accent_ta := TouchArea {
                     clicked => {
+                        root.accent_before = ThemeSettings.accent;
                         root.popup_open = true;
                         accent_popup.show();
                     }
@@ -475,6 +649,10 @@ export component AppearanceSettings inherits Rectangle {
 
                 HorizontalLayout {
                     padding: 8px;
+
+                    padding-left: SettingsLayout.inset;
+
+                    padding-right: SettingsLayout.inset;
                     alignment: space-between;
                     cross-axis-alignment: center;
                     spacing: 16px;
@@ -511,20 +689,29 @@ export component AppearanceSettings inherits Rectangle {
                         width: 24px;
                         height: 24px;
                         border-radius: 12px;
-                        background: ThemeSettings.primary_accent;
-                        animate background {
-                            duration: 300ms;
-                            easing: ease-in-out;
-                        }
+                        // Both halves of a pair.
+                        background: @linear-gradient(135deg, ThemeSettings.primary_accent 50%, ThemeSettings.secondary_accent 50%);
                     }
                 }
             }
 
+            // Android only: desktop already draws with the system's font.
+            if !SettingsLayout.desktop: SectionHeader { text: @tr("Font"); }
+            if !SettingsLayout.desktop: SwitchRow {
+                title: @tr("System font");
+                subtitle: AppSettings.system_font_status != "" ? AppSettings.system_font_status
+                    : @tr("The font your phone uses");
+                text_color: root.text_color;
+                checked <=> AppSettings.system_font;
+                toggled => { AppSettings.preferences_changed(); }
+            }
+
             SectionHeader { text: @tr("Navigation"); }
 
-            Rectangle {
-                border-radius: 8px;
-                background: top_nav_ta.has-hover ? ThemeSettings.hover_color : transparent;
+            SettingsCard {
+                first: true;
+                last: true;
+                highlighted: top_nav_ta.has-hover;
 
                 top_nav_ta := TouchArea {
                     clicked => {
@@ -535,6 +722,10 @@ export component AppearanceSettings inherits Rectangle {
 
                 HorizontalLayout {
                     padding: 8px;
+
+                    padding-left: SettingsLayout.inset;
+
+                    padding-right: SettingsLayout.inset;
                     alignment: space-between;
                     cross-axis-alignment: center;
                     spacing: 16px;

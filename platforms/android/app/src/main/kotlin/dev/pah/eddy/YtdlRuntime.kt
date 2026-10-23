@@ -127,12 +127,15 @@ object YtdlRuntime {
             // Deno keeps compiled scripts here.
             .put("DENO_DIR", File(context.cacheDir, "deno").absolutePath)
 
-        if (python != null && script != null) {
+        // Python whether or not its package carries yt-dlp: newer packages
+        // don't, and Eddy downloads yt-dlp itself (components.rs).
+        if (python != null) {
             val usr = File(python.ldDir, "usr")
             env.put("PYTHONHOME", usr.absolutePath)
                 .put("HOME", usr.absolutePath)
                 .put("SSL_CERT_FILE", File(usr, "etc/tls/cert.pem").absolutePath)
-            json.put("python", python.exe.absolutePath).put("ytdlp", script.absolutePath)
+            json.put("python", python.exe.absolutePath)
+            script?.let { json.put("ytdlp", it.absolutePath) }
             // QuickJS comes with the Python package; yt-dlp needs a JS runtime
             // for YouTube.
             File(python.binDir, "libqjs.so").takeIf { it.exists() }?.let { json.put("quickjs", it.absolutePath) }

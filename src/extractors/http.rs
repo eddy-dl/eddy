@@ -14,6 +14,9 @@ fn build(redirects: bool) -> reqwest::Client {
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(30))
         .user_agent(UA_DESKTOP)
+        // As browsers write them on HTTP/1.1; Cloudflare (Royal Road)
+        // turns lowercase header names away.
+        .http1_title_case_headers()
         .redirect(if redirects { reqwest::redirect::Policy::limited(10) } else { reqwest::redirect::Policy::none() })
         .build()
         .expect("failed to build the HTTP client")
@@ -57,6 +60,17 @@ impl CookieJar {
 
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    pub fn get(&self, name: &str) -> Option<&str> {
+        self.0.get(name).map(String::as_str)
+    }
+
+    /// Adds `other`'s cookies, replacing ones of the same name.
+    pub fn merge(&mut self, other: &CookieJar) {
+        for (name, value) in &other.0 {
+            self.set(name, value);
+        }
     }
 
     /// The Cookie header value.

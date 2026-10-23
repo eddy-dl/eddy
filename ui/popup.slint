@@ -3,34 +3,36 @@ import { ThemeSettings } from "themes/theme.slint";
 import { Links } from "globals/Links.slint";
 import { LinkPreviewSheet } from "components/LinkPreviewSheet.slint";
 import { QuickDownloadSheet } from "components/QuickDownloadSheet.slint";
+import { FolderBrowser } from "globals/FolderBrowser.slint";
+import { FolderBrowserSheet } from "components/FolderBrowserSheet.slint";
 
-// The share popup on Android: a small window at the bottom of the screen,
-// over whatever app the links were shared from. It runs in its own process,
+// The share popup on Android: a sheet at the bottom of the screen, over
+// whatever app the links were shared from. The window covers the whole
+// screen (or the whole small window) and is see-through above the sheet;
+// Android dims or blurs what's behind it. It runs in its own process,
 // so it only has what it was shared; anything left when it closes stays
 // pending in the main app.
 export component PreviewApp inherits Window {
+    // Material's Roboto, or the phone's own font (see ThemeSettings).
+    default-font-family: ThemeSettings.font_family;
     // 1 = "Download now" (ask how, then start everything), 2 = preview.
     in property <int> mode: 2;
 
     // Close the popup (links not dealt with stay pending).
     callback close_requested();
-    // The height the content needs, so the window can be sized to fit.
-    callback resize_requested(length);
 
     title: "Eddy";
-    background: ThemeSettings.surface;
+    background: transparent;
     preferred-width: 420px;
 
-    // The window height the content needs: content plus the navigation bar
-    // the window reaches under. Rust applies it once the window is up, then
-    // on every change.
-    // (Android caps the window at 85% of the screen.)
-    out property <length> wanted_height: (root.mode == 1 ? quick.preferred-height : preview.content_height)
+    // The sheet's height: its content plus the navigation bar it reaches
+    // under, at most 85% of the window.
+    private property <length> wanted_height: (root.mode == 1 ? quick.preferred-height : preview.content_height)
         + root.safe-area-insets.bottom;
-    // The preview takes the window's actual height; its options scroll if
+    private property <length> sheet_height: Math.min(root.wanted_height, root.height * 0.85);
+    // The preview takes the sheet's actual height; its options scroll if
     // they still don't fit, with the buttons kept in view.
-    private property <length> preview_height: Math.max(0px, root.height - root.safe-area-insets.bottom);
-    changed wanted_height => { root.resize_requested(self.wanted_height); }
+    private property <length> preview_height: Math.max(0px, root.sheet_height - root.safe-area-insets.bottom);
 
     init => {
         ThemeSettings.system_is_dark = Palette.color-scheme == ColorScheme.dark;
@@ -40,40 +42,70 @@ export component PreviewApp inherits Window {
     scope := FocusScope {
         key-pressed(event) => {
             if (event.text == Key.Back || event.text == Key.Escape) {
+                if (FolderBrowser.open) {
+                    FolderBrowser.cancel();
+                    return accept;
+                }
                 root.close_requested();
                 return accept;
             }
             return reject;
         }
 
-        // Placed by hand rather than in a layout: the preview's height comes
-        // from the window's, so it mustn't feed back into the window's size.
         width: 100%;
         height: 100%;
 
-        quick := QuickDownloadSheet {
-            visible: root.mode == 1;
-            y: 0;
-            width: parent.width;
-            height: self.preferred-height;
-            count: Links.pending.length;
-            ytdlp_available: Links.ytdlp_available;
-            download(choice) => { Links.quick_download(choice); }
-            later => { root.close_requested(); }
+        // Tapping the see-through part above the sheet closes the popup.
+        TouchArea {
+            clicked => { root.close_requested(); }
         }
 
-        preview := LinkPreviewSheet {
-            visible: root.mode == 2 && Links.pending.length > 0;
-            y: 0;
-            width: parent.width;
-            height: root.preview_height;
-            drop-shadow-blur: 0px;
-            link: Links.pending.length > 0 ? Links.pending[0] : { id: -1 };
-            position: 1;
-            total: Links.pending.length;
-            available_height: root.preview_height;
-            skip => { Links.skip(self.link.id); }
-            download(backend, format, filename) => { Links.start(self.link.id, backend, format, filename); }
+        // Placed by hand rather than in a layout: the preview's height comes
+        // from the sheet's, so it mustn't feed back into the sheet's size.
+        sheet := Rectangle {
+            y: root.height - root.sheet_height;
+            width: 100%;
+            height: root.sheet_height;
+            background: ThemeSettings.surface;
+
+            // Taps on the sheet's empty parts stay in the sheet.
+            TouchArea {}
+
+            quick := QuickDownloadSheet {
+                visible: root.mode == 1;
+                y: 0;
+                width: parent.width;
+                height: self.preferred-height;
+                count: Links.pending.length;
+                ytdlp_available: Links.ytdlp_available;
+                download(choice) => { Links.quick_download(choice); }
+                later => { root.close_requested(); }
+            }
+
+            preview := LinkPreviewSheet {
+                visible: root.mode == 2 && Links.pending.length > 0;
+                window_width: root.width;
+                window_height: root.height;
+                y: 0;
+                width: parent.width;
+                height: root.preview_height;
+                drop-shadow-blur: 0px;
+                link: Links.pending.length > 0 ? Links.pending[0] : { id: -1 };
+                position: 1;
+                total: Links.pending.length;
+                available_height: root.preview_height;
+                skip => { Links.skip(self.link.id); }
+                download(backend, format, filename, options) => { Links.start(self.link.id, backend, format, filename, options); }
+            }
         }
+    }
+
+    // Eddy's own folder browser, over the whole window (see folders.rs).
+    if FolderBrowser.open: FolderBrowserSheet {
+        width: 100%;
+        height: 100%;
+        safe_top: root.safe-area-insets.top;
+        safe_bottom: root.safe-area-insets.bottom;
+        keyboard: root.virtual-keyboard-size.height > 0 ? root.height - root.virtual-keyboard-position.y : 0px;
     }
 }

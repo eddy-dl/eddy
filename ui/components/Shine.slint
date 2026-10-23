@@ -1,0 +1,78 @@
+import { ThemeSettings } from "../themes/theme.slint";
+
+// One band of light crossing a card: it moves on by one sweep each time
+// `sweeps` goes up, keeping the colour it was sent with.
+component Band inherits Rectangle {
+    in property <int> sweeps;
+    in property <color> glow;
+    in property <duration> wait;
+
+    // Each sweep takes it from one whole number to the next; the fraction
+    // runs 0 to 1, so it always crosses left to right, and rests off the
+    // left edge in between.
+    private property <float> progress: root.sweeps;
+    animate progress {
+        duration: 650ms;
+        delay: root.wait;
+        easing: ease-in-out;
+    }
+    private property <float> along: root.progress - Math.floor(root.progress);
+    // Its colour for this sweep (the next one's may differ).
+    private property <color> colour: root.glow;
+    changed sweeps => {
+        root.colour = root.glow;
+    }
+
+    Rectangle {
+        width: Math.max(80px, root.width * 0.35);
+        height: root.height;
+        x: -self.width + root.along * (root.width + self.width);
+        background: @linear-gradient(90deg,
+            root.colour.transparentize(100%) 0%,
+            root.colour 50%,
+            root.colour.transparentize(100%) 100%);
+    }
+}
+
+// A band of light that sweeps across a card for each ThemeSettings.sweep,
+// later the further down the screen the card is, so it cascades: the new
+// accent; a pale glow of it for light mode, a deeper shade for dark; silver
+// on AMOLED black. Put it last in a card that clips (it fills its
+// parent).
+//
+// No Timer (Slint 1.18's start late or not at all from a stop): bands ride
+// animated counters. Two take turns, so a sweep sent while the last is
+// still crossing (AMOLED on, then straight off) gets a fresh band at the
+// usual speed instead of hurrying the old one along.
+export component Shine inherits Rectangle {
+    private property <int> kind: ThemeSettings.shine_kind;
+    // Every sweep is the accent's, only its colour changes: a pale glow of
+    // the accent for light mode, a deeper shade for dark, silver on AMOLED
+    // black (all as easy to see on their cards as the accent on its own).
+    private property <color> glow:
+        root.kind == 1 ? ThemeSettings.primary_accent.mix(#ffffff, 60%).transparentize(40%) :
+        root.kind == 2 ? ThemeSettings.primary_accent.mix(#000000, 75%).transparentize(40%) :
+        root.kind == 3 ? #ffffff.transparentize(65%) :
+        ThemeSettings.primary_accent.transparentize(55%);
+    // Top to bottom: about a fifth of a second per screen of height. A mode
+    // or AMOLED sweep waits for the cards' fade to the new colours first, as
+    // the accent's does (its picker covers that fade).
+    private property <duration> wait: Math.max(0ms, root.absolute-position.y / 1px * 0.25ms)
+        + (root.kind == 0 ? 0ms : ThemeSettings.fade);
+
+    // Odd sweeps, and even ones.
+    odd := Band {
+        width: 100%;
+        height: 100%;
+        sweeps: Math.floor((ThemeSettings.shine + 1) / 2);
+        glow: root.glow;
+        wait: root.wait;
+    }
+    even := Band {
+        width: 100%;
+        height: 100%;
+        sweeps: Math.floor(ThemeSettings.shine / 2);
+        glow: root.glow;
+        wait: root.wait;
+    }
+}

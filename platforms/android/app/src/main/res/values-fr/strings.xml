@@ -20,8 +20,15 @@
     <string name="download_started">Téléchargement démarré</string>
     <string name="results_channel">Téléchargements terminés</string>
     <string name="no_active_downloads">Aucun téléchargement en cours</string>
+    <string name="pause">Pause</string>
+    <string name="pause_all">Tout mettre en pause</string>
+    <string name="cancel">Annuler</string>
+    <string name="cancel_all">Tout annuler</string>
     <string name="downloaded_name">%s téléchargé</string>
     <string name="download_failed_name">Échec du téléchargement : %s</string>
     <string name="cant_open_file">Impossible d\'ouvrir le fichier</string>
+    <string name="saved_in_folder">Enregistré dans %1$s</string>
+    <string name="cant_share">Impossible de les partager</string>
+    <string name="cant_delete_file">Impossible de supprimer le fichier</string>
     <string name="allow_installs">Autorisez Eddy à installer des applications, puis touchez à nouveau le paquet</string>
 </resources>

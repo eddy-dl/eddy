@@ -308,7 +308,8 @@ export component BottomNavButton inherits Rectangle {
             width: 64px;
             height: 32px;
             border-radius: 16px;
-            background: root.is_active ? ThemeSettings.primary_accent : transparent;
+            // Material You's active indicator: the secondary container.
+            background: root.is_active ? ThemeSettings.secondary_container : transparent;
 
             x: (parent.width - self.width) / 2;
             y: root.is_active ? 12px : 24px;
@@ -328,8 +329,8 @@ export component BottomNavButton inherits Rectangle {
                 icon_type: root.icon_type;
                 is_active: root.is_active;
                 is_downloading: root.is_downloading;
-                icon_color: root.is_active ? #ffffff : ThemeSettings.text_color;
-                cutout_color: ThemeSettings.primary_accent;
+                icon_color: root.is_active ? ThemeSettings.on_secondary_container : ThemeSettings.text_color;
+                cutout_color: ThemeSettings.secondary_container;
             }
         }
 

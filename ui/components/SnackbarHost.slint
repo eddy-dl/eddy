@@ -1,0 +1,58 @@
+import { Snackbar } from "../globals/Snackbar.slint";
+import { ThemeSettings } from "../themes/theme.slint";
+
+// Shows Snackbar's message for a while, then fades it out. MD3's snackbar:
+// inverse surface, 4 corners, 48 tall, at the bottom.
+export component SnackbarHost inherits Rectangle {
+    // How far up from the bottom it sits (clear of the bottom bar).
+    in property <length> bottom_inset: 0px;
+
+    private property <bool> shown: false;
+    // `changed` only watches its own properties: Snackbar's serial, here.
+    private property <int> serial: Snackbar.serial;
+    changed serial => {
+        root.shown = Snackbar.message != "";
+        // start() runs a stopped timer; restart() only resets a running one.
+        hide.start();
+        hide.restart();
+    }
+
+    hide := Timer {
+        interval: 4s;
+        running: false;
+        triggered => {
+            self.stop();
+            root.shown = false;
+        }
+    }
+
+    bar := Rectangle {
+        width: Math.min(root.width - 32px, max(240px, label.preferred-width + 32px));
+        height: max(48px, label.preferred-height + 24px);
+        x: (root.width - self.width) / 2;
+        y: root.height - self.height - root.bottom_inset - (root.shown ? 16px : 0px);
+        opacity: root.shown ? 1.0 : 0.0;
+        visible: self.opacity > 0;
+        animate opacity, y { duration: 200ms; easing: ease-out; }
+        border-radius: 4px;
+        // MD3's inverse surface and its text.
+        background: ThemeSettings.is_dark ? #e6e1e3 : #322f31;
+        drop-shadow-blur: 8px;
+        drop-shadow-color: #00000030;
+
+        label := Text {
+            x: 16px;
+            width: parent.width - 32px;
+            text: Snackbar.message;
+            font-size: 14px;
+            color: ThemeSettings.is_dark ? #322f31 : #f4eff1;
+            vertical-alignment: center;
+            wrap: word-wrap;
+        }
+
+        // Tapping it puts it away.
+        TouchArea {
+            clicked => { root.shown = false; }
+        }
+    }
+}

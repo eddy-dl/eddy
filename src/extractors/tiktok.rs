@@ -1,9 +1,11 @@
 //! TikTok videos and photo posts, adapted from urlsula's tiktok_dl: resolve
 //! short links, read the page's rehydration JSON (solving TikTok's WAF
 //! challenge when it shows one), and fetch the media with the page's cookies.
+//! A photo post's slideshow comes as a video from tikmate.io, which also
+//! stands in when TikTok's page can't be read (see tikmate.rs).
 
 use super::http::{self, CookieJar};
-use super::{Fetch, MediaInfo, MediaItem, MediaKind, MediaRequest, Quality, Service};
+use super::{Fetch, MediaInfo, MediaItem, MediaKind, MediaRequest, Quality, Service, tikmate};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use regex::Regex;
@@ -222,7 +224,82 @@ fn download_headers(page: &str, jar: &CookieJar) -> Vec<(String, String)> {
     headers
 }
 
+/// A post's media. A photo post also offers its slideshow as a video
+/// (from tikmate.io); and when TikTok's page can't be read, tikmate's answer
+/// is the post.
 pub async fn get_info(url: &str) -> Result<MediaInfo, String> {
+    match native_info(url).await {
+        Ok(mut info) => {
+            if is_photo_post(&info.items) {
+                match tikmate::fetch(url).await {
+                    Ok(post) => {
+                        if let Some(video) = post.video {
+                            let size = http::content_length(&video, &tikmate::headers()).await.unwrap_or(0);
+                            let caption = info.items.first().and_then(|i| i.caption.clone());
+                            let thumbnail = info.items.first().map(|i| i.thumbnail.clone()).unwrap_or_default();
+                            info.items.push(slideshow_item(info.items.len(), size, thumbnail, caption));
+                        }
+                    }
+                    Err(e) => log::warn!("no slideshow video for {url}: {e}"),
+                }
+            }
+            Ok(info)
+        }
+        Err(e) => {
+            log::warn!("TikTok's page failed for {url} ({e}); trying tikmate");
+            tikmate_info(url).await.map_err(|t| format!("{e} (and {t})"))
+        }
+    }
+}
+
+fn is_photo_post(items: &[MediaItem]) -> bool {
+    !items.is_empty() && items.iter().all(|i| i.kind == MediaKind::Image)
+}
+
+/// A photo post's slideshow, as its last item.
+fn slideshow_item(index: usize, size: u64, thumbnail: String, caption: Option<String>) -> MediaItem {
+    MediaItem {
+        square_cover: false,
+        index,
+        kind: MediaKind::Video,
+        ext: "mp4".to_string(),
+        thumbnail,
+        qualities: vec![Quality { key: "best".to_string(), size }],
+        caption,
+        duration: None,
+    }
+}
+
+/// The post from tikmate alone: its images, then its video (a photo post's
+/// slideshow, or the video itself).
+async fn tikmate_info(url: &str) -> Result<MediaInfo, String> {
+    let post = tikmate::fetch(url).await?;
+    let headers = tikmate::headers();
+    let mut items = Vec::new();
+    for (image, preview) in &post.images {
+        let size = http::content_length(image, &headers).await.unwrap_or(0);
+        items.push(MediaItem {
+            square_cover: false,
+            index: items.len(),
+            kind: MediaKind::Image,
+            ext: "jpg".to_string(),
+            thumbnail: preview.clone(),
+            qualities: vec![Quality { key: "best".to_string(), size }],
+            caption: post.caption.clone(),
+            duration: None,
+        });
+    }
+    if let Some(video) = &post.video {
+        let size = http::content_length(video, &headers).await.unwrap_or(0);
+        let thumbnail = post.thumbnail.clone().or_else(|| post.images.first().map(|(_, p)| p.clone())).unwrap_or_default();
+        items.push(slideshow_item(items.len(), size, thumbnail, post.caption.clone()));
+    }
+    let id = FULL_RE.captures(url).map(|c| c[5].to_string()).unwrap_or_else(|| "tiktok".to_string());
+    Ok(MediaInfo { service: Service::TikTok, id, title: None, items, info_json: None })
+}
+
+/// The post from TikTok's own page.
+async fn native_info(url: &str) -> Result<MediaInfo, String> {
     let (id, page) = resolve_id(url).await?;
     let (item, page_url, jar) = fetch_metadata(&id, &page).await?;
     let urls = media_urls(&item);
@@ -243,6 +320,7 @@ pub async fn get_info(url: &str) -> Result<MediaInfo, String> {
     for (index, (media_url, kind)) in urls.into_iter().enumerate() {
         let size = http::content_length(&media_url, &headers).await.unwrap_or(0);
         items.push(MediaItem {
+            square_cover: false,
             index,
             kind,
             ext: if kind == MediaKind::Video { "mp4" } else { "jpg" }.to_string(),
@@ -252,15 +330,32 @@ pub async fn get_info(url: &str) -> Result<MediaInfo, String> {
             duration,
         });
     }
-    Ok(MediaInfo { service: Service::TikTok, id, items, info_json: None })
+    Ok(MediaInfo { service: Service::TikTok, id, title: None, items, info_json: None })
 }
 
+/// Fresh links for the items asked for, the same way get_info found them:
+/// TikTok's page, with tikmate for a photo post's slideshow (the item after
+/// its images), or tikmate for all of it when the page fails.
 pub async fn resolve(url: &str, request: &MediaRequest) -> Result<Vec<Fetch>, String> {
-    let (id, page) = resolve_id(url).await?;
-    let (item, page_url, jar) = fetch_metadata(&id, &page).await?;
+    let native = async {
+        let (id, page) = resolve_id(url).await?;
+        let (item, page_url, jar) = fetch_metadata(&id, &page).await?;
+        Ok::<_, String>((item, page_url, jar))
+    }
+    .await;
+    let (item, page_url, jar) = match native {
+        Ok(found) => found,
+        Err(e) => {
+            log::warn!("TikTok's page failed for {url} ({e}); trying tikmate");
+            return tikmate_fetches(url, request).await;
+        }
+    };
     let caption = item.get("desc").and_then(|d| d.as_str()).map(str::trim).filter(|s| !s.is_empty()).map(String::from);
     let headers = download_headers(&page_url, &jar);
-    Ok(media_urls(&item)
+    let media = media_urls(&item);
+    let photo_post = !media.is_empty() && media.iter().all(|(_, k)| *k == MediaKind::Image);
+    let count = media.len();
+    let mut fetches: Vec<Fetch> = media
         .into_iter()
         .enumerate()
         .filter(|(i, _)| super::wanted(request, *i))
@@ -272,6 +367,45 @@ pub async fn resolve(url: &str, request: &MediaRequest) -> Result<Vec<Fetch>, St
             ext: if kind == MediaKind::Video { "mp4" } else { "jpg" }.to_string(),
             hls: false,
             caption: caption.clone(),
+        })
+        .collect();
+    if photo_post && super::wanted(request, count) {
+        match tikmate::fetch(url).await {
+            Ok(tikmate::Post { video: Some(video), .. }) => fetches.push(Fetch {
+                index: count,
+                url: video,
+                headers: tikmate::headers(),
+                kind: MediaKind::Video,
+                ext: "mp4".to_string(),
+                hls: false,
+                caption: caption.clone(),
+            }),
+            Ok(_) => log::warn!("tikmate has no slideshow video for {url}"),
+            Err(e) => log::warn!("no slideshow video for {url}: {e}"),
+        }
+    }
+    Ok(fetches)
+}
+
+/// The items asked for, from tikmate alone (images, then the video).
+async fn tikmate_fetches(url: &str, request: &MediaRequest) -> Result<Vec<Fetch>, String> {
+    let post = tikmate::fetch(url).await?;
+    let media = post
+        .images
+        .iter()
+        .map(|(image, _)| (image.clone(), MediaKind::Image))
+        .chain(post.video.clone().map(|v| (v, MediaKind::Video)));
+    Ok(media
+        .enumerate()
+        .filter(|(i, _)| super::wanted(request, *i))
+        .map(|(index, (url, kind))| Fetch {
+            index,
+            url,
+            headers: tikmate::headers(),
+            kind,
+            ext: if kind == MediaKind::Video { "mp4" } else { "jpg" }.to_string(),
+            hls: false,
+            caption: post.caption.clone(),
         })
         .collect())
 }

@@ -123,6 +123,9 @@ android {
 dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
+    // The activity Rust runs in (android-activity's game-activity glue; must
+    // match the version android-activity 0.6 supports).
+    implementation("androidx.games:games-activity:4.4.0")
     implementation("org.rustls:rustls-platform-verifier:$rustlsVerifierVersion")
     // Unpacking the YTDLnis helper packages (yt-dlp) with their symlinks.
     // See YtdlRuntime.kt.

@@ -12,9 +12,6 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-const COMMUNITY_PLUGIN_URL: &str =
-    "https://github.com/biggestsonicfan/yt-dlp-community-plugin/archive/refs/heads/master.zip";
-const COMMUNITY_PLUGIN_NAME: &str = "biggestsonicfan-yt-dlp-community-plugin";
 
 /// The tools, in the order Settings lists them.
 const TOOLS: [&str; 3] = ["ytdlp", "ffmpeg", "deno"];
@@ -282,29 +279,17 @@ fn start_install(key: String) {
 
 /// Streams `url` into a temporary file next to `dir`, reporting progress.
 async fn download(key: &str, url: &str, size: u64, dir: &Path) -> Result<PathBuf, String> {
-    use tokio::io::AsyncWriteExt;
-    tokio::fs::create_dir_all(dir).await.map_err(|e| e.to_string())?;
-    let path = dir.join(format!(".download-{key}"));
-    let mut response = crate::extractors::http::client()
-        .get(url)
-        .send()
-        .await
-        .and_then(|r| r.error_for_status())
-        .map_err(|e| e.to_string())?;
-    let total = response.content_length().unwrap_or(size).max(1);
-    let mut file = tokio::fs::File::create(&path).await.map_err(|e| e.to_string())?;
-    let (mut done, mut shown) = (0u64, 0u64);
-    while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
-        file.write_all(&chunk).await.map_err(|e| e.to_string())?;
-        done += chunk.len() as u64;
-        if done * 100 / total != shown {
-            shown = done * 100 / total;
+    // With aria2: several connections, and it retries.
+    let shown = std::sync::atomic::AtomicU64::new(0);
+    crate::downloader::fetch_file(url, dir, &format!(".download-{key}"), |done, total| {
+        let total = if total > 0 { total } else { size.max(1) };
+        let percent = done * 100 / total;
+        if shown.swap(percent, std::sync::atomic::Ordering::Relaxed) != percent {
             with_state(|s| s.working.insert(key.to_string(), Some(done as f32 / total as f32)));
             redraw();
         }
-    }
-    file.flush().await.map_err(|e| e.to_string())?;
-    Ok(path)
+    })
+    .await
 }
 
 fn make_executable(path: &Path) {
@@ -363,7 +348,7 @@ async fn install_tool(key: &str, release: &Release) -> Result<(), String> {
 
     if key == "ytdlp" {
         // Nice to have; yt-dlp works without it.
-        if let Err(e) = install_community_plugin(&dir).await {
+        if let Err(e) = crate::ytdlp_plugin::install(&dir).await {
             log::warn!("couldn't install the yt-dlp community plugin: {e}");
         }
     }
@@ -422,40 +407,3 @@ fn extract_tar_xz(archive: &Path, dir: &Path, wanted: &[String]) -> Result<(), S
     Ok(())
 }
 
-/// yt-dlp looks for plugins in yt-dlp-plugins/<name>/yt_dlp_plugins next to
-/// itself.
-async fn install_community_plugin(dir: &Path) -> Result<(), String> {
-    let plugin_dir = dir.join("yt-dlp-plugins").join(COMMUNITY_PLUGIN_NAME);
-    if plugin_dir.join("yt_dlp_plugins").is_dir() {
-        return Ok(());
-    }
-    let archive = download("plugin", COMMUNITY_PLUGIN_URL, 0, dir).await?;
-    tokio::task::spawn_blocking(move || -> Result<(), String> {
-        let file = std::fs::File::open(&archive).map_err(|e| e.to_string())?;
-        let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
-        for i in 0..zip.len() {
-            let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
-            if entry.is_dir() {
-                continue;
-            }
-            // Drop the archive's top folder.
-            let Some(path) = entry.enclosed_name() else {
-                continue;
-            };
-            let relative: PathBuf = path.components().skip(1).collect();
-            if relative.as_os_str().is_empty() {
-                continue;
-            }
-            let destination = plugin_dir.join(relative);
-            if let Some(parent) = destination.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-            }
-            let mut out = std::fs::File::create(&destination).map_err(|e| e.to_string())?;
-            std::io::copy(&mut entry, &mut out).map_err(|e| e.to_string())?;
-        }
-        let _ = std::fs::remove_file(&archive);
-        Ok(())
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}

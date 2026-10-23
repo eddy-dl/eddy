@@ -1,0 +1,180 @@
+import { AppSettings } from "../../globals/AppSettings.slint";
+import { Note } from "../../components/Note.slint";
+import { ThemeSettings } from "../../themes/theme.slint";
+import { Wordmark } from "../../components/Wordmark.slint";
+import { SettingsCard, SettingsLayout } from "../SettingsCard.slint";
+
+// A row that opens a web page: label, where it goes, and an arrow.
+component LinkRow inherits SettingsCard {
+    in property <string> label;
+    in property <string> detail;
+    in property <image> icon;
+    callback clicked();
+
+    highlighted: ta.has-hover;
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding: 8px;
+        padding-left: SettingsLayout.inset;
+        padding-right: SettingsLayout.inset;
+        spacing: 16px;
+
+        VerticalLayout {
+            alignment: center;
+            Image {
+                source: root.icon;
+                width: 24px;
+                height: 24px;
+                colorize: root.text_color;
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 4px;
+            horizontal-stretch: 1;
+
+            Text {
+                text: root.label;
+                font-size: 18px;
+                font-weight: 600;
+                color: root.text_color;
+            }
+            Text {
+                text: root.detail;
+                font-size: 13px;
+                color: ThemeSettings.primary_accent.transparentize(30%);
+                overflow: elide;
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            Image {
+                source: @image-url("../../icons/rounded/chevron_right.svg");
+                width: 16px;
+                height: 16px;
+                colorize: root.text_color.transparentize(40%);
+            }
+        }
+    }
+}
+
+// Settings → About: what Eddy is, who made it, where its code is.
+export component AboutSettings inherits Rectangle {
+    in property <color> text_color: #FFFFFF;
+    // True once the content has scrolled away from the top; tints the settings header.
+    out property <bool> scrolled: scroller.content-y < 0;
+
+    TouchArea { }
+
+    scroller := Flickable {
+        width: 100%;
+        height: 100%;
+        content-height: about_layout.preferred-height;
+
+        about_layout := VerticalLayout {
+            spacing: SettingsLayout.spacing;
+            alignment: start;
+            padding-left: SettingsLayout.side;
+            padding-right: SettingsLayout.side;
+            padding-top: 8px;
+            // Room under the last item, so it doesn't end at the edge.
+            padding-bottom: 24px;
+
+            // The app: its logo, version and what it's for.
+            VerticalLayout {
+                padding-top: 16px;
+                padding-bottom: 28px;
+                spacing: 8px;
+
+                HorizontalLayout {
+                    alignment: center;
+                    Wordmark {
+                        font-size: 44px;
+                    }
+                }
+                Text {
+                    text: @tr("Version {}", AppSettings.app_version);
+                    font-size: 14px;
+                    color: root.text_color.transparentize(40%);
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: @tr("A download manager for files, torrents, media and web novels, built with Rust and Slint.");
+                    font-size: 14px;
+                    color: root.text_color;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+            }
+
+            LinkRow {
+                first: true;
+                last: false;
+                label: @tr("Developer");
+                detail: "Nubuki-all";
+                icon: @image-url("../../icons/rounded/person.svg");
+                text_color: root.text_color;
+                clicked => { AppSettings.open_url("https://github.com/Nubuki-all"); }
+            }
+            LinkRow {
+                first: false;
+                last: true;
+                label: @tr("Source code");
+                detail: "GitHub";
+                icon: @image-url("../../icons/rounded/code.svg");
+                text_color: root.text_color;
+                clicked => { AppSettings.open_url("https://github.com/Nubuki-all/eddy"); }
+            }
+
+            Rectangle { height: SettingsLayout.group_gap + 14px; }
+
+            // Made with Slint: its badge, as Slint asks.
+            SettingsCard {
+                highlighted: slint_ta.has-hover;
+                text_color: root.text_color;
+
+                slint_ta := TouchArea {
+                    clicked => { AppSettings.open_url("https://slint.dev/"); }
+                }
+
+                VerticalLayout {
+                    padding: 20px;
+                    spacing: 8px;
+                    alignment: center;
+
+                    Image {
+                        source: ThemeSettings.is_dark
+                            ? @image-url("../../icons/MadeWithSlint-logo-dark.svg")
+                            : @image-url("../../icons/MadeWithSlint-logo-light.svg");
+                        height: 48px;
+                        image-fit: contain;
+                        accessible-label: "#MadeWithSlint";
+                    }
+                    Text {
+                        text: @tr("Slint {} · slint.dev", AppSettings.slint_version);
+                        font-size: 12px;
+                        color: root.text_color.transparentize(40%);
+                        horizontal-alignment: center;
+                    }
+                }
+            }
+
+            // With the "i" the app's other notes have.
+            HorizontalLayout {
+                padding-top: 12px;
+                alignment: center;
+                Note {
+                    text: @tr("This app logo's font is Pacifico, under the SIL Open Font License.");
+                    text_color: root.text_color;
+                    font_size: 12px;
+                }
+            }
+        }
+    }
+}

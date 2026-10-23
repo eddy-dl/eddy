@@ -1,15 +1,18 @@
 import { ThemeSettings } from "../themes/theme.slint";
 
-// Pill-shaped choice button; several in a row share the width.
+// Pill-shaped choice button; several in a row share the width (MD3's
+// segmented buttons, 40 tall).
 export component Chip inherits Rectangle {
     in property <string> text;
     in property <bool> selected;
     callback clicked();
 
     horizontal-stretch: 1;
-    height: 36px;
-    border-radius: 18px;
-    background: root.selected ? ThemeSettings.primary_accent : (ta.has-hover ? ThemeSettings.hover_color : transparent);
+    height: 40px;
+    border-radius: 20px;
+    // Material 3's selected filter chip / segmented button: the secondary
+    // container (a pair's second colour, softened).
+    background: root.selected ? ThemeSettings.secondary_container : (ta.has-hover ? ThemeSettings.hover_color : transparent);
     border-width: root.selected ? 0px : 1px;
     border-color: ThemeSettings.text_color.transparentize(70%);
     animate background, border-width { duration: 150ms; }
@@ -18,7 +21,7 @@ export component Chip inherits Rectangle {
         text: root.text;
         font-size: 13px;
         font-weight: 600;
-        color: root.selected ? #ffffff : ThemeSettings.text_color;
+        color: root.selected ? ThemeSettings.on_secondary_container : ThemeSettings.text_color;
         horizontal-alignment: center;
         vertical-alignment: center;
         overflow: elide;

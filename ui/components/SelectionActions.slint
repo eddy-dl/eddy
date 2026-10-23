@@ -2,35 +2,38 @@ import { ThemeSettings } from "../themes/theme.slint";
 import { ActionButton, ModernSwitch } from "Buttons.slint";
 import { HoldTouchArea, HintBubble } from "HoldHint.slint";
 
-export enum SelectionAction { Pause, Resume, Cancel, Delete }
+export enum SelectionAction { Pause, Resume, Cancel, Delete, Share }
 
-// Round icon button for the selection bar. Holding it names it, below the
-// header (the top of the screen leaves no room above).
-component ActionIcon inherits Rectangle {
+// MD3 standard icon button: a 24 Material Symbols (rounded) icon in
+// on-surface-variant, a 40 circle
+// of state layer on press, in a 48 touch target. Holding it names it (a
+// plain tooltip), below it, as the top of the screen leaves no room above.
+export component ActionIcon inherits Rectangle {
     in property <string> label;
-    in property <string> commands; // 24-unit stroked path, like the nav icons
-    in property <bool> danger: false;
+    in property <image> icon;
+    // Some glyphs are drawn smaller in their box than others (pause, play):
+    // a larger size evens them out with their neighbours.
+    in property <length> icon_size: 24px;
     callback clicked();
 
     width: 48px;
     height: 48px;
-    border-radius: 24px;
-    background: ta.pressed && !ta.holding ? ThemeSettings.hover_color : transparent;
-    animate background { duration: 150ms; }
 
-    Path {
-        width: 24px;
-        height: 24px;
+    Rectangle {
+        width: 40px;
+        height: 40px;
+        border-radius: 20px;
+        background: ta.pressed && !ta.holding ? ThemeSettings.text_color.transparentize(88%) : transparent;
+        animate background { duration: 150ms; }
+    }
+
+    Image {
+        source: root.icon;
+        width: root.icon_size;
+        height: root.icon_size;
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
-        viewbox-width: 24;
-        viewbox-height: 24;
-        stroke: root.danger ? #E5534B : ThemeSettings.text_color;
-        stroke-width: 2px;
-        stroke-line-cap: round;
-        stroke-line-join: round;
-        fill: transparent;
-        commands: root.commands;
+        colorize: ThemeSettings.text_color.transparentize(25%);
     }
 
     ta := HoldTouchArea {
@@ -45,11 +48,13 @@ component ActionIcon inherits Rectangle {
     }
 }
 
-// What can be done with the selected items, shown in the header while
-// selecting. Only actions that apply to something selected appear:
-// - Downloading: Pause (active or queued), Cancel
-// - Stopped: Resume (paused, failed or cancelled), Cancel (paused), Delete
-// - Completed: Delete
+// The actions for the selected items, in the header while selecting (an
+// MD3 contextual app bar). At most three show, MD3's limit and what fits
+// beside the count; the rest go in the ⋮ menu (app.slint).
+// - Downloading: Pause (active or queued), Cancel, Share (their links)
+// - Stopped: Resume (paused, failed or cancelled), Delete, Share; Cancel
+//   (paused) in the menu
+// - Completed: Share (their files), Delete
 export component SelectionActionBar inherits HorizontalLayout {
     in property <int> tab; // 0 = Downloading, 1 = Stopped, 2 = Completed
     // How many of the selected items are in each state.
@@ -60,26 +65,37 @@ export component SelectionActionBar inherits HorizontalLayout {
     callback action(SelectionAction);
 
     spacing: 0px;
+    // Only as wide as its icons, packed to the right: as a layout it would
+    // otherwise take a share of the header's spare width, its icons at its
+    // left (mid-header in landscape).
+    horizontal-stretch: 0;
+    alignment: end;
 
     if root.tab == 0 && root.running > 0: ActionIcon {
         label: @tr("Pause");
-        commands: "M9 6v12M15 6v12";
+        icon: @image-url("../icons/rounded/pause.svg");
+        icon_size: 30px;
         clicked => { root.action(SelectionAction.Pause); }
     }
     if root.tab == 1 && root.paused + root.ended > 0: ActionIcon {
         label: root.paused > 0 ? @tr("Resume") : @tr("Retry");
-        commands: "M8 5.5v13l10.5 -6.5z";
+        icon: @image-url("../icons/rounded/play_arrow.svg");
+        icon_size: 32px;
         clicked => { root.action(SelectionAction.Resume); }
     }
-    if root.tab == 0 || (root.tab == 1 && root.paused > 0): ActionIcon {
+    if root.tab == 0: ActionIcon {
         label: @tr("Cancel");
-        commands: "M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0M9 9l6 6M15 9l-6 6";
+        icon: @image-url("../icons/rounded/cancel.svg");
         clicked => { root.action(SelectionAction.Cancel); }
+    }
+    ActionIcon {
+        label: root.tab == 2 ? @tr("Share files") : @tr("Share links");
+        icon: @image-url("../icons/rounded/share.svg");
+        clicked => { root.action(SelectionAction.Share); }
     }
     if root.tab != 0: ActionIcon {
         label: @tr("Delete");
-        danger: true;
-        commands: "M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2 -2l1 -12M9 7V4h6v3";
+        icon: @image-url("../icons/rounded/delete.svg");
         clicked => { root.action(SelectionAction.Delete); }
     }
 }

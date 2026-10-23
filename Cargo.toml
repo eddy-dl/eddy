@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
+# aria2_rust, patched (see patches/aria2_rust), is a workspace of its own.
+exclude = ["patches/aria2_rust"]
 
 # Android/IOS build target
 [lib]
@@ -23,6 +25,10 @@ base64 = "0.21"
 dirs = "5.0"
 linkify = "0.11"
 log = "0.4"
+# aria2-core reports through tracing; its warnings and errors go to
+# logs/aria2.log (see logs.rs).
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }
 percent-encoding = "2"
 rand = "0.8"
 regex = "1"
@@ -36,18 +42,41 @@ slint = { version = "1.17.1" }
 sys-locale = "0.3"
 tokio = { version = "1.30", features = ["rt-multi-thread", "macros", "time", "sync", "fs", "io-util"] }
 url = "2"
+# Novels: reading sites' HTML, and packing the EPUB (also unpacks the
+# desktop tools).
+scraper = "0.24"
+# Walking scraper's parsed tree (its node type).
+ego-tree = "0.10"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 # Unpacking yt-dlp, ffmpeg and Deno (Settings → Downloads); pure Rust.
 lzma-rs = "0.3"
 rfd = "0.14"
 tar = "0.4"
-zip = { version = "2", default-features = false, features = ["deflate"] }
 system-theme = { version = "0.3", default-features = false }
 webbrowser = "1.0"
+# Finished / failed download notifications.
+notify-rust = "4"
+# The window handle, for Windows' taskbar progress.
+raw-window-handle = "0.6"
+slint = { version = "1.17.1", features = ["raw-window-handle-06"] }
+
+# Taskbar progress: Windows' ITaskbarList3 (the version Slint already uses).
+# Process groups for the programs Eddy starts (children.rs).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell"] }
+
+# Taskbar progress: the Unity launcher entry signal (KDE, Dash to Dock),
+# over the D-Bus library Slint already uses.
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = "5"
 
 [target.'cfg(target_os = "android")'.dependencies]
-android-activity = { version = "0.6.1", features = ["native-activity"] }
+android-activity = { version = "0.6.1", features = ["game-activity"] }
 android_logger = "0.14"
 jni = "0.22"
 ndk-context = "0.1"
@@ -71,7 +100,13 @@ codegen-units = 1
 panic = "abort"
 
 # Slint 1.18.1's Android backend with the upstream fix that releases the GPU
-# surface when the window goes (see patches/i-slint-backend-android-activity).
+# surface when the window goes, running on GameActivity (see
+# patches/i-slint-backend-game-activity).
 # Drop once a Slint release includes it.
 [patch.crates-io]
-i-slint-backend-android-activity = { path = "patches/i-slint-backend-android-activity" }
+i-slint-backend-android-activity = { path = "patches/i-slint-backend-game-activity" }
+
+# aria2_rust with resuming fixed (see patches/aria2_rust/EDDY.md).
+[patch."https://github.com/balovess/aria2_rust/"]
+aria2-core = { path = "patches/aria2_rust/aria2-core" }
+aria2-protocol = { path = "patches/aria2_rust/aria2-protocol" }

@@ -44,6 +44,11 @@ pub fn system_accent() -> Option<slint::Color> {
     ))
 }
 
+/// Desktops give one accent colour.
+pub fn system_second_accent() -> Option<slint::Color> {
+    None
+}
+
 pub fn open_native_url(url: &str) {
     if let Err(e) = webbrowser::open(url) {
         eprintln!("Failed to open URL on desktop: {e}");
@@ -92,6 +97,22 @@ where
     }
 }
 
+/// Lets the user pick a cookies.txt (Settings → Downloads → Cookies).
+pub fn pick_cookies_file<F>(on_picked: F)
+where
+    F: FnOnce(String, String) + Send + 'static,
+{
+    if let Some(path) = rfd::FileDialog::new()
+        .set_title("Add cookies.txt")
+        .add_filter("cookies.txt", &["txt"])
+        .add_filter("All files", &["*"])
+        .pick_file()
+    {
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        on_picked(path.to_string_lossy().into_owned(), name);
+    }
+}
+
 /// Desktop apps stay running while they download, so downloads start
 /// straight away.
 pub fn start_download(request: &crate::downloader::DownloadRequest) -> Result<(), String> {
@@ -106,6 +127,16 @@ pub fn has_all_files_access() -> bool {
 pub fn request_all_files_access() {}
 
 /// Opens a downloaded file with the system's default app.
+/// Desktop downloads are plain files (no documents).
+pub fn delete_document(_uri: &str) {}
+
+/// Opens a web page in the browser.
+pub fn open_url(url: &str) {
+    if let Err(e) = webbrowser::open(url) {
+        log::error!("Couldn't open {url}: {e}");
+    }
+}
+
 pub fn open_file(path: &str) {
     let program = if cfg!(target_os = "windows") {
         "explorer"
@@ -127,9 +158,26 @@ pub fn get_app_data_dir() -> String {
         .into_owned()
 }
 
-pub fn trigger_haptic() {}
-pub fn show_toast(_: &str) {}
+pub fn trigger_haptic(_: super::Haptic) {}
+/// The app's snackbar, set up by main (desktop has no toasts of its own).
+static TOAST: std::sync::OnceLock<Box<dyn Fn(String) + Send + Sync>> = std::sync::OnceLock::new();
+
+pub fn set_toast_handler(show: impl Fn(String) + Send + Sync + 'static) {
+    let _ = TOAST.set(Box::new(show));
+}
+
+/// A short message, in the app's snackbar. Any thread.
+pub fn show_toast(message: &str) {
+    if let Some(show) = TOAST.get() {
+        show(message.to_string());
+    }
+}
 pub fn set_bar_icons_dark(_: bool) {}
+
+/// Desktops have no share sheet to hand things to.
+pub fn share(_files: &[String], _text: &str) {
+    show_toast("Sharing isn't available here");
+}
 
 /// ffmpeg from PATH (merging, HLS, converting to audio).
 /// The yt-dlp helper apps are Android's; elsewhere yt-dlp is a normal program.
@@ -186,4 +234,10 @@ pub fn ytdlp_available() -> bool {
 
 pub fn ytdlp_ready() -> bool {
     ytdlp_available()
+}
+
+/// Where Eddy would keep its own yt-dlp (Android's; desktop installs its
+/// tools through components_desktop instead).
+pub fn own_ytdlp() -> std::path::PathBuf {
+    tools_dir().join("yt-dlp-own")
 }

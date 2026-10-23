@@ -1,4 +1,4 @@
-import { TextEdit } from "std-widgets.slint";
+import { TextArea } from "TextArea.slint";
 import { ThemeSettings } from "../themes/theme.slint";
 import { ActionButton } from "Buttons.slint";
 
@@ -16,6 +16,7 @@ export component AddLinksSheet inherits Rectangle {
 
     height: layout.preferred-height;
     background: ThemeSettings.surface;
+    animate background { duration: ThemeSettings.fade; easing: ease-in-out; }
     border-radius: 16px;
     drop-shadow-blur: 12px;
     drop-shadow-color: #00000020;
@@ -57,11 +58,13 @@ export component AddLinksSheet inherits Rectangle {
             }
         }
 
-        input := TextEdit {
+        // Eddy's own, in its theme's colours (TextEdit follows the system's).
+        input := TextArea {
             text <=> root.text;
             height: 160px;
             font-size: 14px;
-            wrap: word-wrap;
+            // Links are long words: broken anywhere.
+            wrap: TextWrap.char-wrap;
             input-method-hints: { capitalization: CapitalizationMode.none, auto-correct: false, auto-complete: false };
             placeholder-text: @tr("Paste links, or any text containing them");
         }

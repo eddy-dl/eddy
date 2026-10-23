@@ -5,6 +5,7 @@ export enum LinkBackend {
     Direct, // plain HTTP/FTP file, through aria2
     Torrent, // magnet or .torrent, through aria2's BitTorrent
     Media, // a page's video / audio / images, through an extractor (yt-dlp or a native one)
+    Book, // a web novel from a reading site, saved as an EPUB
 }
 
 export enum ProbeState { Probing, Ready, Failed }
@@ -21,11 +22,33 @@ export struct LinkFormat {
 }
 
 // One file inside a torrent.
+// One of a download's several files: a torrent's, or a post's / playlist's
+// items.
 export struct TorrentFile {
     index: int, // 1-based, as aria2's select-file counts
-    path: string, // inside the torrent, e.g. "Show/S01E01.mkv"
+    path: string, // inside the torrent, e.g. "Show/S01E01.mkv"; an item's title
     size: string, // formatted
     selected: bool,
+    // Media items: 1 video, 2 audio, 3 image (0 a torrent's file), its
+    // thumbnail, and whether a video is saved as just its audio.
+    kind: int,
+    thumbnail: image,
+    as_audio: bool,
+    // Its own quality (a key, or a bitrate "128" as audio; "" for the
+    // preview's), and the ones it has (as video, and as audio), held to pick.
+    quality: string,
+    formats: [LinkFormat],
+    audio_formats: [LinkFormat],
+}
+
+// How one download goes about it (the preview's options; Settings →
+// Downloads → Downloading by default).
+export struct LinkOptions {
+    speed_kbps: int, // 0 = no limit
+    connections: int, // 1–16
+    ua_mode: int, // 0 = aria2's own, 1 = a browser's, 2 = ua_custom
+    ua_custom: string,
+    category: bool, // into a Video / Music / Documents… folder
 }
 
 // A link found in the Add links text, waiting for the user to look at it.
@@ -45,6 +68,7 @@ export struct PendingLink {
     formats: [LinkFormat], // yt-dlp qualities, best first
     files: [TorrentFile], // a torrent's files, once known; all selected at first
     files_selected: int, // how many of `files` are selected
+    files_audio: int, // of the selected ones, how many are saved as audio
     folder: string, // where it'll be saved, as shown to the user
     folder_uri: string, // a folder picked for this link; "" for the usual one
     // Media links (LinkBackend.Media):
@@ -53,6 +77,19 @@ export struct PendingLink {
     media_kind: int, // 0 = not media, 1 = video, 2 = audio, 3 = image
     // Bitrates for saving as audio (selector: kbps, e.g. "128").
     audio_formats: [LinkFormat],
+    // Books (LinkBackend.Book): how many chapters, how many of them locked
+    // (paid early access, never saved), and the preview's starting options
+    // (Settings → Downloads → Books).
+    book_chapters: int,
+    book_locked: int,
+    book_notes: bool,
+    book_images: bool,
+    book_note_images: bool,
+    book_small_images: bool,
+    // Saved before (the download it was saved by; 0 if not): downloading
+    // updates it. `book_new`: chapters added since.
+    book_saved_id: int,
+    book_new: int,
 }
 
 export global Links {
@@ -82,7 +119,7 @@ export global Links {
           filename: "missing.zip", file_type: FileType.Archive,
           size: "", source: "example.com", folder: "Download/Eddy", backends: [LinkBackend.Direct], formats: [] },
         { id: 4, url: "https://webtorrent.io/torrents/sintel.torrent", state: ProbeState.Ready, error: "",
-          filename: "Sintel", file_type: FileType.Torrent,
+          filename: "Sintel", file_type: FileType.Folder,
           size: "129 MB", source: "webtorrent.io", folder: "Download/Eddy", backends: [LinkBackend.Torrent, LinkBackend.Direct], formats: [],
           files: [
               { index: 1, path: "Sintel/Sintel.mp4", size: "123 MB", selected: true },
@@ -100,7 +137,7 @@ export global Links {
     callback process_text(string);
     // Download a pending link (and drop it from `pending`). `format` is a
     // LinkFormat selector for yt-dlp, otherwise "".
-    callback start(id: int, backend: LinkBackend, format: string, filename: string);
+    callback start(id: int, backend: LinkBackend, format: string, filename: string, options: LinkOptions);
     // Drop a pending link without downloading it.
     callback skip(id: int);
     // Pick a different folder for one link (it starts out with the usual one).
@@ -109,6 +146,13 @@ export global Links {
     callback toggle_file(id: int, index: int);
     // Select or unselect all of a torrent link's files.
     callback select_all_files(id: int, selected: bool);
+    // A video item saved as just its audio, or not; every item at once.
+    callback toggle_audio(id: int, index: int);
+    callback set_all_audio(id: int, audio: bool);
+    // The preview's quality and bitrate (the items' sizes follow them), and
+    // one item's own ("" to follow the preview's again).
+    callback choose_quality(id: int, video: string, audio: string);
+    callback set_item_quality(id: int, index: int, quality: string);
     // Download every pending link with the given choice, each as soon as
     // its check is done (failed ones stay pending).
     callback quick_download(QuickBackend);

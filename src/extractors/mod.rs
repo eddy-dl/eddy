@@ -8,7 +8,9 @@
 
 pub mod http;
 pub mod instagram;
+pub mod packed;
 pub mod pinterest;
+pub mod tikmate;
 pub mod tiktok;
 pub mod ytdlp;
 
@@ -67,12 +69,17 @@ pub struct MediaItem {
     pub caption: Option<String>,
     /// Seconds, when known (audio sizes are estimated from it).
     pub duration: Option<f64>,
+    /// One of YouTube's auto-generated music tracks: its thumbnail is a
+    /// square cover padded out to 16:9, so saved as audio it's cut square.
+    pub square_cover: bool,
 }
 
 #[derive(Clone, Debug)]
 pub struct MediaInfo {
     pub service: Service,
     pub id: String,
+    /// The whole thing's title, for several items (a playlist's).
+    pub title: Option<String>,
     pub items: Vec<MediaItem>,
     /// yt-dlp's full info, saved so the download can reuse it
     /// (`--load-info-json`) instead of asking the site again.
@@ -80,12 +87,28 @@ pub struct MediaInfo {
 }
 
 /// What the user picked, handed from the preview to the downloader (as JSON,
-/// since it crosses into the download service).
+/// since it crosses into the download service). Fields added later default,
+/// so requests saved by an earlier Eddy (paused downloads) still read.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct MediaRequest {
     pub service: Option<Service>,
     /// Items to fetch (MediaItem::index); empty for all.
     pub items: Vec<usize>,
+    /// Of those, the ones saved as audio (`audio_codec`); empty with a
+    /// codec set: all of them.
+    pub audio_items: Vec<usize>,
+    /// A playlist (yt-dlp): its entries are the items. Otherwise yt-dlp is
+    /// told to stick to the one video a link may also be in a playlist with.
+    pub playlist: bool,
+    /// How many entries the playlist had when it was checked.
+    pub entries: usize,
+    /// Items given their own quality (a key, or an audio item's bitrate
+    /// "128"); the rest take `quality` / `audio_kbps`.
+    pub item_qualities: Vec<(usize, String)>,
+    /// Items whose thumbnail is a padded square cover (music tracks): cut
+    /// square when they're saved as audio.
+    pub square_covers: Vec<usize>,
     /// A Quality::key, or "best".
     pub quality: String,
     /// Convert to audio: "mp3" / "m4a" (empty to keep the media as it is),
@@ -163,6 +186,11 @@ pub async fn resolve(service: Service, url: &str, request: &MediaRequest) -> Res
 /// Whether item `index` was asked for.
 pub(crate) fn wanted(request: &MediaRequest, index: usize) -> bool {
     request.items.is_empty() || request.items.contains(&index)
+}
+
+/// Whether item `index` is saved as audio.
+pub fn as_audio(request: &MediaRequest, index: usize) -> bool {
+    !request.audio_codec.is_empty() && (request.audio_items.is_empty() || request.audio_items.contains(&index))
 }
 
 /// Sorts qualities best first, as urlsula does: by pixels for "w:h", by

@@ -1,0 +1,88 @@
+import { ThemeSettings } from "../themes/theme.slint";
+
+// A multi-line text field in Eddy's colours (TextField's outlined look).
+// Scrolls with the cursor; Back puts it down, as TextField's does.
+export component TextArea inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    in property <string> placeholder-text;
+    in property <length> font-size: 14px;
+    in property <string> font-family;
+    in property <TextWrap> wrap: TextWrap.word-wrap;
+    in property <InputMethodHints> input-method-hints <=> input.input-method-hints;
+    out property <bool> has-focus: input.has-focus;
+
+    callback edited(string);
+
+    // Pastes at the cursor (at the end without one).
+    public function paste() {
+        input.focus();
+        input.paste();
+    }
+
+    // Replaces the text with the clipboard's.
+    public function paste_all() {
+        input.focus();
+        input.select-all();
+        input.paste();
+    }
+
+    min-width: 120px;
+    min-height: 120px;
+    border-radius: 4px;
+    border-width: input.has-focus ? 2px : 1px;
+    border-color: input.has-focus ? ThemeSettings.primary_accent : ThemeSettings.text_color.transparentize(55%);
+    background: transparent;
+    forward-focus: input;
+
+    park := FocusScope {
+        x: 0;
+        y: 0;
+        width: 0;
+        height: 0;
+    }
+
+    scroller := Flickable {
+        x: 16px;
+        y: 12px;
+        width: parent.width - 32px;
+        height: parent.height - 24px;
+        content-height: Math.max(self.height, input.preferred-height);
+
+        if root.text == "" && input.preedit-text == "": Text {
+            width: 100%;
+            text: root.placeholder-text;
+            font-size: root.font-size;
+            color: ThemeSettings.text_color.transparentize(50%);
+            wrap: word-wrap;
+        }
+
+        input := TextInput {
+            width: 100%;
+            height: max(scroller.height, self.preferred-height);
+            single-line: false;
+            wrap: root.wrap;
+            font-size: root.font-size;
+            font-family: root.font-family;
+            color: ThemeSettings.text_color;
+            selection-background-color: ThemeSettings.primary_accent.transparentize(60%);
+            selection-foreground-color: ThemeSettings.text_color;
+
+            // Keeps the cursor's line in view.
+            cursor-position-changed(position) => {
+                if position.y + scroller.content-y < 0px {
+                    scroller.content-y = -position.y;
+                } else if position.y + self.font-size * 1.5 + scroller.content-y > scroller.height {
+                    scroller.content-y = scroller.height - position.y - self.font-size * 1.5;
+                }
+            }
+            key-pressed(event) => {
+                if (event.text == Key.Back || event.text == Key.Escape) {
+                    park.focus();
+                    return accept;
+                }
+                return reject;
+            }
+            edited => { root.edited(self.text); }
+        }
+    }
+}

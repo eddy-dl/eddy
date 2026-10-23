@@ -1,25 +1,28 @@
-import { LineEdit } from "std-widgets.slint";
+import { TextField } from "TextField.slint";
+import { DragHandle } from "DragHandle.slint";
+import { DownloadOptionsEditor } from "DownloadOptionsEditor.slint";
 import { ThemeSettings } from "../themes/theme.slint";
 import { ActionButton } from "Buttons.slint";
 import { SectionLabel } from "Chips.slint";
 import { FileTypeIcon } from "FileTypeIcon.slint";
 import { DownloadItem, DownloadState } from "DownloadCards.slint";
-import { LinkBackend } from "../globals/Links.slint";
+import { LinkBackend, LinkOptions } from "../globals/Links.slint";
 
 // Things that can be done to one download. `Rename` and `RefreshLink` come
 // with the new name or link.
-export enum ItemAction { Pause, Resume, Cancel, Delete, Rename, ChangeFolder, RefreshLink, Open }
+export enum ItemAction { Pause, Resume, Cancel, Delete, Rename, ChangeFolder, RefreshLink, Open, UpdateBook }
 
 // One option: icon, label, and a detail line (the current value).
 component OptionRow inherits Rectangle {
     in property <string> label;
     in property <string> detail;
-    in property <string> commands; // 24-unit stroked path, like the nav icons
+    in property <image> icon; // Material Symbols, rounded
     in property <bool> danger: false;
     callback clicked();
 
-    height: root.detail.is-empty ? 48px : 56px;
-    border-radius: 8px;
+    // MD3 list items: one-line 56, two-line 72.
+    height: root.detail.is-empty ? 56px : 72px;
+    border-radius: 16px;
     background: ta.pressed ? ThemeSettings.text_color.transparentize(92%) : transparent;
 
     HorizontalLayout {
@@ -29,17 +32,12 @@ component OptionRow inherits Rectangle {
 
         VerticalLayout {
             alignment: center;
-            Path {
-                width: 22px;
-                height: 22px;
-                viewbox-width: 24;
-                viewbox-height: 24;
-                stroke: root.danger ? #E5534B : ThemeSettings.text_color.transparentize(20%);
-                stroke-width: 2px;
-                stroke-line-cap: round;
-                stroke-line-join: round;
-                fill: transparent;
-                commands: root.commands;
+            // MD3 list item's leading icon: 24, on-surface-variant.
+            Image {
+                source: root.icon;
+                width: 24px;
+                height: 24px;
+                colorize: root.danger ? #E5534B : ThemeSettings.text_color.transparentize(25%);
             }
         }
 
@@ -78,17 +76,27 @@ export component DownloadOptionsSheet inherits Rectangle {
     // Delete is asked about first (the owner shows the confirmation).
     callback action(ItemAction, string);
     callback delete_requested();
+    // New speed limit, connections, user agent or folder (a running download
+    // restarts with them, carrying on where it got to).
+    callback options_changed(LinkOptions);
 
     // Called by the owner when the sheet opens, so it starts on the options.
     public function reset() {
+        handle.reset();
         root.editing = 0;
         root.copied = false;
     }
 
-    // 0 = the options; 1 = renaming; 2 = pasting a new link.
+    // 0 = the options; 1 = renaming; 2 = pasting a new link; 3 = its
+    // download options.
     private property <int> editing: 0;
     private property <string> edit_text;
     private property <bool> copied: false;
+    private property <int> opt_speed_kbps;
+    private property <int> opt_connections;
+    private property <int> opt_ua_mode;
+    private property <string> opt_ua_custom;
+    private property <bool> opt_category;
 
     private property <bool> running: root.item.state == DownloadState.Active || root.item.state == DownloadState.Queued;
     private property <bool> paused: root.item.state == DownloadState.Paused;
@@ -99,13 +107,38 @@ export component DownloadOptionsSheet inherits Rectangle {
 
     height: Math.min(layout.preferred-height, root.available_height);
     background: ThemeSettings.surface;
-    border-radius: 16px;
+    animate background { duration: ThemeSettings.fade; easing: ease-in-out; }
+    // How far its handle's been dragged, for the owner to add to its y,
+    // and whether it's being dragged (no animation then).
+    // Springs back when let go short of dismissing (it follows the finger
+    // while dragged).
+    out property <length> drag_offset: handle.offset;
+    animate drag_offset { duration: handle.dragging ? 0ms : 250ms; easing: ease-out-quad; }
+    out property <bool> dragging: handle.dragging;
+    // Hangs from the top (the top navigation bar): dragged up to dismiss.
+    in property <bool> from_top: false;
+    // Dragged far enough by the handle.
+    callback dismiss_requested();
+
+    // MD3 bottom sheet: 28 corners.
+    border-radius: 28px;
     clip: true;
     drop-shadow-blur: 12px;
     drop-shadow-color: #00000020;
 
+    // Takes the focus off a text field tapped away from (so the keyboard
+    // goes and Back works on the sheet again).
+    park := FocusScope {
+        x: 0;
+        y: 0;
+        width: 0;
+        height: 0;
+    }
+
     // Keeps taps on the sheet's gaps from reaching the backdrop behind it.
-    TouchArea { }
+    TouchArea {
+        clicked => { park.focus(); }
+    }
 
     // Copies the link: TextInput is the one thing with clipboard access.
     link_copy := TextInput {
@@ -117,10 +150,18 @@ export component DownloadOptionsSheet inherits Rectangle {
 
     Flickable {
         content-height: layout.preferred-height;
+
+        // Taps between the rows.
+        TouchArea {
+            height: layout.preferred-height;
+            clicked => { park.focus(); }
+        }
         interactive: layout.preferred-height > root.height;
 
         layout := VerticalLayout {
             padding: 16px;
+            // Under the drag handle.
+            padding-top: 32px;
             spacing: 6px;
 
             // What it is and how far it got.
@@ -163,6 +204,13 @@ export component DownloadOptionsSheet inherits Rectangle {
 
             if root.editing == 0: ActionButton {
                 text: root.running ? @tr("Pause") : root.paused ? @tr("Resume") : @tr("Retry");
+                // Filled icons, on the filled button.
+                has_icon: true;
+                icon: root.running ? @image-url("../icons/rounded/filled/pause.svg")
+                    : root.paused ? @image-url("../icons/rounded/filled/play_arrow.svg")
+                    : @image-url("../icons/rounded/refresh.svg");
+                // Pause and play are drawn smaller in their box than refresh.
+                icon_size: root.running ? 22px : root.paused ? 24px : 18px;
                 primary: true;
                 height: 48px;
                 clicked => { root.action(root.running ? ItemAction.Pause : ItemAction.Resume, ""); }
@@ -174,7 +222,7 @@ export component DownloadOptionsSheet inherits Rectangle {
                 OptionRow {
                     label: @tr("Rename");
                     detail: root.item.filename;
-                    commands: "M4 20h4l10.5 -10.5a2.83 2.83 0 0 0 -4 -4L4 16v4M13.5 6.5l4 4";
+                    icon: @image-url("../icons/rounded/edit.svg");
                     clicked => {
                         root.edit_text = root.item.filename;
                         root.editing = 1;
@@ -183,13 +231,27 @@ export component DownloadOptionsSheet inherits Rectangle {
                 OptionRow {
                     label: @tr("Change folder");
                     detail: root.item.folder;
-                    commands: "M3 7a2 2 0 0 1 2 -2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2H5a2 2 0 0 1 -2 -2z";
+                    icon: @image-url("../icons/rounded/folder_open.svg");
                     clicked => { root.action(ItemAction.ChangeFolder, ""); }
+                }
+                OptionRow {
+                    label: @tr("Download options");
+                    detail: (root.item.options.speed_kbps > 0 ? Math.round(root.item.options.speed_kbps / 102.4) / 10 + " MB/s · " : @tr("No limit") + " · ")
+                        + @tr("{n} connection" | "{n} connections" % root.item.options.connections);
+                    icon: @image-url("../icons/rounded/tune.svg");
+                    clicked => {
+                        root.opt_speed_kbps = root.item.options.speed_kbps;
+                        root.opt_connections = root.item.options.connections;
+                        root.opt_ua_mode = root.item.options.ua_mode;
+                        root.opt_ua_custom = root.item.options.ua_custom;
+                        root.opt_category = root.item.options.category;
+                        root.editing = 3;
+                    }
                 }
                 if root.can_refresh: OptionRow {
                     label: @tr("Refresh link");
                     detail: @tr("Paste a new link if this one expired");
-                    commands: "M20 11a8 8 0 1 0 -2.3 5.7M20 5v6h-6";
+                    icon: @image-url("../icons/rounded/refresh.svg");
                     clicked => {
                         root.edit_text = "";
                         root.editing = 2;
@@ -198,7 +260,7 @@ export component DownloadOptionsSheet inherits Rectangle {
                 OptionRow {
                     label: root.copied ? @tr("Link copied") : @tr("Copy link");
                     detail: root.item.url;
-                    commands: "M10 13a5 5 0 0 0 7.54 .54l3 -3a5 5 0 0 0 -7.07 -7.07l-1.72 1.71M14 11a5 5 0 0 0 -7.54 -.54l-3 3a5 5 0 0 0 7.07 7.07l1.71 -1.71";
+                    icon: @image-url("../icons/rounded/link.svg");
                     clicked => {
                         link_copy.select-all();
                         link_copy.copy();
@@ -208,19 +270,65 @@ export component DownloadOptionsSheet inherits Rectangle {
                 if root.running || root.paused: OptionRow {
                     label: @tr("Cancel");
                     danger: true;
-                    commands: "M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0M9 9l6 6M15 9l-6 6";
+                    icon: @image-url("../icons/rounded/cancel.svg");
                     clicked => { root.action(ItemAction.Cancel, ""); }
                 }
                 if root.paused || root.ended: OptionRow {
                     label: @tr("Delete");
                     danger: true;
-                    commands: "M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2 -2l1 -12M9 7V4h6v3";
+                    icon: @image-url("../icons/rounded/delete.svg");
                     clicked => { root.delete_requested(); }
                 }
             }
 
+            // This download's options.
+            if root.editing == 3: VerticalLayout {
+                spacing: 10px;
+                padding-top: 4px;
+                DownloadOptionsEditor {
+                    compact: true;
+                    speed_kbps <=> root.opt_speed_kbps;
+                    connections <=> root.opt_connections;
+                    ua_mode <=> root.opt_ua_mode;
+                    ua_custom <=> root.opt_ua_custom;
+                    category <=> root.opt_category;
+                }
+                if root.running: Text {
+                    text: @tr("Saving restarts the download with these, carrying on from where it got to.");
+                    font-size: 12px;
+                    color: ThemeSettings.text_color.transparentize(35%);
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    padding-top: 4px;
+                    spacing: 12px;
+                    ActionButton {
+                        text: @tr("Back");
+                        horizontal-stretch: 1;
+                        height: 48px;
+                        clicked => { root.editing = 0; }
+                    }
+                    ActionButton {
+                        text: @tr("Save");
+                        primary: true;
+                        horizontal-stretch: 1;
+                        height: 48px;
+                        clicked => {
+                            root.options_changed({
+                                speed_kbps: root.opt_speed_kbps,
+                                connections: root.opt_connections,
+                                ua_mode: root.opt_ua_mode,
+                                ua_custom: root.opt_ua_custom,
+                                category: root.opt_category,
+                            });
+                            root.editing = 0;
+                        }
+                    }
+                }
+            }
+
             // Renaming, or pasting a new link.
-            if root.editing != 0: VerticalLayout {
+            if root.editing == 1 || root.editing == 2: VerticalLayout {
                 spacing: 10px;
                 padding-top: 4px;
 
@@ -233,7 +341,7 @@ export component DownloadOptionsSheet inherits Rectangle {
                     color: ThemeSettings.text_color.transparentize(35%);
                     wrap: word-wrap;
                 }
-                edit := LineEdit {
+                edit := TextField {
                     text <=> root.edit_text;
                     font-size: 14px;
                     input-method-hints: { capitalization: CapitalizationMode.none, auto-correct: false, auto-complete: false };
@@ -265,5 +373,14 @@ export component DownloadOptionsSheet inherits Rectangle {
                 }
             }
         }
+    }
+
+    // MD3 bottom sheet's drag handle: dragging it away dismisses the sheet.
+    handle := DragHandle {
+        // At the edge away from the bar it hangs from.
+        y: root.from_top ? root.height - self.height : 0px;
+        width: 100%;
+        upward: root.from_top;
+        dismissed => { root.dismiss_requested(); }
     }
 }

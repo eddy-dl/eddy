@@ -1,0 +1,47 @@
+import { ThemeSettings } from "../themes/theme.slint";
+
+// MD3's indeterminate circular progress indicator: an arc in the accent
+// with round ends, turning while it grows to most of a circle and shrinks
+// back, each cycle starting where the last one's tail stopped.
+export component CircularProgress {
+    in property <color> indicator_color: ThemeSettings.primary_accent;
+    in property <length> thickness: 2px;
+    width: 16px;
+    height: 16px;
+
+    // One grow-and-shrink, and the steady turn under it.
+    property <duration> period: 1333ms;
+    property <float> t: Math.mod(animation-tick() / root.period, 1.0);
+    property <float> cycles: Math.floor(animation-tick() / root.period);
+    property <float> turn: Math.mod(animation-tick() / 1568ms, 1.0) * 360;
+    // The head runs ahead in the first half, the tail catches up in the
+    // second (eased both ways).
+    property <float> grow: root.t < 0.5 ? root.ease(root.t * 2) : 1;
+    property <float> shrink: root.t < 0.5 ? 0 : root.ease((root.t - 0.5) * 2);
+    property <float> start: Math.mod(root.turn + root.cycles * 250 + root.shrink * 250, 360);
+    property <float> sweep: 15 + (root.grow - root.shrink) * 250;
+
+    // On a 24-unit box; the stroke's width is in pixels, so the radius
+    // leaves room for half of it.
+    property <float> radius: 12 - root.thickness / root.width * 12;
+    property <float> x1: 12 + root.radius * Math.cos(root.start * 1deg);
+    property <float> y1: 12 + root.radius * Math.sin(root.start * 1deg);
+    property <float> x2: 12 + root.radius * Math.cos((root.start + root.sweep) * 1deg);
+    property <float> y2: 12 + root.radius * Math.sin((root.start + root.sweep) * 1deg);
+
+    pure function ease(x: float) -> float {
+        x * x * (3 - 2 * x)
+    }
+
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        stroke: root.indicator_color;
+        stroke-width: root.thickness;
+        stroke-line-cap: round;
+        fill: transparent;
+        commands: "M " + root.x1 + " " + root.y1 + " A " + root.radius + " " + root.radius + " 0 " + (root.sweep > 180 ? "1" : "0") + " 1 " + root.x2 + " " + root.y2;
+    }
+}

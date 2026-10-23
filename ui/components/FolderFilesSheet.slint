@@ -1,0 +1,172 @@
+import { ListView } from "std-widgets.slint";
+import { ThemeSettings } from "../themes/theme.slint";
+import { FileType, FileTypeIcon } from "FileTypeIcon.slint";
+import { DragHandle } from "DragHandle.slint";
+
+// One file a finished folder download saved.
+export struct FolderFile {
+    name: string, // its path inside the folder
+    size: string,
+    file_type: FileType,
+    missing: bool, // moved or deleted since
+}
+
+// What a finished folder download (a playlist, a post, a torrent's files)
+// holds, filled in by Rust when its card is tapped.
+export global FolderFiles {
+    in-out property <bool> open: false;
+    in property <int> id;
+    in property <string> title;
+    in property <[FolderFile]> files;
+    // How many of them are gone.
+    in property <int> missing;
+    callback open_file(id: int, index: int);
+    callback open_folder(id: int);
+}
+
+component FileRow inherits Rectangle {
+    in property <FolderFile> file;
+    callback clicked();
+
+    height: 56px;
+    background: ta.pressed ? ThemeSettings.hover_color : transparent;
+    animate background { duration: 150ms; }
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 16px;
+
+        VerticalLayout {
+            alignment: center;
+            FileTypeIcon {
+                file_type: root.file.file_type;
+                muted: root.file.missing;
+                opacity: root.file.missing ? 0.55 : 1.0;
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            horizontal-stretch: 1;
+
+            Text {
+                text: root.file.name;
+                font-size: 15px;
+                color: ThemeSettings.text_color.transparentize(root.file.missing ? 45% : 0%);
+                overflow: elide;
+            }
+            Text {
+                text: root.file.missing ? @tr("Missing") : root.file.size;
+                font-size: 12px;
+                color: root.file.missing ? #E5534B : ThemeSettings.text_color.transparentize(35%);
+            }
+        }
+    }
+}
+
+// MD3 bottom sheet listing a folder download's files; tapping one opens it.
+export component FolderFilesSheet inherits Rectangle {
+    // Space the sheet may take; past this its list scrolls.
+    in property <length> available_height: 10000px;
+    // Springs back when let go short of dismissing (it follows the finger
+    // while dragged).
+    out property <length> drag_offset: handle.offset;
+    animate drag_offset { duration: handle.dragging ? 0ms : 250ms; easing: ease-out-quad; }
+    out property <bool> dragging: handle.dragging;
+    callback dismiss_requested();
+
+    public function reset() {
+        handle.reset();
+    }
+
+    height: Math.min(header.preferred-height + FolderFiles.files.length * 56px + 16px, root.available_height);
+    background: ThemeSettings.surface;
+    animate background { duration: ThemeSettings.fade; easing: ease-in-out; }
+    border-radius: 28px;
+    clip: true;
+    drop-shadow-blur: 12px;
+    drop-shadow-color: #00000020;
+
+    // Keeps taps on the sheet's gaps from reaching the backdrop behind it.
+    TouchArea { }
+
+    VerticalLayout {
+        header := VerticalLayout {
+            handle := DragHandle {
+                dismissed => { root.dismiss_requested(); }
+            }
+
+            HorizontalLayout {
+                padding-left: 24px;
+                padding-right: 12px;
+                padding-bottom: 8px;
+                spacing: 8px;
+
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 1;
+                    spacing: 2px;
+
+                    Text {
+                        text: FolderFiles.title;
+                        font-size: 22px;
+                        color: ThemeSettings.text_color;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: FolderFiles.missing > 0
+                            ? @tr("{n} file" | "{n} files" % FolderFiles.files.length) + " · " + @tr("{n} missing" | "{n} missing" % FolderFiles.missing)
+                            : @tr("{n} file" | "{n} files" % FolderFiles.files.length);
+                        font-size: 13px;
+                        color: FolderFiles.missing > 0 ? #E5534B : ThemeSettings.text_color.transparentize(35%);
+                    }
+                }
+
+                // MD3 text button.
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        height: 40px;
+                        width: folder_label.preferred-width + 24px;
+                        border-radius: 20px;
+                        background: folder_ta.pressed ? ThemeSettings.primary_accent.transparentize(88%) : transparent;
+                        animate background { duration: 150ms; }
+
+                        folder_ta := TouchArea {
+                            clicked => { FolderFiles.open_folder(FolderFiles.id); }
+                        }
+                        folder_label := Text {
+                            text: @tr("Open folder");
+                            font-size: 14px;
+                            font-weight: 500;
+                            color: ThemeSettings.primary_accent;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                height: 1px;
+                background: ThemeSettings.text_color.transparentize(90%);
+            }
+        }
+
+        ListView {
+            vertical-stretch: 1;
+            for file[i] in FolderFiles.files: FileRow {
+                file: file;
+                clicked => { FolderFiles.open_file(FolderFiles.id, i); }
+            }
+        }
+
+        Rectangle { height: 16px; }
+    }
+}

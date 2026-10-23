@@ -228,6 +228,7 @@ pub async fn get_info(url: &str) -> Result<MediaInfo, String> {
                     super::add_quality(&mut qualities, v.quality.clone(), v.size);
                 }
                 MediaItem {
+                    square_cover: false,
                     index,
                     kind: MediaKind::Video,
                     ext: "mp4".to_string(),
@@ -238,6 +239,7 @@ pub async fn get_info(url: &str) -> Result<MediaInfo, String> {
                 }
             }
             PinMedia::Image { url, width, height, size, caption } => MediaItem {
+                square_cover: false,
                 index,
                 kind: MediaKind::Image,
                 ext: "jpg".to_string(),
@@ -250,6 +252,7 @@ pub async fn get_info(url: &str) -> Result<MediaInfo, String> {
                 duration: None,
             },
             PinMedia::Gif { url, size, caption } => MediaItem {
+                square_cover: false,
                 index,
                 kind: MediaKind::Image,
                 ext: "gif".to_string(),
@@ -260,7 +263,7 @@ pub async fn get_info(url: &str) -> Result<MediaInfo, String> {
             },
         })
         .collect();
-    Ok(MediaInfo { service: Service::Pinterest, id, items, info_json: None })
+    Ok(MediaInfo { service: Service::Pinterest, id, title: None, items, info_json: None })
 }
 
 pub async fn resolve(url: &str, request: &MediaRequest) -> Result<Vec<Fetch>, String> {
