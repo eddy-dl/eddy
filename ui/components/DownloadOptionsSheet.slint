@@ -314,6 +314,9 @@ export component DownloadOptionsSheet inherits Rectangle {
                         horizontal-stretch: 1;
                         height: 48px;
                         clicked => {
+                            // The keyboard's unfinished word (a suggestion still underlined) only
+                            // reaches the field when it loses focus: so first, or it's left out.
+                            park.focus();
                             root.options_changed({
                                 speed_kbps: root.opt_speed_kbps,
                                 connections: root.opt_connections,
@@ -364,6 +367,9 @@ export component DownloadOptionsSheet inherits Rectangle {
                         height: 48px;
                         opacity: root.edit_text.is-empty ? 0.4 : 1.0;
                         clicked => {
+                            // The keyboard's unfinished word (a suggestion still underlined) only
+                            // reaches the field when it loses focus: so first, or it's left out.
+                            park.focus();
                             if (!root.edit_text.is-empty) {
                                 root.action(root.editing == 1 ? ItemAction.Rename : ItemAction.RefreshLink, root.edit_text);
                                 root.editing = 0;

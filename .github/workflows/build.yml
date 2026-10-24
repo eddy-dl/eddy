@@ -9,7 +9,10 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  SLINT_STYLE: material
+  # SLINT_STYLE is each job's own: fluent on the desktops, material on
+  # Android. Never Qt, even where it's installed: Slint would link it,
+  # making Qt something the app needs to start.
+  SLINT_NO_QT: "1"
   CARGO_INCREMENTAL: 0
   RUSTFLAGS: "-C debuginfo=0"
 
@@ -17,6 +20,8 @@ jobs:
   build-windows-x86_64:
     name: Build (Windows x86_64)
     runs-on: windows-latest
+    env:
+      SLINT_STYLE: fluent
     steps:
       - uses: actions/checkout@v6
 
@@ -52,6 +57,8 @@ jobs:
   build-windows-arm64:
     name: Build (Windows arm64)
     runs-on: windows-11-arm
+    env:
+      SLINT_STYLE: fluent
     steps:
       - uses: actions/checkout@v6
 
@@ -84,6 +91,8 @@ jobs:
   build-linux-x86_64:
     name: Build (Linux x86_64)
     runs-on: ubuntu-latest
+    env:
+      SLINT_STYLE: fluent
     steps:
       - uses: actions/checkout@v6
 
@@ -125,6 +134,8 @@ jobs:
   build-linux-arm64:
     name: Build (Linux arm64)
     runs-on: ubuntu-24.04-arm
+    env:
+      SLINT_STYLE: fluent
     steps:
       - uses: actions/checkout@v6
 
@@ -163,6 +174,8 @@ jobs:
   build-android:
     name: Build (Android)
     runs-on: ubuntu-latest
+    env:
+      SLINT_STYLE: material
     steps:
       - uses: actions/checkout@v6
 

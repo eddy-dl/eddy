@@ -6,6 +6,7 @@ export enum LinkBackend {
     Torrent, // magnet or .torrent, through aria2's BitTorrent
     Media, // a page's video / audio / images, through an extractor (yt-dlp or a native one)
     Book, // a web novel from a reading site, saved as an EPUB
+    Drive, // a Google Drive file, or a folder's files, through aria2
 }
 
 export enum ProbeState { Probing, Ready, Failed }

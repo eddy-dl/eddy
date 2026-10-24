@@ -1,5 +1,6 @@
 pub mod aria2;
 pub mod book;
+pub mod drive;
 pub mod media;
 
 use aria2::AriaEngineClient;
@@ -24,6 +25,9 @@ pub enum Backend {
     Auto,
     /// A web novel saved as an EPUB; `format` is a novels::NovelOptions.
     Book,
+    /// A Google Drive file or folder; `format` is a gdrive::DriveRequest
+    /// (a folder's picked files).
+    Drive,
 }
 
 impl Backend {
@@ -33,6 +37,7 @@ impl Backend {
             2 => Backend::Media,
             3 => Backend::Auto,
             4 => Backend::Book,
+            5 => Backend::Drive,
             _ => Backend::Direct,
         }
     }
@@ -43,6 +48,7 @@ impl Backend {
             Backend::Media => 2,
             Backend::Auto => 3,
             Backend::Book => 4,
+            Backend::Drive => 5,
         }
     }
 }
@@ -421,6 +427,7 @@ fn launch(request: &DownloadRequest) -> Result<Option<Handle>, String> {
         Backend::Direct => watch(engine().start_download(&request.url, &dir, name.as_deref(), None, &request.settings)?),
         Backend::Media => Some(Handle::Job(media::start(request, &dir, name, deliver.clone())?)),
         Backend::Book => Some(Handle::Job(book::start(request, &dir, name, deliver.clone())?)),
+        Backend::Drive => Some(Handle::Job(drive::start(request, &dir, name, deliver.clone())?)),
         Backend::Auto => {
             CHOOSING.fetch_add(1, Ordering::SeqCst);
             let mut request = request.clone();

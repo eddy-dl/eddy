@@ -161,6 +161,10 @@ pub fn load_preferences(ui_weak: slint::Weak<DownloaderApp>) {
 pub fn apply_font(theme: &ThemeSettings) {
     if std::env::var("SLINT_DEFAULT_FONT").is_ok_and(|p| !p.is_empty()) {
         theme.set_font_family("sans-serif".into());
+    } else if !cfg!(target_os = "android") {
+        // Roboto is material's (and Android's); a desktop style and the
+        // system pick their own (Segoe UI with Fluent).
+        theme.set_font_family("".into());
     }
 }
 

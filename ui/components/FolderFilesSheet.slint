@@ -97,7 +97,10 @@ export component FolderFilesSheet inherits Rectangle {
     TouchArea { }
 
     VerticalLayout {
+        // Only its own height: the list below takes the rest (a layout
+        // would otherwise share it, squeezing the list).
         header := VerticalLayout {
+            vertical-stretch: 0;
             handle := DragHandle {
                 dismissed => { root.dismiss_requested(); }
             }

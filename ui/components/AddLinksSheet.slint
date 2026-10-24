@@ -14,6 +14,14 @@ export component AddLinksSheet inherits Rectangle {
 
     private property <bool> has_text: !root.text.is-empty;
 
+    // Takes the focus off the text box before Add reads it.
+    park := FocusScope {
+        x: 0;
+        y: 0;
+        width: 0;
+        height: 0;
+    }
+
     height: layout.preferred-height;
     background: ThemeSettings.surface;
     animate background { duration: ThemeSettings.fade; easing: ease-in-out; }
@@ -92,6 +100,9 @@ export component AddLinksSheet inherits Rectangle {
                 opacity: root.has_text ? 1.0 : 0.4;
                 animate opacity { duration: 150ms; }
                 clicked => {
+                    // The keyboard's unfinished word (a suggestion still underlined) only
+                    // reaches the field when it loses focus: so first, or it's left out.
+                    park.focus();
                     if (root.has_text) {
                         root.process();
                     }

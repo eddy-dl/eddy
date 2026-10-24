@@ -13,7 +13,8 @@ object EddyNative {
     // than once.
     @JvmStatic external fun init(context: Context)
 
-    // backend: 0 = direct, 1 = torrent, 2 = yt-dlp, 3 = auto. selectFiles is
+    // backend: 0 = direct, 1 = torrent, 2 = media, 3 = auto, 4 = book,
+    // 5 = Google Drive (Backend::from_index). selectFiles is
     // a torrent's files to fetch ("1,3", 1-based), "" for all. Returns false
     // if it couldn't be started.
     // folder is a tree URI picked for this download, "" for the usual one.

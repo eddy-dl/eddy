@@ -26,6 +26,8 @@ thread_local! {
     static NEXT_ID: Cell<i32> = const { Cell::new(1) };
     // Media links' extractor details, by link id (needed again to download).
     static MEDIA: RefCell<HashMap<i32, MediaMeta>> = RefCell::new(HashMap::new());
+    // Drive folders' files, by link id, in the preview's order.
+    static DRIVE: RefCell<HashMap<i32, Vec<extractors::gdrive::Entry>>> = RefCell::new(HashMap::new());
     // Run when the last pending link is dealt with (the share popup closes).
     static ON_EMPTY: RefCell<Option<Box<dyn Fn()>>> = const { RefCell::new(None) };
 }
@@ -56,6 +58,7 @@ where
             LinkBackend::Torrent => Backend::Torrent,
             LinkBackend::Media => Backend::Media,
             LinkBackend::Book => Backend::Book,
+            LinkBackend::Drive => Backend::Drive,
             _ => Backend::Direct,
         };
         start_link(id, backend, format.to_string(), filename.to_string(), &options);
@@ -133,10 +136,14 @@ where
         for link in links {
             let torrent = link.backends.row_data(0) == Some(LinkBackend::Torrent);
             let book = link.backends.row_data(0) == Some(LinkBackend::Book);
+            let drive = link.backends.row_data(0) == Some(LinkBackend::Drive);
             let backend = match choice {
                 _ if torrent => Backend::Torrent,
                 // Books stay books, with the Books defaults.
                 _ if book => Backend::Book,
+                // Drive links have no other way; a folder unchecked yet
+                // downloads all its files.
+                _ if drive => Backend::Drive,
                 QuickBackend::Direct => Backend::Direct,
                 QuickBackend::Media => Backend::Media,
                 _ => Backend::Auto,
@@ -395,6 +402,19 @@ fn start_link(id: i32, backend: Backend, format: String, filename: String, optio
     let format = match backend {
         Backend::Media => serde_json::to_string(&media_request(id, &link, &format)).unwrap_or_default(),
         Backend::Book => serde_json::to_string(&book_options(&format)).unwrap_or_default(),
+        // A Drive folder's picked files.
+        Backend::Drive => match DRIVE.with(|d| d.borrow().get(&id).cloned()) {
+            Some(entries) => {
+                let picked: std::collections::HashSet<i32> = link.files.iter().filter(|f| f.selected).map(|f| f.index).collect();
+                if picked.is_empty() {
+                    crate::platform::show_toast("Pick at least one file to download");
+                    return;
+                }
+                let files = entries.into_iter().enumerate().filter(|(i, _)| picked.contains(&(*i as i32 + 1))).map(|(_, e)| e).collect();
+                serde_json::to_string(&extractors::gdrive::DriveRequest { files }).unwrap_or_default()
+            }
+            None => String::new(),
+        },
         _ => format,
     };
     let request = DownloadRequest {
@@ -433,6 +453,10 @@ fn download_settings(options: &crate::LinkOptions, link: &PendingLink, audio: bo
             false => String::new(),
             true if link.backends.row_data(0) == Some(LinkBackend::Book) => "Books".to_string(),
             true if audio => category_folder(FileType::Audio).to_string(),
+            // A Drive folder's files aren't a torrent's.
+            true if link.file_type == FileType::Folder && link.backends.row_data(0) == Some(LinkBackend::Drive) => {
+                category_folder(FileType::Other).to_string()
+            }
             true => category_folder(link.file_type).to_string(),
         },
         replace_existing: crate::preferences::replace_existing(),
@@ -505,6 +529,7 @@ fn take_pending(id: i32) -> Option<PendingLink> {
         Some(m.remove(index))
     })?;
     MEDIA.with(|m| m.borrow_mut().remove(&id));
+    DRIVE.with(|d| d.borrow_mut().remove(&id));
     if PENDING.with(|m| m.row_count() == 0) {
         // Nothing left to show a check's result to.
         crate::children::stop_checks();
@@ -562,17 +587,29 @@ pub fn extract_links(text: &str) -> Vec<String> {
 
 fn initial_link(id: i32, url: &str) -> PendingLink {
     let magnet = is_magnet(url);
-    let filename = if magnet { magnet_name(url) } else { name_from_url(url) }.unwrap_or_default();
+    let drive = extractors::gdrive::parse_link(url);
+    // A Drive link's path says nothing of the file ("view", "uc").
+    let filename = if magnet { magnet_name(url) } else if drive.is_some() { None } else { name_from_url(url) }.unwrap_or_default();
     PendingLink {
         id,
         url: url.into(),
         state: ProbeState::Probing,
         error: SharedString::new(),
-        file_type: if magnet { torrent_type(&[], &filename) } else { file_type_for(&filename, None) },
+        file_type: match &drive {
+            Some(extractors::gdrive::Link::Folder(_)) => FileType::Folder,
+            _ if magnet => torrent_type(&[], &filename),
+            _ => file_type_for(&filename, None),
+        },
         filename: filename.into(),
         size: SharedString::new(),
         source: if magnet { "BitTorrent".into() } else { host_of(url).into() },
-        backends: backends_model(&[if magnet { LinkBackend::Torrent } else { LinkBackend::Direct }]),
+        backends: backends_model(&[if magnet {
+            LinkBackend::Torrent
+        } else if drive.is_some() {
+            LinkBackend::Drive
+        } else {
+            LinkBackend::Direct
+        }]),
         formats: ModelRc::new(VecModel::default()),
         files: ModelRc::new(VecModel::default()),
         files_selected: 0,
@@ -615,6 +652,8 @@ struct Probe {
     media: Option<MediaMeta>,
     /// A web novel's chapter counts, for book links.
     book: Option<BookMeta>,
+    /// A Drive folder's files, next to `files` (their ids, to download).
+    drive: Option<Vec<extractors::gdrive::Entry>>,
 }
 
 #[derive(Clone, Debug)]
@@ -698,6 +737,9 @@ fn apply_probe(id: i32, result: Result<Probe, String>) {
                 link.files_selected = probe.files.len() as i32;
                 link.files = files_model(&probe.files, &probe.items);
                 link.files_audio = 0;
+                if let Some(entries) = probe.drive {
+                    DRIVE.with(|d| d.borrow_mut().insert(id, entries));
+                }
                 if let Some(media) = probe.media {
                     link.service = media.service.label().into();
                     link.media_kind = match media.kind {
@@ -762,6 +804,7 @@ pub async fn pick_backend(url: &str) -> (Backend, String) {
                 Some(LinkBackend::Torrent) => Backend::Torrent,
                 Some(LinkBackend::Media) => Backend::Media,
                 Some(LinkBackend::Book) => Backend::Book,
+                Some(LinkBackend::Drive) => Backend::Drive,
                 _ => Backend::Direct,
             };
             // Best quality; music stays audio.
@@ -816,6 +859,7 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
             items: Vec::new(),
             media: None,
             book: None,
+            drive: None,
         });
     }
 
@@ -838,7 +882,14 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
             items: Vec::new(),
             media: None,
             book: Some(BookMeta { site: book.site, id: book.id.clone(), chapters: book.chapters.len(), locked, cover }),
+            drive: None,
         });
+    }
+
+    // Google Drive: a shared file's real name and size, or a shared
+    // folder's files.
+    if let Some(link) = extractors::gdrive::identify(url).await {
+        return drive_probe(link).await;
     }
 
     // TikTok, Instagram, Pinterest: their own extractors (yt-dlp if those fail).
@@ -861,6 +912,7 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
                 items: Vec::new(),
                 media: None,
                 book: None,
+                drive: None,
             });
         }
         return Err(format!("Unsupported link type ({scheme})"));
@@ -922,6 +974,7 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
                 items: Vec::new(),
                 media: None,
                 book: None,
+                drive: None,
             });
         }
     }
@@ -955,6 +1008,7 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
         items: Vec::new(),
         media: None,
         book: None,
+        drive: None,
     })
 }
 
@@ -990,7 +1044,63 @@ async fn probe_torrent_link(url: &str, filename: &str) -> Result<Probe, String> 
         items: Vec::new(),
         media: None,
         book: None,
+        drive: None,
     })
+}
+
+/// A Drive file: its name and size (worked out again when it downloads, as
+/// its link doesn't last). A folder: its files, like a torrent's.
+async fn drive_probe(link: extractors::gdrive::Link) -> Result<Probe, String> {
+    use extractors::gdrive::{self, Link};
+    let empty = Probe {
+        filename: String::new(),
+        file_type: FileType::Other,
+        size: String::new(),
+        backends: vec![LinkBackend::Drive],
+        formats: Vec::new(),
+        files: Vec::new(),
+        items: Vec::new(),
+        media: None,
+        book: None,
+        drive: None,
+    };
+    match link {
+        Link::File(id) => {
+            let file = gdrive::resolve(&id, "").await?;
+            Ok(Probe {
+                file_type: file_type_for(&file.name, None),
+                size: file.size.map(format_size).unwrap_or_default(),
+                filename: file.name,
+                ..empty
+            })
+        }
+        Link::Folder(id) => {
+            let folder = gdrive::list_folder(&id).await?;
+            if folder.entries.is_empty() {
+                return Err("This Drive folder has no files to download".to_string());
+            }
+            if folder.truncated {
+                log::warn!("Drive folder {id} has more than {} files; listing the first", gdrive::MAX_FILES);
+            }
+            let files: Vec<(usize, String, u64)> =
+                folder.entries.iter().enumerate().map(|(i, e)| (i + 1, e.path.clone(), e.size.unwrap_or(0))).collect();
+            // Sizes are known for most: a total of those, marked as at least.
+            let total: u64 = folder.entries.iter().filter_map(|e| e.size).sum();
+            let all_sized = folder.entries.iter().all(|e| e.size.is_some());
+            Ok(Probe {
+                filename: clean_name(&folder.name),
+                file_type: FileType::Folder,
+                size: match (total, all_sized) {
+                    (0, _) => String::new(),
+                    (n, true) => format_size(n),
+                    (n, false) => format!("{}+", format_size(n)),
+                },
+                files,
+                drive: Some(folder.entries),
+                ..empty
+            })
+        }
+    }
 }
 
 /// A torrent's files in its own order, numbered from 1 like aria2's
@@ -1143,7 +1253,7 @@ fn describe_error(error: reqwest::Error) -> String {
 
 /// The file name from a Content-Disposition header, preferring the
 /// `filename*=UTF-8''…` form.
-fn disposition_name(value: &str) -> Option<String> {
+pub(crate) fn disposition_name(value: &str) -> Option<String> {
     let mut plain = None;
     for part in value.split(';').map(str::trim) {
         if let Some(encoded) = part.strip_prefix("filename*=") {
@@ -1275,6 +1385,7 @@ async fn media_probe(info: MediaInfo) -> Probe {
             info_json: info.info_json,
         }),
         book: None,
+        drive: None,
     }
 }
 

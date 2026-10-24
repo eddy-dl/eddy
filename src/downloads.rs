@@ -65,6 +65,9 @@ pub struct Saved {
     /// A new name for an unfinished download, given to the file once it's
     /// done.
     pub rename_to: Option<String>,
+    /// `name` is one the user gave (renamed while downloading): finishing
+    /// keeps it, rather than taking the file's own.
+    pub named: bool,
     /// A web novel's book, once saved: the library (see `saved_book`).
     pub book: Option<crate::novels::SavedBook>,
     /// A folder picked for an unfinished download (as `request.folder`
@@ -383,7 +386,9 @@ pub fn ended(id: i64, handle: Option<&Handle>, name: &str, ok: bool, message: &s
         entry.saved.state = if ok { State::Completed } else { State::Failed };
         entry.saved.message = message.to_string();
         if ok {
-            entry.saved.name = name.to_string();
+            if !entry.saved.named {
+                entry.saved.name = name.to_string();
+            }
             entry.saved.partial.clear();
             // Several files: the folder they're in, not the first of them.
             let mut path = path.map(|p| top_item(&entry.saved, p));
@@ -402,8 +407,8 @@ pub fn ended(id: i64, handle: Option<&Handle>, name: &str, ok: bool, message: &s
                 Some(dir) if entry.saved.is_folder => folder_listing(dir),
                 _ => Vec::new(),
             };
-            // A torrent's one file, now that it's known.
-            if entry.saved.request.backend == Backend::Torrent && !entry.saved.is_folder {
+            // A torrent's (or a Drive link's) one file, now that it's known.
+            if matches!(entry.saved.request.backend, Backend::Torrent | Backend::Drive) && !entry.saved.is_folder {
                 if let Some(name) = path.as_ref().and_then(|p| p.file_name()) {
                     entry.saved.file_type = file_type_index(crate::links::file_type_for(&name.to_string_lossy(), None));
                 }
@@ -435,6 +440,9 @@ fn several_files(request: &DownloadRequest) -> bool {
         Backend::Media => serde_json::from_str::<crate::extractors::MediaRequest>(&request.format).is_ok_and(|media| {
             media.items.len() > 1 || (media.playlist && media.items.is_empty() && media.entries > 1)
         }),
+        // A folder's files, however many: they go in a folder.
+        Backend::Drive => matches!(crate::extractors::gdrive::parse_link(&request.url), Some(crate::extractors::gdrive::Link::Folder(_)))
+            || !request.format.is_empty(),
         _ => false,
     }
 }
@@ -816,6 +824,7 @@ fn rename(id: i64, name: &str) {
             // Still downloading: the file gets the name once it's done.
             entry.saved.rename_to = Some(name.clone());
             entry.saved.name = name;
+            entry.saved.named = true;
             save(entry);
             return;
         }
@@ -980,10 +989,42 @@ pub fn apply_move(id: i64, path: Option<std::path::PathBuf>, deliver: Option<dow
     }
 }
 
+/// A finished download's names, while it's still where it was written (a
+/// picked folder's copy is made from there next, so after it would be too
+/// late): a torrent's folder takes the preview's name, then a rename made
+/// while it downloaded is applied. Returns where its first file is now.
+pub fn name_torrent_folder(id: i64, path: Option<std::path::PathBuf>, deliver: Option<&downloader::Deliver>) -> Option<std::path::PathBuf> {
+    let path = torrent_folder(id, path, deliver)?;
+    Some(apply_rename(id, path))
+}
+
+/// A rename made while it downloaded: given to what it saved at the top of
+/// its folder (its file, or the folder its files went into).
+fn apply_rename(id: i64, path: std::path::PathBuf) -> std::path::PathBuf {
+    with_entries(|entries| {
+        let Some(entry) = entries.iter_mut().find(|e| e.id == id) else {
+            return path.clone();
+        };
+        let Some(name) = entry.saved.rename_to.take() else {
+            return path.clone();
+        };
+        let top = top_item(&entry.saved, path.clone());
+        let new_top = downloader::free_path(&renamed(&top, &name));
+        if std::fs::rename(&top, &new_top).is_err() {
+            log::warn!("couldn't rename {} to {name}", top.display());
+            return path.clone();
+        }
+        entry.saved.name = new_top.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(name);
+        save(entry);
+        // The first file, inside what was renamed.
+        path.strip_prefix(&top).map(|rel| if rel.as_os_str().is_empty() { new_top.clone() } else { new_top.join(rel) }).unwrap_or(new_top)
+    })
+}
+
 /// A finished torrent with several files: its folder (the torrent's own
 /// name) renamed to the folder name the preview gave it. Returns where its
 /// first file is now.
-pub fn name_torrent_folder(id: i64, path: Option<std::path::PathBuf>, deliver: Option<&downloader::Deliver>) -> Option<std::path::PathBuf> {
+fn torrent_folder(id: i64, path: Option<std::path::PathBuf>, deliver: Option<&downloader::Deliver>) -> Option<std::path::PathBuf> {
     let path = path?;
     let wanted = with_entries(|entries| {
         let request = &entries.iter().find(|e| e.id == id)?.saved.request;
@@ -1473,6 +1514,7 @@ fn view(entry: &Entry, state: State) -> DownloadItem {
             Backend::Torrent => LinkBackend::Torrent,
             Backend::Media => LinkBackend::Media,
             Backend::Book => LinkBackend::Book,
+            Backend::Drive => LinkBackend::Drive,
             Backend::Direct | Backend::Auto => LinkBackend::Direct,
         },
         folder: saved.folder.clone().into(),
@@ -1545,7 +1587,7 @@ fn guess_type(request: &DownloadRequest) -> FileType {
                 FileType::Video
             }
         }
-        Backend::Direct | Backend::Auto => {
+        Backend::Direct | Backend::Auto | Backend::Drive => {
             let name = if request.filename.is_empty() { downloader::label_for(request) } else { request.filename.clone() };
             crate::links::file_type_for(&name, None)
         }

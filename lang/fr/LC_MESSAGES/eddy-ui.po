@@ -224,6 +224,9 @@ msgstr "Télécharger avec"
 msgid "Torrent"
 msgstr "Torrent"
 
+msgid "Google Drive"
+msgstr "Google Drive"
+
 msgid "Direct"
 msgstr "Direct"
 
@@ -706,6 +709,9 @@ msgstr "Nom du dossier"
 
 msgid "The playlist's or post's name"
 msgstr "Le nom de la playlist ou de la publication"
+
+msgid "The Drive folder's name"
+msgstr "Le nom du dossier Drive"
 
 msgid "Bitrate for this one"
 msgstr "Débit pour celui-ci"

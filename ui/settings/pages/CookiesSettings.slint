@@ -100,8 +100,10 @@ export component CookiesSettings inherits Rectangle {
                 height: 48px;
                 opacity: root.dirty ? 1.0 : 0.45;
                 clicked => {
+                    // The keyboard's unfinished word (a suggestion still underlined) only
+                    // reaches the field when it loses focus: so first, or it's left out.
+                    park.focus();
                     if (root.dirty) {
-                        park.focus();
                         AppSettings.cookies_save(root.draft);
                     }
                 }
