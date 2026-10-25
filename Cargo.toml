@@ -21,6 +21,11 @@ path = "src/main.rs"
 aria2-core = { git = "https://github.com/balovess/aria2_rust/", package = "aria2-core", features = ["bittorrent", "metalink", "sftp"] }
 # Torrent file parsing (names and sizes for picked .torrent files).
 aria2-protocol = { git = "https://github.com/balovess/aria2_rust/", package = "aria2-protocol" }
+# MEGA: its files are AES-128-CTR encrypted, names AES-CBC, keys AES-ECB
+# (versions already in the tree). 0.9 uses ARMv8's AES instructions when the
+# CPU has them; 0.8 only with a --cfg flag, and ran 20x slower without.
+aes = "0.9"
+ctr = "0.10"
 base64 = "0.21"
 dirs = "5.0"
 linkify = "0.11"

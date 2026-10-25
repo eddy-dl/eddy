@@ -9,6 +9,7 @@
 pub mod gdrive;
 pub mod http;
 pub mod instagram;
+pub mod mega;
 pub mod packed;
 pub mod pinterest;
 pub mod tikmate;

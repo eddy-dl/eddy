@@ -2,6 +2,7 @@ pub mod aria2;
 pub mod book;
 pub mod drive;
 pub mod media;
+pub mod mega;
 
 use aria2::AriaEngineClient;
 use aria2_core::engine::download_engine::DownloadEngine;
@@ -28,6 +29,9 @@ pub enum Backend {
     /// A Google Drive file or folder; `format` is a gdrive::DriveRequest
     /// (a folder's picked files).
     Drive,
+    /// A MEGA file or folder; `format` is a mega::MegaRequest (a folder's
+    /// picked files).
+    Mega,
 }
 
 impl Backend {
@@ -38,6 +42,7 @@ impl Backend {
             3 => Backend::Auto,
             4 => Backend::Book,
             5 => Backend::Drive,
+            6 => Backend::Mega,
             _ => Backend::Direct,
         }
     }
@@ -49,6 +54,7 @@ impl Backend {
             Backend::Auto => 3,
             Backend::Book => 4,
             Backend::Drive => 5,
+            Backend::Mega => 6,
         }
     }
 }
@@ -518,6 +524,7 @@ fn launch(request: &DownloadRequest) -> Result<Option<Handle>, String> {
         Backend::Media => Some(Handle::Job(media::start(request, &dir, name, deliver.clone())?)),
         Backend::Book => Some(Handle::Job(book::start(request, &dir, name, deliver.clone())?)),
         Backend::Drive => Some(Handle::Job(drive::start(request, &dir, name, deliver.clone())?)),
+        Backend::Mega => Some(Handle::Job(mega::start(request, &dir, name, deliver.clone())?)),
         Backend::Auto => {
             CHOOSING.fetch_add(1, Ordering::SeqCst);
             let mut request = request.clone();

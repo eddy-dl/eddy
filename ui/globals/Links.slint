@@ -7,6 +7,7 @@ export enum LinkBackend {
     Media, // a page's video / audio / images, through an extractor (yt-dlp or a native one)
     Book, // a web novel from a reading site, saved as an EPUB
     Drive, // a Google Drive file, or a folder's files, through aria2
+    Mega, // a MEGA file, or a folder's files: fetched through aria2, then decrypted
 }
 
 export enum ProbeState { Probing, Ready, Failed }
