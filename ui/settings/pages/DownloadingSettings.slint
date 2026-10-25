@@ -2,6 +2,7 @@ import { AppSettings } from "../../globals/AppSettings.slint";
 import { DownloadOptionsEditor } from "../../components/DownloadOptionsEditor.slint";
 import { Chip, SectionLabel } from "../../components/Chips.slint";
 import { Note } from "../../components/Note.slint";
+import { SwitchRow } from "../../components/SwitchRow.slint";
 
 // Settings → Downloads → Downloading: every download's defaults (a
 // download's preview or options sheet can change them for it).
@@ -90,6 +91,15 @@ export component DownloadingSettings inherits Rectangle {
                     : @tr("The new one gets a number: \"name (1)\".");
                 font_size: 13px;
                 text_color: root.text_color;
+            }
+
+            SwitchRow {
+                flush: true;
+                title: @tr("Links with spaces");
+                subtitle: @tr("A pasted link runs on through spaces, up to the next link or the end of its line");
+                text_color: root.text_color;
+                checked <=> AppSettings.links_with_spaces;
+                toggled => { AppSettings.preferences_changed(); }
             }
 
             DownloadOptionsEditor {

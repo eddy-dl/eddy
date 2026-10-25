@@ -51,6 +51,8 @@ pub fn delete_document(_uri: &str) {}
 
 pub fn share(_files: &[String], _text: &str) {}
 
+pub fn open_in_folder(_doc: &str, _rel: &str) {}
+
 pub fn has_all_files_access() -> bool {
     false
 }

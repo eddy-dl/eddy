@@ -135,7 +135,8 @@ export global Links {
     in property <bool> ytdlp_available: true;
 
     // Find the links in some text and add them to `pending`.
-    callback process_text(string);
+    // The text, and whether its links may have spaces in them.
+    callback process_text(string, bool);
     // Download a pending link (and drop it from `pending`). `format` is a
     // LinkFormat selector for yt-dlp, otherwise "".
     callback start(id: int, backend: LinkBackend, format: string, filename: string, options: LinkOptions);

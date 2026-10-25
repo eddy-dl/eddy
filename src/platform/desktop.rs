@@ -174,6 +174,9 @@ pub fn show_toast(message: &str) {
 }
 pub fn set_bar_icons_dark(_: bool) {}
 
+/// Picked-folder documents are Android's; desktop downloads are plain files.
+pub fn open_in_folder(_doc: &str, _rel: &str) {}
+
 /// Desktops have no share sheet to hand things to.
 pub fn share(_files: &[String], _text: &str) {
     show_toast("Sharing isn't available here");

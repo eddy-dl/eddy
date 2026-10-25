@@ -1,4 +1,6 @@
 import { TextArea } from "TextArea.slint";
+import { SwitchRow } from "SwitchRow.slint";
+import { AppSettings } from "../globals/AppSettings.slint";
 import { ThemeSettings } from "../themes/theme.slint";
 import { ActionButton } from "Buttons.slint";
 
@@ -9,8 +11,15 @@ export component AddLinksSheet inherits Rectangle {
     callback process();
     callback cancel();
 
-    // Moves the keyboard to the text box (called when the sheet opens).
-    public function focus_input() { input.focus(); }
+    // Moves the keyboard to the text box (called when the sheet opens), and
+    // starts "Links with spaces" from Settings again.
+    public function focus_input() {
+        root.spaces = AppSettings.links_with_spaces;
+        input.focus();
+    }
+
+    // "Links with spaces", for this paste only (Settings keeps its own).
+    out property <bool> spaces: AppSettings.links_with_spaces;
 
     private property <bool> has_text: !root.text.is-empty;
 
@@ -75,6 +84,14 @@ export component AddLinksSheet inherits Rectangle {
             wrap: TextWrap.char-wrap;
             input-method-hints: { capitalization: CapitalizationMode.none, auto-correct: false, auto-complete: false };
             placeholder-text: @tr("Paste links, or any text containing them");
+        }
+
+        SwitchRow {
+            flush: true;
+            compact: true;
+            title: @tr("Links with spaces");
+            subtitle: @tr("For this paste: Settings keeps its own");
+            checked <=> root.spaces;
         }
 
         Text {

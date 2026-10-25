@@ -27,6 +27,7 @@
     <string name="download_failed_name">Download failed: %s</string>
     <string name="cant_open_file">Couldn\'t open the file</string>
     <string name="saved_in_folder">Saved in %1$s</string>
+    <string name="file_missing">This file can\'t be found. It may have been moved or deleted</string>
     <string name="cant_share">Couldn\'t share them</string>
     <string name="cant_delete_file">Couldn\'t delete the file</string>
     <string name="allow_installs">Allow Eddy to install apps, then tap the package again</string>

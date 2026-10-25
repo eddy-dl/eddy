@@ -14,13 +14,15 @@ object TreeCopy {
     // copied), and the copy of the first file or folder, to open it by.
     class Delivered(val error: String?, val uri: Uri?)
 
-    fun deliver(context: Context, staging: File, treeUri: String): Delivered {
+    // `merge`: folders go into ones of the same name already there (more
+    // of a finished download's files) rather than beside them.
+    fun deliver(context: Context, staging: File, treeUri: String, merge: Boolean = false): Delivered {
         return try {
             val tree = Uri.parse(treeUri)
             val root = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
             var first: Uri? = null
             staging.listFiles()?.forEach {
-                val copied = copy(context, it, root)
+                val copied = copy(context, it, root, merge)
                 if (first == null) first = copied
             }
             staging.deleteRecursively()
@@ -31,13 +33,32 @@ object TreeCopy {
         }
     }
 
+    // The folder `name` in `parent` (a document of a tree), if there is one.
+    private fun childFolder(context: Context, parent: Uri, name: String): Uri? {
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(parent, DocumentsContract.getDocumentId(parent))
+        val columns = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+        )
+        context.contentResolver.query(children, columns, null, null, null)?.use { c ->
+            while (c.moveToNext()) {
+                if (c.getString(1) == name && c.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR) {
+                    return DocumentsContract.buildDocumentUriUsingTree(parent, c.getString(0))
+                }
+            }
+        }
+        return null
+    }
+
     // Returns the copy's document.
-    private fun copy(context: Context, source: File, parent: Uri): Uri {
+    private fun copy(context: Context, source: File, parent: Uri, merge: Boolean): Uri {
         val resolver = context.contentResolver
         if (source.isDirectory) {
-            val dir = DocumentsContract.createDocument(resolver, parent, DocumentsContract.Document.MIME_TYPE_DIR, source.name)
+            val dir = (if (merge) childFolder(context, parent, source.name) else null)
+                ?: DocumentsContract.createDocument(resolver, parent, DocumentsContract.Document.MIME_TYPE_DIR, source.name)
                 ?: error("Couldn't create the folder ${source.name}")
-            source.listFiles()?.forEach { copy(context, it, dir) }
+            source.listFiles()?.forEach { copy(context, it, dir, merge) }
             return dir
         }
         val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(source.extension.lowercase())

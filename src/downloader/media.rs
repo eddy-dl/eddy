@@ -465,7 +465,7 @@ pub(super) async fn save(
     let dir = path.parent().unwrap_or(Path::new(".")).to_string_lossy().into_owned();
     let out = part.file_name().unwrap_or_default().to_string_lossy().into_owned();
     let engine = super::engine();
-    let gid = engine.start_download_with_headers(url, &dir, Some(&out), None, settings, headers)?;
+    let gid = engine.start_download_with_headers(url, &dir, Some(&out), None, settings, headers, None)?;
     set_aria(job, Some(gid.clone()));
     let result = loop {
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
@@ -480,6 +480,7 @@ pub(super) async fn save(
         }
     };
     set_aria(job, None);
+    engine.drop_lock_file(&gid);
     result?;
     if tokio::fs::metadata(&part).await.map(|m| m.len()).unwrap_or(0) == 0 {
         let _ = tokio::fs::remove_file(&part).await;

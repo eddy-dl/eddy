@@ -776,3 +776,24 @@ msgstr "Le nouveau reçoit un numéro : « nom (1) »."
 
 msgid "Other"
 msgstr "Autres"
+
+msgid "Links with spaces"
+msgstr "Liens avec des espaces"
+
+msgid "A pasted link runs on through spaces, up to the next link or the end of its line"
+msgstr "Un lien collé continue après les espaces, jusqu'au lien suivant ou à la fin de sa ligne"
+
+msgid "For this paste: Settings keeps its own"
+msgstr "Pour ce collage : les Paramètres gardent le leur"
+
+msgid "Saved"
+msgstr "Enregistré"
+
+msgid "Choose files"
+msgstr "Choisir les fichiers"
+
+msgid "Unticked files that are saved already stay where they are"
+msgstr "Les fichiers décochés déjà enregistrés restent où ils sont"
+
+msgid "Pick which of its files to download"
+msgstr "Choisissez lesquels de ses fichiers télécharger"

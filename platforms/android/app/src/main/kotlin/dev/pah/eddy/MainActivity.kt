@@ -143,6 +143,61 @@ class MainActivity : GameActivity() {
         }
     }
 
+    // Opens `relPath` ("sub/file.ext", inside the download's folder) in a
+    // picked folder's copy of a download, `docUri`: the folder itself, or a
+    // category folder it sits in (then it's one of that one's folders).
+    // Found a name at a time among each document's children.
+    fun openInFolder(docUri: String, relPath: String) {
+        Thread {
+            val found = try {
+                val root = android.net.Uri.parse(docUri)
+                val names = relPath.split('/').filter { it.isNotEmpty() }
+                fun walk(from: android.net.Uri) = names.fold<String, android.net.Uri?>(from) { doc, name -> doc?.let { child(root, it, name) } }
+                walk(root) ?: folders(root).firstNotNullOfOrNull { walk(it) }
+            } catch (e: Exception) {
+                android.util.Log.w("eddy", "couldn't find $relPath in $docUri", e)
+                null
+            }
+            runOnUiThread {
+                if (found != null) openFile(found.toString())
+                else Toast.makeText(this, getString(R.string.file_missing), Toast.LENGTH_LONG).show()
+            }
+        }.start()
+    }
+
+    // `parent`'s folders.
+    private fun folders(parent: android.net.Uri): List<android.net.Uri> {
+        val children = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(
+            parent, android.provider.DocumentsContract.getDocumentId(parent))
+        val columns = arrayOf(
+            android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE)
+        val found = mutableListOf<android.net.Uri>()
+        contentResolver.query(children, columns, null, null, null)?.use {
+            while (it.moveToNext()) {
+                if (it.getString(1) == android.provider.DocumentsContract.Document.MIME_TYPE_DIR) {
+                    found += android.provider.DocumentsContract.buildDocumentUriUsingTree(parent, it.getString(0))
+                }
+            }
+        }
+        return found
+    }
+
+    // `parent`'s child called `name` (under the tree `tree` was opened in).
+    private fun child(tree: android.net.Uri, parent: android.net.Uri, name: String): android.net.Uri? {
+        val children = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(
+            tree, android.provider.DocumentsContract.getDocumentId(parent))
+        val columns = arrayOf(
+            android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+        contentResolver.query(children, columns, null, null, null)?.use {
+            while (it.moveToNext()) {
+                if (it.getString(1) == name) return android.provider.DocumentsContract.buildDocumentUriUsingTree(tree, it.getString(0))
+            }
+        }
+        return null
+    }
+
     // Shares downloads: `paths` (newline-separated files or document URIs)
     // as attachments, with `text` (their links) alongside; or the text alone.
     fun shareItems(paths: String, text: String) {

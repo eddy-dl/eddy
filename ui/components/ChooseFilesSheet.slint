@@ -1,0 +1,228 @@
+import { ListView } from "std-widgets.slint";
+import { ThemeSettings } from "../themes/theme.slint";
+import { FileType, FileTypeIcon } from "FileTypeIcon.slint";
+import { DragHandle } from "DragHandle.slint";
+import { ActionButton } from "Buttons.slint";
+
+// One of a download's files (a torrent's) or items (a yt-dlp playlist's).
+export struct ChoiceFile {
+    index: int, // 1-based, as the preview listed it
+    path: string, // inside the torrent; an item's title
+    size: string,
+    file_type: FileType,
+    selected: bool,
+    // Saved already (a finished download's): ticked, it stays as it is.
+    saved: bool,
+}
+
+// Which of a torrent's files, or a yt-dlp playlist's items, a download
+// fetches: picked again from the files the preview listed, at any point
+// (downloading, paused, finished). Filled in by Rust.
+export global ChooseFiles {
+    in-out property <bool> open: false;
+    in property <int> id;
+    in property <string> title;
+    in-out property <[ChoiceFile]> files;
+    // How many of `files` are ticked.
+    in-out property <int> selected;
+    // Download with the ticked files (Rust reads `files`).
+    callback apply(id: int);
+    // Ticks every file, or none.
+    callback select_all(on: bool);
+
+    public function toggle(i: int) {
+        self.files[i].selected = !self.files[i].selected;
+        self.selected += self.files[i].selected ? 1 : -1;
+    }
+}
+
+component ChoiceRow inherits Rectangle {
+    in property <ChoiceFile> file;
+    callback clicked();
+
+    // MD3's minimum touch target (compact for a list).
+    height: 48px;
+    background: ta.pressed ? ThemeSettings.hover_color : transparent;
+    animate background { duration: 150ms; }
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 24px;
+        padding-right: 24px;
+        spacing: 16px;
+
+        VerticalLayout {
+            alignment: center;
+            // MD3 checkbox: 18 with 2 corners, outlined in on-surface-variant,
+            // or filled with the primary colour and a check.
+            Rectangle {
+                width: 18px;
+                height: 18px;
+                border-radius: 2px;
+                border-width: root.file.selected ? 0px : 2px;
+                border-color: ThemeSettings.text_color.transparentize(30%);
+                background: root.file.selected ? ThemeSettings.primary_accent : transparent;
+                animate background { duration: 150ms; }
+
+                Image {
+                    source: @image-url("../icons/rounded/check.svg");
+                    width: 16px;
+                    height: 16px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    colorize: #ffffff;
+                    opacity: root.file.selected ? 1 : 0;
+                }
+            }
+        }
+
+        Text {
+            text: root.file.path;
+            font-size: 14px;
+            color: root.file.selected ? ThemeSettings.text_color : ThemeSettings.text_color.transparentize(45%);
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+
+        Text {
+            text: root.file.saved ? @tr("Saved") : root.file.size;
+            font-size: 12px;
+            font-weight: root.file.saved ? 600 : 400;
+            color: root.file.saved ? ThemeSettings.primary_accent : ThemeSettings.text_color.transparentize(35%);
+            vertical-alignment: center;
+        }
+    }
+}
+
+// MD3 bottom sheet: a download's files to tick, and Download.
+export component ChooseFilesSheet inherits Rectangle {
+    // Space the sheet may take; past this its list scrolls.
+    in property <length> available_height: 10000px;
+    // Springs back when let go short of dismissing (it follows the finger
+    // while dragged).
+    out property <length> drag_offset: handle.offset;
+    animate drag_offset { duration: handle.dragging ? 0ms : 250ms; easing: ease-out-quad; }
+    out property <bool> dragging: handle.dragging;
+    callback dismiss_requested();
+
+    public function reset() {
+        handle.reset();
+    }
+
+    height: Math.min(header.preferred-height + ChooseFiles.files.length * 48px + footer.preferred-height, root.available_height);
+    background: ThemeSettings.surface;
+    animate background { duration: ThemeSettings.fade; easing: ease-in-out; }
+    border-radius: 28px;
+    clip: true;
+    drop-shadow-blur: 12px;
+    drop-shadow-color: #00000020;
+
+    // Keeps taps on the sheet's gaps from reaching the backdrop behind it.
+    TouchArea { }
+
+    VerticalLayout {
+        // Only its own height: the list below takes the rest.
+        header := VerticalLayout {
+            vertical-stretch: 0;
+            handle := DragHandle {
+                dismissed => { root.dismiss_requested(); }
+            }
+
+            HorizontalLayout {
+                padding-left: 24px;
+                padding-right: 12px;
+                padding-bottom: 8px;
+                spacing: 8px;
+
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 1;
+                    spacing: 2px;
+
+                    Text {
+                        text: @tr("Choose files");
+                        font-size: 22px;
+                        color: ThemeSettings.text_color;
+                    }
+                    Text {
+                        text: @tr("{} of {} selected", ChooseFiles.selected, ChooseFiles.files.length) + " · " + ChooseFiles.title;
+                        font-size: 13px;
+                        color: ThemeSettings.text_color.transparentize(35%);
+                        overflow: elide;
+                    }
+                }
+
+                // MD3 text button: everything, or nothing once everything
+                // is ticked.
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        property <bool> all_selected: ChooseFiles.selected == ChooseFiles.files.length;
+                        height: 40px;
+                        width: all_label.preferred-width + 24px;
+                        border-radius: 20px;
+                        background: all_ta.pressed ? ThemeSettings.primary_accent.transparentize(88%) : transparent;
+                        animate background { duration: 150ms; }
+
+                        all_ta := TouchArea {
+                            clicked => { ChooseFiles.select_all(!parent.all_selected); }
+                        }
+                        all_label := Text {
+                            text: parent.all_selected ? @tr("None") : @tr("All");
+                            font-size: 14px;
+                            font-weight: 500;
+                            color: ThemeSettings.primary_accent;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                height: 1px;
+                background: ThemeSettings.text_color.transparentize(90%);
+            }
+        }
+
+        ListView {
+            vertical-stretch: 1;
+            for file[i] in ChooseFiles.files: ChoiceRow {
+                file: file;
+                clicked => { ChooseFiles.toggle(i); }
+            }
+        }
+
+        footer := VerticalLayout {
+            vertical-stretch: 0;
+            padding: 16px;
+            padding-top: 8px;
+            spacing: 8px;
+
+            Rectangle {
+                height: 1px;
+                background: ThemeSettings.text_color.transparentize(90%);
+            }
+            Text {
+                text: @tr("Unticked files that are saved already stay where they are");
+                font-size: 12px;
+                color: ThemeSettings.text_color.transparentize(35%);
+                wrap: word-wrap;
+            }
+            ActionButton {
+                text: @tr("Download");
+                primary: true;
+                opacity: ChooseFiles.selected > 0 ? 1.0 : 0.38;
+                clicked => {
+                    if (ChooseFiles.selected > 0) {
+                        ChooseFiles.apply(ChooseFiles.id);
+                    }
+                }
+            }
+        }
+    }
+}

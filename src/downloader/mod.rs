@@ -83,6 +83,87 @@ pub struct DownloadRequest {
     /// (aria2 and yt-dlp find theirs themselves). Not saved.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub resume: bool,
+    /// A torrent's files not picked (1-based): written, where a picked
+    /// one's pieces run over into them, out of sight (`unpicked_dir`), not
+    /// among the download's files.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unpicked: Vec<usize>,
+    /// What the preview listed to pick from: a torrent's files or a yt-dlp
+    /// playlist's items, so they can be picked again later ("Choose
+    /// files"). Empty for the other downloads.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub choices: Vec<Choice>,
+}
+
+/// One of a download's files to pick from (see `DownloadRequest::choices`).
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct Choice {
+    /// 1-based: aria2's select-file number, or a playlist item's index + 1.
+    pub index: usize,
+    /// Its path inside the torrent, or the item's title.
+    pub path: String,
+    /// As shown ("1.2 GB").
+    pub size: String,
+}
+
+impl DownloadRequest {
+    /// The choices it fetches (`Choice::index`es): all of them when it
+    /// doesn't say.
+    pub fn picked(&self) -> Vec<usize> {
+        let picked: Vec<usize> = match self.backend {
+            Backend::Torrent => self
+                .select_files
+                .split(',')
+                .flat_map(|part| match part.trim().split_once('-') {
+                    Some((a, b)) => match (a.parse::<usize>(), b.parse::<usize>()) {
+                        (Ok(a), Ok(b)) => (a..=b).collect(),
+                        _ => Vec::new(),
+                    },
+                    None => part.trim().parse().ok().into_iter().collect(),
+                })
+                .collect(),
+            Backend::Media => serde_json::from_str::<crate::extractors::MediaRequest>(&self.format)
+                .map(|media| media.items.iter().map(|i| i + 1).collect())
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        if picked.is_empty() { self.choices.iter().map(|c| c.index).collect() } else { picked }
+    }
+
+    /// Fetches just `picked` (`Choice::index`es) of its choices.
+    pub fn pick(&mut self, picked: &[usize]) {
+        let all = picked.len() >= self.choices.len() && self.choices.iter().all(|c| picked.contains(&c.index));
+        match self.backend {
+            Backend::Torrent => {
+                self.select_files = if all { String::new() } else { picked.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",") };
+                self.unpicked = if all { Vec::new() } else { self.choices.iter().map(|c| c.index).filter(|i| !picked.contains(i)).collect() };
+            }
+            Backend::Media => {
+                if let Ok(mut media) = serde_json::from_str::<crate::extractors::MediaRequest>(&self.format) {
+                    media.items = if all { Vec::new() } else { picked.iter().map(|i| i - 1).collect() };
+                    self.format = serde_json::to_string(&media).unwrap_or_default();
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Where a torrent download's unpicked files go: Eddy's own storage, removed
+/// when it ends.
+pub fn unpicked_dir(id: i64) -> PathBuf {
+    PathBuf::from(crate::platform::get_app_data_dir()).join("unpicked").join(format!("download-{id}"))
+}
+
+/// aria2's index-out for a request's unpicked files ("N=path" lines).
+fn index_out(request: &DownloadRequest) -> Option<String> {
+    if request.unpicked.is_empty() {
+        return None;
+    }
+    let dir = unpicked_dir(request.id);
+    let _ = std::fs::create_dir_all(&dir);
+    Some(request.unpicked.iter().map(|n| format!("{n}={}", dir.join(n.to_string()).display())).collect::<Vec<_>>().join("\n"))
 }
 
 /// How a download goes about it. Each backend uses what it can: aria2
@@ -195,6 +276,9 @@ static WATCHED: Mutex<Vec<Watched>> = Mutex::new(Vec::new());
 pub struct Deliver {
     pub staging: std::path::PathBuf,
     pub tree_uri: String,
+    /// Its folders go into ones of the same name there (more of a finished
+    /// download's files), not beside them.
+    pub merge: bool,
 }
 /// Downloads that ended since the last `take_finished`.
 static FINISHED: Mutex<Vec<Finished>> = Mutex::new(Vec::new());
@@ -230,7 +314,8 @@ fn finished_by(id: i64, handle: Option<&Handle>, name: String, ok: bool, message
     } else {
         log::error!("download failed: {name}: {message}");
     }
-    let deliver = deliver.filter(|_| ok);
+    let adding = crate::downloads::adding(id);
+    let deliver = deliver.filter(|_| ok).map(|d| Deliver { merge: adding, ..d });
     // A torrent's folder takes the name the preview gave it; a folder
     // picked while it downloaded, it moves there now.
     let (path, deliver) = if ok {
@@ -239,9 +324,9 @@ fn finished_by(id: i64, handle: Option<&Handle>, name: String, ok: bool, message
     } else {
         (path, deliver)
     };
-    // Staged files move into the picked folder, so the path won't hold.
-    let path = if deliver.is_some() { None } else { path };
-    if !crate::downloads::ended(id, handle, &name, ok, &message, path) {
+    // Staged files move into the picked folder, so the path won't hold; it
+    // still says what was saved.
+    if !crate::downloads::ended_at(id, handle, &name, ok, &message, path, deliver.is_some()) {
         return;
     }
     FINISHED.lock().unwrap_or_else(|e| e.into_inner()).push(Finished { id, name, ok, message, deliver });
@@ -266,8 +351,12 @@ pub fn take_finished() -> Vec<Finished> {
                 // A torrent's metadata is done; its files are still to come.
                 let children = engine.followed_by(&w.gid);
                 if children.is_empty() {
-                    let path = (!p.filename.is_empty()).then(|| PathBuf::from(&p.filename));
+                    engine.remove_unpicked(&w.gid);
+                    let _ = std::fs::remove_dir_all(unpicked_dir(w.id));
+                    // The first picked file (aria2's first file may not be).
+                    let path = engine.first_picked(&w.gid).or_else(|| (!p.filename.is_empty()).then(|| PathBuf::from(&p.filename)));
                     finished_by(w.id, Some(&Handle::Aria(w.gid.clone())), w.label.clone(), true, String::new(), w.deliver.clone(), path);
+                    engine.drop_lock_file(&w.gid);
                 } else {
                     // Its progress is the files' now.
                     crate::downloads::running(w.id, Handle::Aria(children[0].clone()));
@@ -286,6 +375,7 @@ pub fn take_finished() -> Vec<Finished> {
                     log::error!(target: "aria2", "{}: {message}", w.label);
                 }
                 finished_by(w.id, Some(&Handle::Aria(w.gid.clone())), w.label.clone(), false, message, None, None);
+                engine.drop_lock_file(&w.gid);
                 false
             }
             _ => true,
@@ -386,7 +476,7 @@ fn launch(request: &DownloadRequest) -> Result<Option<Handle>, String> {
     let deliver = match &target {
         crate::storage::SaveTarget::Staged { tree_uri, staging } => {
             std::fs::create_dir_all(staging).map_err(|e| e.to_string())?;
-            Some(Deliver { staging: staging.clone(), tree_uri: tree_uri.clone() })
+            Some(Deliver { staging: staging.clone(), tree_uri: tree_uri.clone(), merge: false })
         }
         crate::storage::SaveTarget::Dir(_) => None,
     };
@@ -418,11 +508,11 @@ fn launch(request: &DownloadRequest) -> Result<Option<Handle>, String> {
         Backend::Torrent if !request.url.contains(':') || request.url.starts_with('/') => {
             // A saved .torrent file.
             let torrent = std::fs::read(&request.url).map_err(|e| e.to_string())?;
-            watch(engine().start_torrent(torrent, &dir, select, &request.settings)?)
+            watch(engine().start_torrent(torrent, &dir, select, index_out(request).as_deref(), &request.settings)?)
         }
         // A magnet, or a .torrent link aria2 fetches and then follows: the
         // files take their names from the torrent.
-        Backend::Torrent => watch(engine().start_download(&request.url, &dir, None, select, &request.settings)?),
+        Backend::Torrent => watch(engine().start_download_with_headers(&request.url, &dir, None, select, &request.settings, &[], index_out(request).as_deref())?),
         // Direct on a .torrent link saves the .torrent file itself.
         Backend::Direct => watch(engine().start_download(&request.url, &dir, name.as_deref(), None, &request.settings)?),
         Backend::Media => Some(Handle::Job(media::start(request, &dir, name, deliver.clone())?)),

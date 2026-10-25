@@ -43,8 +43,10 @@ where
     links.set_pending(PENDING.with(|m| ModelRc::from(m.clone())));
     links.set_ytdlp_available(crate::platform::ytdlp_ready());
 
-    links.on_process_text(|text| {
-        add_links_from_text(&text);
+    links.on_process_text(|text, spaces| {
+        extract_links_with(&text, spaces).iter().for_each(|url| {
+            add_url(url, true);
+        });
     });
 
     links.on_skip(|id| {
@@ -417,6 +419,22 @@ fn start_link(id: i32, backend: Backend, format: String, filename: String, optio
         },
         _ => format,
     };
+    // The torrent's other files, kept out of its folder.
+    let unpicked = if backend == Backend::Torrent && !select_files.is_empty() {
+        link.files.iter().filter(|f| !f.selected).map(|f| f.index as usize).collect()
+    } else {
+        Vec::new()
+    };
+    // A torrent's files and a yt-dlp playlist's items, to pick again later.
+    let ytdlp = MEDIA.with(|m| m.borrow().get(&id).is_some_and(|m| m.service == extractors::Service::YtDlp));
+    let choices = if link.files.row_count() > 1 && (backend == Backend::Torrent || (backend == Backend::Media && ytdlp)) {
+        link.files
+            .iter()
+            .map(|f| crate::downloader::Choice { index: f.index as usize, path: f.path.to_string(), size: f.size.to_string() })
+            .collect()
+    } else {
+        Vec::new()
+    };
     let request = DownloadRequest {
         url: link.url.to_string(),
         backend,
@@ -428,6 +446,8 @@ fn start_link(id: i32, backend: Backend, format: String, filename: String, optio
         // A book saved before is updated in place of a second copy.
         id: if backend == Backend::Book { link.book_saved_id as i64 } else { 0 },
         resume: false,
+        unpicked,
+        choices,
     };
     match crate::platform::start_download(&request) {
         Ok(()) => {
@@ -544,22 +564,73 @@ fn take_pending(id: i32) -> Option<PendingLink> {
 
 // --- Finding links ---
 
-/// Every link in `text`, in order, without duplicates. Magnets are found as
-/// whole words; anything else that looks like a web address counts too, with
-/// https:// assumed when the scheme is missing.
+/// Every link in `text`, in order, without duplicates (Settings → "Links
+/// with spaces" says how far one runs).
 pub fn extract_links(text: &str) -> Vec<String> {
+    extract_links_with(text, crate::preferences::links_with_spaces())
+}
+
+/// `extract_links`. Magnets are found word by word (see below); anything
+/// else that looks like a web address counts too, with https:// assumed
+/// when the scheme is missing. With `spaces`, a link runs on through spaces
+/// (kept as %20) until a word starts another (a protocol, or www.) or the
+/// line ends.
+pub fn extract_links_with(text: &str, spaces: bool) -> Vec<String> {
     let mut found: Vec<String> = Vec::new();
     let mut rest = String::with_capacity(text.len());
+    let trim = |w: &'_ str| -> String { w.trim_matches(|c| matches!(c, '<' | '>' | '"' | '\'' | '(' | ')' | ',')).to_string() };
+    let is_magnet = |w: &str| w.len() > 8 && w[..7].eq_ignore_ascii_case("magnet:");
+    let starts_link = |w: &str| {
+        let w = w.trim_start_matches(|c| matches!(c, '<' | '"' | '\'' | '('));
+        is_magnet(w) || w.starts_with("http://") || w.starts_with("https://")
+    };
 
-    for word in text.split_whitespace() {
-        let word = word.trim_matches(|c| matches!(c, '<' | '>' | '"' | '\'' | '(' | ')' | ','));
-        if word.len() > 8 && word[..7].eq_ignore_ascii_case("magnet:") {
-            found.push(word.to_string());
-        } else {
-            // Kept apart from magnets so their tracker URLs aren't picked up.
-            rest.push_str(word);
-            rest.push(' ');
+    for line in text.lines() {
+        if spaces {
+            let line = line.trim();
+            let starts = link_starts(line);
+            // What's before the first one goes to the usual finder.
+            rest.push_str(&line[..starts.first().copied().unwrap_or(line.len())]);
+            rest.push('\n');
+            for (k, &start) in starts.iter().enumerate() {
+                let end = starts.get(k + 1).copied().unwrap_or(line.len());
+                let link = trim(line[start..end].trim()).trim_end_matches(|c| matches!(c, '.' | ';' | ':' | '!' | '?')).to_string();
+                let link = link.split_whitespace().collect::<Vec<_>>().join("%20");
+                found.push(if link.contains(':') { link } else { format!("https://{link}") });
+            }
+            continue;
         }
+        let words: Vec<&str> = line.split_whitespace().collect();
+        let mut i = 0;
+        while i < words.len() {
+            let word = trim(words[i]);
+            if !is_magnet(&word) {
+                // Kept apart from magnets so their tracker URLs aren't picked up.
+                rest.push_str(&word);
+                rest.push(' ');
+                i += 1;
+                continue;
+            }
+            // A name pasted with its spaces in (dn=Some Name) splits the
+            // magnet into words: it carries on, on the same line and before
+            // the next link, through the last word still holding one of its
+            // parameters; the spaces become %20.
+            let end = (i + 1..words.len())
+                .take_while(|&j| !starts_link(words[j]))
+                .filter(|&j| MAGNET_PARAMS.iter().any(|p| words[j].contains(p)))
+                .last();
+            match end {
+                Some(end) => {
+                    found.push(trim(&words[i..=end].join("%20")));
+                    i = end + 1;
+                }
+                None => {
+                    found.push(word);
+                    i += 1;
+                }
+            }
+        }
+        rest.push('\n');
     }
 
     let mut finder = linkify::LinkFinder::new();
@@ -582,6 +653,28 @@ pub fn extract_links(text: &str) -> Vec<String> {
     }
     unique
 }
+
+/// Where links start in `line`: a protocol, or www., at the start of a
+/// word (a tracker's http:// inside a magnet isn't one), past an opening
+/// bracket or quote.
+fn link_starts(line: &str) -> Vec<usize> {
+    let lower = line.to_ascii_lowercase();
+    let mut starts = Vec::new();
+    for scheme in ["magnet:", "http://", "https://", "ftp://", "www."] {
+        for (at, _) in lower.match_indices(scheme) {
+            let before = line[..at].chars().next_back();
+            if before.is_none_or(|c| c.is_whitespace() || matches!(c, '<' | '"' | '\'' | '(')) {
+                starts.push(at);
+            }
+        }
+    }
+    starts.sort_unstable();
+    starts
+}
+
+/// A magnet's parameters past its first: the words of a name with spaces
+/// end before the next of these.
+const MAGNET_PARAMS: [&str; 11] = ["&xt=", "&dn=", "&tr=", "&xl=", "&ws=", "&as=", "&xs=", "&kt=", "&mt=", "&so=", "&x.pe="];
 
 // --- What the UI shows before and after the check ---
 
@@ -1637,11 +1730,46 @@ mod tests {
                     <magnet:?xt=urn:btih:abc&dn=Some+Thing&tr=http://tracker.example/announce> \
                     and https://example.com/a.zip again";
         assert_eq!(
-            extract_links(text),
+            extract_links_with(text, false),
             vec![
                 "magnet:?xt=urn:btih:abc&dn=Some+Thing&tr=http://tracker.example/announce",
                 "https://example.com/a.zip",
                 "https://example.org/b.iso",
+            ]
+        );
+    }
+
+    #[test]
+    fn magnet_with_spaces_in_its_name() {
+        let text = "magnet:?xt=urn:btih:8ca5&dn=Avatar Seven Havens S01E09 [ UIndex.org ]&tr=udp://t.example:1337/announce&tr=udp://u.example:6969/announce well\n\
+                    magnet:?xt=urn:btih:abc&dn=Plain and https://example.com/a.zip";
+        assert_eq!(
+            extract_links_with(text, false),
+            vec![
+                "magnet:?xt=urn:btih:8ca5&dn=Avatar%20Seven%20Havens%20S01E09%20[%20UIndex.org%20]&tr=udp://t.example:1337/announce&tr=udp://u.example:6969/announce",
+                "magnet:?xt=urn:btih:abc&dn=Plain",
+                "https://example.com/a.zip",
+            ]
+        );
+        assert_eq!(
+            magnet_name("magnet:?xt=urn:btih:8ca5&dn=Avatar%20Seven%20Havens%20S01E09&tr=udp://t").as_deref(),
+            Some("Avatar Seven Havens S01E09")
+        );
+    }
+
+    #[test]
+    fn links_with_spaces() {
+        let text = "see https://example.com/My File.pdf.\n\
+                    magnet:?xt=urn:btih:abc&dn=A Name&tr=udp://t.example https://x.org/b c.zip www.y.net/d e\n\
+                    and example.org/plain";
+        assert_eq!(
+            extract_links_with(text, true),
+            vec![
+                "https://example.com/My%20File.pdf",
+                "magnet:?xt=urn:btih:abc&dn=A%20Name&tr=udp://t.example",
+                "https://x.org/b%20c.zip",
+                "https://www.y.net/d%20e",
+                "https://example.org/plain",
             ]
         );
     }

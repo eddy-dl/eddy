@@ -10,7 +10,7 @@ import { LinkBackend, LinkOptions } from "../globals/Links.slint";
 
 // Things that can be done to one download. `Rename` and `RefreshLink` come
 // with the new name or link.
-export enum ItemAction { Pause, Resume, Cancel, Delete, Rename, ChangeFolder, RefreshLink, Open, UpdateBook }
+export enum ItemAction { Pause, Resume, Cancel, Delete, Rename, ChangeFolder, RefreshLink, Open, UpdateBook, ChooseFiles }
 
 // One option: icon, label, and a detail line (the current value).
 component OptionRow inherits Rectangle {
@@ -247,6 +247,12 @@ export component DownloadOptionsSheet inherits Rectangle {
                         root.opt_category = root.item.options.category;
                         root.editing = 3;
                     }
+                }
+                if root.item.can_choose: OptionRow {
+                    label: @tr("Choose files");
+                    detail: @tr("Pick which of its files to download");
+                    icon: @image-url("../icons/rounded/checklist.svg");
+                    clicked => { root.action(ItemAction.ChooseFiles, ""); }
                 }
                 if root.can_refresh: OptionRow {
                     label: @tr("Refresh link");

@@ -8,6 +8,7 @@ import { BookSettings } from "pages/BookSettings.slint";
 import { DownloadingSettings } from "pages/DownloadingSettings.slint";
 import { CookiesSettings } from "pages/CookiesSettings.slint";
 import { AboutSettings } from "pages/AboutSettings.slint";
+import { SettingsLayout } from "SettingsCard.slint";
 import { AppSettings } from "../globals/AppSettings.slint";
 import { ThemeSettings } from "../themes/theme.slint"; 
 import { AppearanceSettings } from "pages/AppearanceSettings.slint";
@@ -107,7 +108,7 @@ export component SettingsPage inherits Rectangle {
         y: 0px;
         width: root.left_header_width;
         height: root.header_height;
-        background: root.left_header_tinted ? ThemeSettings.surface : transparent;
+        background: root.left_header_tinted ? (SettingsLayout.cards ? ThemeSettings.settings_header : ThemeSettings.surface) : transparent;
         animate background {
             duration: 200ms;
             easing: ease-in-out;
@@ -119,7 +120,7 @@ export component SettingsPage inherits Rectangle {
         y: 0px;
         width: root.width - root.left_header_width;
         height: root.header_height;
-        background: root.right_header_tinted ? ThemeSettings.surface : transparent;
+        background: root.right_header_tinted ? (SettingsLayout.cards ? ThemeSettings.settings_header : ThemeSettings.surface) : transparent;
         animate background {
             duration: 200ms;
             easing: ease-in-out;
