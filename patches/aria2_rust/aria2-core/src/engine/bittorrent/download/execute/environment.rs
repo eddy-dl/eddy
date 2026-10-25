@@ -99,6 +99,21 @@ impl BtDownloadCommand {
         }
     }
 
+    /// Eddy: a test for a checkpoint's bitfield: whether the files its
+    /// finished pieces are in are still there, so its progress can be
+    /// trusted. Owns what it needs (it's held across the checkpoint's load).
+    pub(super) fn bt_checkpoint_files_exist(&self) -> impl Fn(&[u8]) -> bool + Send + Sync + 'static {
+        let layout = self.multi_file_layout.clone();
+        let output_path = self.output_path.clone();
+        move |bitfield: &[u8]| match layout.as_ref() {
+            Some(layout) => (0..layout.num_files()).all(|index| {
+                layout.file_completed_bytes(index, bitfield) == 0
+                    || layout.file_absolute_path(index).is_some_and(|path| path.is_file())
+            }),
+            None => output_path.is_file(),
+        }
+    }
+
     pub(super) async fn create_zero_length_payload(&self) -> Result<()> {
         let paths = match self.multi_file_layout.as_ref() {
             Some(layout) => (0..layout.num_files())

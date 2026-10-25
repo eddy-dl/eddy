@@ -17,6 +17,17 @@ impl BtDownloadCommand {
         meta: &aria2_protocol::bittorrent::torrent::parser::TorrentMeta,
     ) -> Result<()> {
         self.return_all_checked_out_peers();
+        // Eddy: done, it takes no more peers, and the same torrent can be
+        // started again (more of its files) while this command is still
+        // around; its route would otherwise stay registered until it's
+        // dropped ("info-hash route is already registered"). First, as the
+        // steps below can return early.
+        if self.bt_peer_route.take().is_some() {
+            info!("[BT] Incoming peer route released on completion");
+        }
+        // Eddy: its files too: it writes no more, and a new download of the
+        // same torrent (more of its files) may write next to them.
+        self.output_path_reservation = None;
         let final_speed = elapsed_speed(self.completed_bytes, start_time);
         self.progress.set_completed_length(self.completed_bytes);
         self.progress.set_download_speed(final_speed);
