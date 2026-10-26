@@ -318,9 +318,11 @@ export component LinkPreviewSheet inherits Rectangle {
     private property <bool> torrent_file_direct: root.torrent_link && root.backend == LinkBackend.Direct;
     // A torrent's own files keep their names; picking which ones replaces
     // the name field.
-    // A post's or playlist's items get picked the same way.
-    private property <bool> show_files: (root.backend == LinkBackend.Torrent || root.is_media) && root.link.files.length > 1;
-    private property <bool> can_download: !((root.backend == LinkBackend.Torrent || root.is_media)
+    // A post's or playlist's items get picked the same way, and a Drive
+    // folder's files (even just one: they still go in its folder).
+    private property <bool> drive_folder: root.backend == LinkBackend.Drive && root.link.files.length > 0;
+    private property <bool> show_files: ((root.backend == LinkBackend.Torrent || root.is_media) && root.link.files.length > 1) || root.drive_folder;
+    private property <bool> can_download: !((root.backend == LinkBackend.Torrent || root.is_media || root.drive_folder)
         && root.link.files.length > 0 && root.link.files_selected == 0);
 
     height: Math.min(root.content_height, root.available_height);
@@ -611,6 +613,7 @@ export component LinkPreviewSheet inherits Rectangle {
                         text: backend == LinkBackend.Media ? (root.link.service.is-empty ? @tr("Media") : root.link.service)
                             : backend == LinkBackend.Book ? (root.link.service.is-empty ? @tr("Book") : root.link.service)
                             : backend == LinkBackend.Torrent ? @tr("Torrent")
+                            : backend == LinkBackend.Drive ? @tr("Google Drive")
                             : @tr("Direct");
                         selected: root.backend == backend;
                         clicked => {
@@ -835,7 +838,8 @@ export component LinkPreviewSheet inherits Rectangle {
                         horizontal-stretch: 1;
                         font-size: 14px;
                         input-method-hints: { capitalization: CapitalizationMode.none, auto-correct: false, auto-complete: false };
-                        placeholder-text: root.show_files ? @tr("The playlist's or post's name") : @tr("Chosen when the download starts");
+                        placeholder-text: root.drive_folder ? @tr("The Drive folder's name")
+                            : root.show_files ? @tr("The playlist's or post's name") : @tr("Chosen when the download starts");
                     }
                     if root.torrent_file_direct: Text {
                         text: ".torrent";
@@ -952,6 +956,9 @@ export component LinkPreviewSheet inherits Rectangle {
                 opacity: root.can_download ? 1.0 : 0.4;
                 animate opacity { duration: 150ms; }
                 clicked => {
+                    // The keyboard's unfinished word (a suggestion still underlined) only
+                    // reaches the field when it loses focus: so first, or it's left out.
+                    park.focus();
                     if (root.can_download) {
                         root.download(root.backend,
                             // Audio: "audio|<kbps>|<codec>"; otherwise the quality's key.

@@ -10,7 +10,7 @@ import { LinkBackend, LinkOptions } from "../globals/Links.slint";
 
 // Things that can be done to one download. `Rename` and `RefreshLink` come
 // with the new name or link.
-export enum ItemAction { Pause, Resume, Cancel, Delete, Rename, ChangeFolder, RefreshLink, Open, UpdateBook }
+export enum ItemAction { Pause, Resume, Cancel, Delete, Rename, ChangeFolder, RefreshLink, Open, UpdateBook, ChooseFiles }
 
 // One option: icon, label, and a detail line (the current value).
 component OptionRow inherits Rectangle {
@@ -248,6 +248,12 @@ export component DownloadOptionsSheet inherits Rectangle {
                         root.editing = 3;
                     }
                 }
+                if root.item.can_choose: OptionRow {
+                    label: @tr("Choose files");
+                    detail: @tr("Pick which of its files to download");
+                    icon: @image-url("../icons/rounded/checklist.svg");
+                    clicked => { root.action(ItemAction.ChooseFiles, ""); }
+                }
                 if root.can_refresh: OptionRow {
                     label: @tr("Refresh link");
                     detail: @tr("Paste a new link if this one expired");
@@ -314,6 +320,9 @@ export component DownloadOptionsSheet inherits Rectangle {
                         horizontal-stretch: 1;
                         height: 48px;
                         clicked => {
+                            // The keyboard's unfinished word (a suggestion still underlined) only
+                            // reaches the field when it loses focus: so first, or it's left out.
+                            park.focus();
                             root.options_changed({
                                 speed_kbps: root.opt_speed_kbps,
                                 connections: root.opt_connections,
@@ -364,6 +373,9 @@ export component DownloadOptionsSheet inherits Rectangle {
                         height: 48px;
                         opacity: root.edit_text.is-empty ? 0.4 : 1.0;
                         clicked => {
+                            // The keyboard's unfinished word (a suggestion still underlined) only
+                            // reaches the field when it loses focus: so first, or it's left out.
+                            park.focus();
                             if (!root.edit_text.is-empty) {
                                 root.action(root.editing == 1 ? ItemAction.Rename : ItemAction.RefreshLink, root.edit_text);
                                 root.editing = 0;

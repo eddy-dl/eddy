@@ -67,13 +67,16 @@ component SidebarItem inherits Rectangle {
             width: 40px;
             height: 40px;
             border-radius: 20px;
-            background: ThemeSettings.is_dark ? icon_bg_color : icon_bg_color.mix(Colors.white, 80%);
+            // Greyscale in light mode: a light neutral circle (as the other
+            // accents' pastel ones), not the accent's mid grey.
+            property <bool> grey_light: ThemeSettings.accent == AccentColor.Greyscale && !ThemeSettings.is_dark;
+            background: ThemeSettings.is_dark ? icon_bg_color : self.grey_light ? #e3e3e3 : icon_bg_color.mix(Colors.white, 80%);
 
             Image {
                 source: root.icon_filled;
                 width: 24px;
                 height: 24px;
-                colorize: ThemeSettings.is_dark ? #1e1e2e : #2d3748;
+                colorize: ThemeSettings.is_dark ? #1e1e2e : parent.grey_light ? #3a3a3a : #2d3748;
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2;
             }

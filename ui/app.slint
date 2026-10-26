@@ -18,6 +18,7 @@ import { Wordmark } from "components/Wordmark.slint";
 import { SnackbarHost } from "components/SnackbarHost.slint";
 import { DownloadOptionsSheet, ItemAction } from "components/DownloadOptionsSheet.slint";
 import { FolderFiles, FolderFilesSheet } from "components/FolderFilesSheet.slint";
+import { ChooseFiles, ChooseFilesSheet } from "components/ChooseFilesSheet.slint";
 import { Links, LinkBackend, LinkOptions } from "globals/Links.slint";
 import { FolderBrowser } from "globals/FolderBrowser.slint";
 import { FolderBrowserSheet } from "components/FolderBrowserSheet.slint";
@@ -36,12 +37,14 @@ export { DownloadItem, DownloadState, FileType } from "components/DownloadCards.
 export { SelectionAction } from "components/SelectionActions.slint";
 export { ItemAction } from "components/DownloadOptionsSheet.slint";
 export { FolderFiles, FolderFile } from "components/FolderFilesSheet.slint";
+export { ChooseFiles, ChoiceFile } from "components/ChooseFilesSheet.slint";
 
 // The Android share popup's window. Exported before DownloaderApp so the
 // viewer (which shows the last component) still opens the main app.
 export { PreviewApp } from "popup.slint";
 export { FolderBrowser } from "globals/FolderBrowser.slint";
-export { SettingsLayout } from "settings/SettingsCard.slint";
+import { SettingsLayout } from "settings/SettingsCard.slint";
+export { SettingsLayout }
 export { Links, LinkBackend, LinkFormat, LinkOptions, PendingLink, ProbeState, QuickBackend, TorrentFile } from "globals/Links.slint";
 
 export component DownloaderApp inherits Window {
@@ -390,6 +393,10 @@ export component DownloaderApp inherits Window {
                 }
                 if (root.item_options_open) {
                     root.close_item_options();
+                    return accept;
+                }
+                if (ChooseFiles.open) {
+                    ChooseFiles.open = false;
                     return accept;
                 }
                 if (FolderFiles.open) {
@@ -1216,7 +1223,7 @@ export component DownloaderApp inherits Window {
 
                 cancel => { root.close_sheets(); }
                 process => {
-                    Links.process_text(root.add_links_text);
+                    Links.process_text(root.add_links_text, add_links_sheet.spaces);
                     root.add_links_text = "";
                     root.close_sheets();
                 }
@@ -1334,6 +1341,41 @@ export component DownloaderApp inherits Window {
             }
         }
 
+        // A download's files to pick again (its options, or its folder's list).
+        Rectangle {
+            z: 91;
+            width: 100%;
+            height: 100%;
+            background: #00000060;
+            opacity: ChooseFiles.open ? 1.0 : 0.0;
+            visible: self.opacity > 0;
+            animate opacity { duration: 250ms; }
+            property <length> slide: ChooseFiles.open ? 0px : 24px;
+            animate slide { duration: 250ms; easing: ease-out-quad; }
+
+            property <length> sheet_bottom: AppSettings.top_navigation_bar
+                ? root.height - Math.max(12px, root.safe-area-insets.bottom)
+                : root.height - root.bottom_bar_height - 12px;
+
+            TapToDismissArea {
+                tapped => { ChooseFiles.open = false; }
+            }
+
+            choose_files_sheet := ChooseFilesSheet {
+                available_height: parent.sheet_bottom - Math.max(24px, root.safe-area-insets.top) - 12px;
+                width: Math.min(480px, parent.width - 2 * Math.max(12px, root.safe-area-insets.left, root.safe-area-insets.right));
+                x: (parent.width - self.width) / 2;
+                y: parent.sheet_bottom - self.height + parent.slide + self.drag_offset;
+                dismiss_requested => { ChooseFiles.open = false; }
+            }
+            // Each opening starts undragged.
+            changed visible => {
+                if (self.visible) {
+                    choose_files_sheet.reset();
+                }
+            }
+        }
+
         // Delete confirmation for selected downloads (or one, from its options).
         Rectangle {
             z: 90;
@@ -1382,7 +1424,8 @@ export component DownloaderApp inherits Window {
             }
 
             st_page := SettingsPage {
-                background_color: ThemeSettings.background;
+                // Tinted under the phone's cards; desktop's flat rows keep the page's.
+                background_color: SettingsLayout.cards ? ThemeSettings.settings_background : ThemeSettings.background;
                 text_color: ThemeSettings.text_color;
                 accent_color: ThemeSettings.primary_accent;
 

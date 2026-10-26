@@ -23,6 +23,7 @@ const DL_UA_MODE_KEY: &str = "download_user_agent_mode";
 const DL_UA_CUSTOM_KEY: &str = "download_user_agent_custom";
 const DL_CATEGORY_KEY: &str = "download_category_folders";
 const DL_REPLACE_KEY: &str = "download_replace_existing";
+const LINKS_SPACES_KEY: &str = "links_with_spaces";
 // How many downloads run at once (0: no limit); the rest wait their turn.
 const DL_MAX_CONCURRENT_KEY: &str = "download_max_concurrent";
 pub const DEFAULT_MAX_CONCURRENT: i32 = 3;
@@ -161,6 +162,10 @@ pub fn load_preferences(ui_weak: slint::Weak<DownloaderApp>) {
 pub fn apply_font(theme: &ThemeSettings) {
     if std::env::var("SLINT_DEFAULT_FONT").is_ok_and(|p| !p.is_empty()) {
         theme.set_font_family("sans-serif".into());
+    } else if !cfg!(target_os = "android") {
+        // Roboto is material's (and Android's); a desktop style and the
+        // system pick their own (Segoe UI with Fluent).
+        theme.set_font_family("".into());
     }
 }
 
@@ -197,6 +202,7 @@ pub fn apply_download_defaults(settings: &AppSettings) {
     settings.set_dl_ua_custom(platform::get_pref(DL_UA_CUSTOM_KEY, "").unwrap_or_default().into());
     settings.set_dl_category_folders(platform::get_pref(DL_CATEGORY_KEY, "false").ok().is_some_and(|v| v == "true"));
     settings.set_dl_replace_existing(replace_existing());
+    settings.set_links_with_spaces(links_with_spaces());
     let max = number(DL_MAX_CONCURRENT_KEY, DEFAULT_MAX_CONCURRENT).max(0);
     settings.set_dl_max_concurrent(max);
     crate::downloads::set_max_concurrent(max as usize);
@@ -206,6 +212,12 @@ pub fn apply_download_defaults(settings: &AppSettings) {
 /// both). Read as each download starts.
 pub fn replace_existing() -> bool {
     platform::get_pref(DL_REPLACE_KEY, "false").ok().is_some_and(|v| v == "true")
+}
+
+/// Settings → Downloading → Links with spaces: a link runs to the end of
+/// its line (links::extract_links).
+pub fn links_with_spaces() -> bool {
+    platform::get_pref(LINKS_SPACES_KEY, "false").ok().is_some_and(|v| v == "true")
 }
 
 /// The Downloading defaults as a link's options ("Download now", Auto).
@@ -295,6 +307,7 @@ pub fn save_preferences(ui_weak: slint::Weak<DownloaderApp>) {
             (DL_UA_CUSTOM_KEY, app_settings.get_dl_ua_custom().to_string()),
             (DL_CATEGORY_KEY, app_settings.get_dl_category_folders().to_string()),
             (DL_REPLACE_KEY, app_settings.get_dl_replace_existing().to_string()),
+            (LINKS_SPACES_KEY, app_settings.get_links_with_spaces().to_string()),
             (DL_MAX_CONCURRENT_KEY, app_settings.get_dl_max_concurrent().max(0).to_string()),
         ] {
             if let Err(e) = platform::save_pref(key, &value) {

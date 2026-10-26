@@ -161,6 +161,9 @@ export component FolderBrowserSheet inherits Rectangle {
                     height: 44px;
                     opacity: root.new_name.is-empty ? 0.4 : 1.0;
                     clicked => {
+                        // The keyboard's unfinished word (a suggestion still underlined) only
+                        // reaches the field when it loses focus: so first, or it's left out.
+                        scope.focus();
                         if (!root.new_name.is-empty) {
                             FolderBrowser.create(root.new_name);
                             root.new_name = "";

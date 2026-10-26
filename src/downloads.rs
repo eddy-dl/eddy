@@ -9,7 +9,7 @@
 
 use crate::downloader::{self, Backend, DownloadRequest, Handle};
 use crate::{
-    DownloadItem, DownloadState, DownloaderApp, FileFilter, FileType, FolderFile, FolderFiles, ItemAction, LinkBackend,
+    ChoiceFile, ChooseFiles, DownloadItem, DownloadState, DownloaderApp, FileFilter, FileType, FolderFile, FolderFiles, ItemAction, LinkBackend,
     ListOptions, SelectionAction, SortKey, TabListOptions,
 };
 use slint::ComponentHandle;
@@ -65,6 +65,9 @@ pub struct Saved {
     /// A new name for an unfinished download, given to the file once it's
     /// done.
     pub rename_to: Option<String>,
+    /// `name` is one the user gave (renamed while downloading): finishing
+    /// keeps it, rather than taking the file's own.
+    pub named: bool,
     /// A web novel's book, once saved: the library (see `saved_book`).
     pub book: Option<crate::novels::SavedBook>,
     /// A folder picked for an unfinished download (as `request.folder`
@@ -82,6 +85,10 @@ pub struct Saved {
     /// A finished folder's files when it finished (paths inside it, sizes),
     /// so ones moved or deleted since can be shown as missing.
     pub files: Vec<(String, u64)>,
+    /// Finished before, and now fetching more of its choices ("Choose
+    /// files"): the ones it had saved (`Choice::index`es), which this run
+    /// leaves alone. Empty otherwise.
+    pub had: Vec<usize>,
 }
 
 /// A record and what's running it.
@@ -362,6 +369,13 @@ pub fn update_request(request: &DownloadRequest) {
 /// A download ended (downloader::finished). Returns whether to tell the
 /// user: not when they paused or cancelled it themselves.
 pub fn ended(id: i64, handle: Option<&Handle>, name: &str, ok: bool, message: &str, path: Option<std::path::PathBuf>) -> bool {
+    ended_at(id, handle, name, ok, message, path, false)
+}
+
+/// `ended`; with `staged`, `path` is where it was written before its copy
+/// into a picked folder: read for what it saved (a folder? its files, its
+/// size), not kept as where it is (`delivered` says that, once copied).
+pub fn ended_at(id: i64, handle: Option<&Handle>, name: &str, ok: bool, message: &str, path: Option<std::path::PathBuf>, staged: bool) -> bool {
     with_entries(|entries| {
         let Some(entry) = entries.iter_mut().find(|e| e.id == id) else {
             return true;
@@ -383,7 +397,9 @@ pub fn ended(id: i64, handle: Option<&Handle>, name: &str, ok: bool, message: &s
         entry.saved.state = if ok { State::Completed } else { State::Failed };
         entry.saved.message = message.to_string();
         if ok {
-            entry.saved.name = name.to_string();
+            if !entry.saved.named {
+                entry.saved.name = name.to_string();
+            }
             entry.saved.partial.clear();
             // Several files: the folder they're in, not the first of them.
             let mut path = path.map(|p| top_item(&entry.saved, p));
@@ -398,12 +414,31 @@ pub fn ended(id: i64, handle: Option<&Handle>, name: &str, ok: bool, message: &s
             }
             // What it came to on disk (books counted chapters until now).
             entry.saved.is_folder = path.as_ref().is_some_and(|p| p.is_dir());
-            entry.saved.files = match &path {
+            let mut files = match &path {
                 Some(dir) if entry.saved.is_folder => folder_listing(dir),
                 _ => Vec::new(),
             };
-            // A torrent's one file, now that it's known.
-            if entry.saved.request.backend == Backend::Torrent && !entry.saved.is_folder {
+            // More of a finished one's files: added to what it had (a staged
+            // copy holds only the new ones).
+            let had = std::mem::take(&mut entry.saved.had);
+            let adding = !had.is_empty();
+            if adding {
+                entry.saved.is_folder = true;
+                for old in std::mem::take(&mut entry.saved.files) {
+                    if !files.iter().any(|(name, _)| *name == old.0) {
+                        files.push(old);
+                    }
+                }
+                files.sort();
+                let mut picked = entry.saved.request.picked();
+                picked.extend(had);
+                picked.sort_unstable();
+                picked.dedup();
+                entry.saved.request.pick(&picked);
+            }
+            entry.saved.files = files;
+            // A torrent's (or a Drive link's) one file, now that it's known.
+            if matches!(entry.saved.request.backend, Backend::Torrent | Backend::Drive) && !entry.saved.is_folder {
                 if let Some(name) = path.as_ref().and_then(|p| p.file_name()) {
                     entry.saved.file_type = file_type_index(crate::links::file_type_for(&name.to_string_lossy(), None));
                 }
@@ -412,7 +447,12 @@ pub fn ended(id: i64, handle: Option<&Handle>, name: &str, ok: bool, message: &s
                 entry.saved.total = size;
                 entry.saved.done = size;
             }
-            entry.saved.path = path.map(|p| p.to_string_lossy().into_owned());
+            // All of them, not just this run's.
+            if adding {
+                entry.saved.total = entry.saved.total.max(entry.saved.files.iter().map(|(_, size)| size).sum());
+                entry.saved.done = entry.saved.total;
+            }
+            entry.saved.path = path.filter(|_| !staged).map(|p| p.to_string_lossy().into_owned());
             entry.saved.done = entry.saved.done.max(entry.saved.total);
         }
         entry.saved.ended = now();
@@ -435,6 +475,9 @@ fn several_files(request: &DownloadRequest) -> bool {
         Backend::Media => serde_json::from_str::<crate::extractors::MediaRequest>(&request.format).is_ok_and(|media| {
             media.items.len() > 1 || (media.playlist && media.items.is_empty() && media.entries > 1)
         }),
+        // A folder's files, however many: they go in a folder.
+        Backend::Drive => matches!(crate::extractors::gdrive::parse_link(&request.url), Some(crate::extractors::gdrive::Link::Folder(_)))
+            || !request.format.is_empty(),
         _ => false,
     }
 }
@@ -672,7 +715,15 @@ fn cancel(id: i64) {
         }
         // Trying it again starts over, so what it had is no use.
         discard_partial(&mut entry.saved);
+        forget_unpicked(id);
         entry.saved.state = State::Cancelled;
+        // Fetching more of a finished one: it's back to what it had.
+        let had = std::mem::take(&mut entry.saved.had);
+        if !had.is_empty() {
+            entry.saved.request.pick(&had);
+            entry.saved.state = State::Completed;
+            entry.saved.ended = now();
+        }
         save(entry);
     });
 }
@@ -692,15 +743,31 @@ fn delete(id: i64, files: bool) {
         return;
     };
     crate::db::delete_download(id);
+    forget_unpicked(id);
     if files && entry.saved.state != State::Completed {
         discard_partial(&mut entry.saved);
-    } else if files {
+    }
+    // Finished before (fetching more of it now): what it saved goes too.
+    if files && (entry.saved.state == State::Completed || !entry.saved.had.is_empty()) {
         if let Some(uri) = entry.saved.path.as_ref().filter(|p| is_document(p)) {
             crate::platform::delete_document(uri);
         } else if let Some(path) = &entry.saved.path {
             let path = std::path::Path::new(path);
             let _ = if path.is_dir() { std::fs::remove_dir_all(path) } else { std::fs::remove_file(path) };
         }
+    }
+}
+
+/// A torrent's unpicked files' folder (downloader::unpicked_dir): only
+/// pieces' spill-over, no use once the download's gone. A moment later, so
+/// aria2 has let go of them.
+fn forget_unpicked(id: i64) {
+    let dir = downloader::unpicked_dir(id);
+    if dir.exists() {
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+            let _ = std::fs::remove_dir_all(dir);
+        });
     }
 }
 
@@ -715,6 +782,12 @@ fn open(id: i64) {
         crate::platform::show_toast(&format!("Saved in {}", saved.folder));
         return;
     };
+    // A folder's copy in a picked folder: its list, as when it finished
+    // (a document can't be looked into here; opening one finds it there).
+    if is_document(&path) && saved.is_folder && !saved.files.is_empty() {
+        show_folder(id, &saved.name, None, &saved.files);
+        return;
+    }
     if is_document(&path) {
         crate::platform::open_file(&path);
         return;
@@ -727,7 +800,7 @@ fn open(id: i64) {
             crate::platform::show_toast(if dir.exists() { "This folder is empty" } else { "This folder can't be found. It may have been moved or deleted" });
             return;
         }
-        show_folder(id, &saved.name, dir, &recorded);
+        show_folder(id, &saved.name, Some(dir), &recorded);
         return;
     }
     if dir.exists() {
@@ -765,17 +838,19 @@ fn folder_listing(dir: &std::path::Path) -> Vec<(String, u64)> {
     files
 }
 
-/// Fills in and opens the folder sheet.
-fn show_folder(id: i64, name: &str, dir: &std::path::Path, files: &[(String, u64)]) {
+/// Fills in and opens the folder sheet. `dir`: the folder on disk, to say
+/// which files are gone; None for a picked folder's copy (shown as listed).
+fn show_folder(id: i64, name: &str, dir: Option<&std::path::Path>, files: &[(String, u64)]) {
+    let can_choose = with_entries(|entries| entries.iter().any(|e| e.id == id && e.saved.request.choices.len() > 1));
     let rows: Vec<FolderFile> = files
         .iter()
         .map(|(rel, size)| {
-            let on_disk = std::fs::metadata(dir.join(rel)).ok().filter(|m| m.is_file());
+            let on_disk = dir.map(|dir| std::fs::metadata(dir.join(rel)).ok().filter(|m| m.is_file()));
             FolderFile {
                 name: rel.clone().into(),
-                size: crate::links::format_size(on_disk.as_ref().map_or(*size, |m| m.len())).into(),
+                size: crate::links::format_size(on_disk.as_ref().and_then(|m| m.as_ref()).map_or(*size, |m| m.len())).into(),
                 file_type: crate::links::file_type_for(rel, None),
-                missing: on_disk.is_none(),
+                missing: on_disk.is_some_and(|m| m.is_none()),
             }
         })
         .collect();
@@ -789,19 +864,21 @@ fn show_folder(id: i64, name: &str, dir: &std::path::Path, files: &[(String, u64
         sheet.set_title(name.into());
         sheet.set_files(ModelRc::new(VecModel::from(rows)));
         sheet.set_missing(missing as i32);
+        sheet.set_can_choose(can_choose);
         sheet.set_open(true);
     });
 }
 
-/// A finished folder download's folder, and the path of its file at
-/// `index` in the sheet's list.
-fn folder_file(id: i64, index: Option<usize>) -> Option<(std::path::PathBuf, Option<std::path::PathBuf>)> {
+/// A finished folder download's folder (a path, or a picked folder's
+/// document), its name, and the file at `index` in the sheet's list (its
+/// path inside the folder).
+fn folder_file(id: i64, index: Option<usize>) -> Option<(String, String, Option<String>)> {
     with_entries(|entries| {
         let saved = &entries.iter().find(|e| e.id == id)?.saved;
-        let dir = std::path::PathBuf::from(saved.path.as_ref()?);
-        let files = if saved.files.is_empty() { folder_listing(&dir) } else { saved.files.clone() };
-        let file = index.and_then(|i| files.get(i)).map(|(rel, _)| dir.join(rel));
-        Some((dir, file))
+        let folder = saved.path.clone()?;
+        let files = if saved.files.is_empty() { folder_listing(std::path::Path::new(&folder)) } else { saved.files.clone() };
+        let rel = index.and_then(|i| files.get(i)).map(|(rel, _)| rel.clone());
+        Some((folder, saved.name.clone(), rel))
     })
 }
 
@@ -816,6 +893,7 @@ fn rename(id: i64, name: &str) {
             // Still downloading: the file gets the name once it's done.
             entry.saved.rename_to = Some(name.clone());
             entry.saved.name = name;
+            entry.saved.named = true;
             save(entry);
             return;
         }
@@ -954,7 +1032,7 @@ pub fn apply_move(id: i64, path: Option<std::path::PathBuf>, deliver: Option<dow
             if std::fs::create_dir_all(&dir).is_err() || move_item(id, &top, &dir.join(top.file_name().unwrap_or_default()), false).is_err() {
                 return (Some(path), deliver);
             }
-            (None, Some(downloader::Deliver { staging, tree_uri }))
+            (None, Some(downloader::Deliver { staging, tree_uri, merge: false }))
         }
         crate::storage::SaveTarget::Dir(dir) => {
             let dir = in_sub(&dir);
@@ -980,17 +1058,51 @@ pub fn apply_move(id: i64, path: Option<std::path::PathBuf>, deliver: Option<dow
     }
 }
 
+/// A finished download's names, while it's still where it was written (a
+/// picked folder's copy is made from there next, so after it would be too
+/// late): a torrent's folder takes the preview's name, then a rename made
+/// while it downloaded is applied. Returns where its first file is now.
+pub fn name_torrent_folder(id: i64, path: Option<std::path::PathBuf>, deliver: Option<&downloader::Deliver>) -> Option<std::path::PathBuf> {
+    let path = torrent_folder(id, path, deliver)?;
+    Some(apply_rename(id, path))
+}
+
+/// A rename made while it downloaded: given to what it saved at the top of
+/// its folder (its file, or the folder its files went into).
+fn apply_rename(id: i64, path: std::path::PathBuf) -> std::path::PathBuf {
+    with_entries(|entries| {
+        let Some(entry) = entries.iter_mut().find(|e| e.id == id) else {
+            return path.clone();
+        };
+        let Some(name) = entry.saved.rename_to.take() else {
+            return path.clone();
+        };
+        let top = top_item(&entry.saved, path.clone());
+        let new_top = downloader::free_path(&renamed(&top, &name));
+        if std::fs::rename(&top, &new_top).is_err() {
+            log::warn!("couldn't rename {} to {name}", top.display());
+            return path.clone();
+        }
+        entry.saved.name = new_top.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(name);
+        save(entry);
+        // The first file, inside what was renamed.
+        path.strip_prefix(&top).map(|rel| if rel.as_os_str().is_empty() { new_top.clone() } else { new_top.join(rel) }).unwrap_or(new_top)
+    })
+}
+
 /// A finished torrent with several files: its folder (the torrent's own
 /// name) renamed to the folder name the preview gave it. Returns where its
 /// first file is now.
-pub fn name_torrent_folder(id: i64, path: Option<std::path::PathBuf>, deliver: Option<&downloader::Deliver>) -> Option<std::path::PathBuf> {
+fn torrent_folder(id: i64, path: Option<std::path::PathBuf>, deliver: Option<&downloader::Deliver>) -> Option<std::path::PathBuf> {
     let path = path?;
     let wanted = with_entries(|entries| {
-        let request = &entries.iter().find(|e| e.id == id)?.saved.request;
+        let saved = &entries.iter().find(|e| e.id == id)?.saved;
+        let request = &saved.request;
         let name = crate::novels::clean::safe_file_name(request.filename.trim());
-        (request.backend == Backend::Torrent && !name.is_empty()).then(|| (name, request.folder.clone(), request.settings.subfolder.clone()))
+        (request.backend == Backend::Torrent && !name.is_empty())
+            .then(|| (name, request.folder.clone(), request.settings.subfolder.clone(), !saved.had.is_empty()))
     });
-    let Some((name, folder, subfolder)) = wanted else {
+    let Some((name, folder, subfolder, adding)) = wanted else {
         return Some(path);
     };
     let mut dir = match deliver {
@@ -1012,6 +1124,12 @@ pub fn name_torrent_folder(id: i64, path: Option<std::path::PathBuf>, deliver: O
     if !top.is_dir() || inside.as_os_str().is_empty() || top.file_name().is_some_and(|n| n == name.as_str()) {
         return Some(path);
     }
+    // More of a finished one's files: into the folder it has.
+    let existing = dir.join(&name);
+    if adding && existing.is_dir() {
+        merge_into(&top, &existing);
+        return Some(existing.join(inside));
+    }
     // A folder of that name there already: the first free "name (n)".
     let renamed = downloader::free_path(&dir.join(&name));
     if std::fs::rename(&top, &renamed).is_err() {
@@ -1019,6 +1137,25 @@ pub fn name_torrent_folder(id: i64, path: Option<std::path::PathBuf>, deliver: O
         return Some(path);
     }
     Some(renamed.join(inside))
+}
+
+/// Moves what's in the folder `from` into the folder `to` (a file there
+/// already of the same name: the new one takes a free name), then removes
+/// `from`.
+fn merge_into(from: &std::path::Path, to: &std::path::Path) {
+    let Ok(children) = std::fs::read_dir(from) else {
+        return;
+    };
+    for child in children.flatten() {
+        let path = child.path();
+        let target = to.join(child.file_name());
+        if path.is_dir() && target.is_dir() {
+            merge_into(&path, &target);
+        } else if std::fs::rename(&path, downloader::free_path(&target)).is_err() {
+            log::warn!("couldn't move {} into {}", path.display(), to.display());
+        }
+    }
+    let _ = std::fs::remove_dir_all(from);
 }
 
 /// Moves `from` to `to`: Ok(true) when renamed, Ok(false) when it's being
@@ -1105,6 +1242,143 @@ fn restart_with(id: i64, change: impl FnOnce(&mut Saved, Option<std::path::PathB
     }
 }
 
+/// "Choose files": a torrent's files or a yt-dlp playlist's items, as the
+/// preview listed them, ticked as the download has them now
+/// (ChooseFilesSheet).
+fn show_choices(id: i64) {
+    let found = with_entries(|entries| entries.iter().find(|e| e.id == id).map(|e| e.saved.clone()));
+    let Some(saved) = found.filter(|s| s.request.choices.len() > 1) else {
+        return;
+    };
+    let picked = saved.request.picked();
+    // What's saved already: a finished one's picks, and what an earlier
+    // run had saved.
+    let done = |i: &usize| saved.had.contains(i) || (saved.state == State::Completed && picked.contains(i));
+    let rows: Vec<ChoiceFile> = saved
+        .request
+        .choices
+        .iter()
+        .map(|c| ChoiceFile {
+            index: c.index as i32,
+            path: c.path.clone().into(),
+            size: c.size.clone().into(),
+            file_type: crate::links::file_type_for(&c.path, None),
+            selected: picked.contains(&c.index) || saved.had.contains(&c.index),
+            saved: done(&c.index),
+        })
+        .collect();
+    let selected = rows.iter().filter(|r| r.selected).count();
+    APP.with(|app| {
+        let Some(ui) = app.borrow().as_ref().and_then(|w| w.upgrade()) else {
+            return;
+        };
+        ui.global::<FolderFiles>().set_open(false);
+        let sheet = ui.global::<ChooseFiles>();
+        sheet.set_id(id as i32);
+        sheet.set_title(saved.name.clone().into());
+        sheet.set_files(ModelRc::new(VecModel::from(rows)));
+        sheet.set_selected(selected as i32);
+        sheet.set_open(true);
+    });
+}
+
+/// The download fetches the `ticked` choices from now on. Unfinished, it
+/// carries on with them (restarting if it's running). Finished, it starts
+/// again for just the new ones, into the same folder; the ones it saved
+/// stay, ticked or not.
+fn choose_files(id: i64, ticked: &[usize]) {
+    let mut moves = Vec::new();
+    let restart = with_entries(|entries| {
+        let entry = entries.iter_mut().find(|e| e.id == id)?;
+        let finished = entry.saved.state == State::Completed;
+        let mut saved_before = entry.saved.had.clone();
+        if finished {
+            saved_before.extend(entry.saved.request.picked());
+        }
+        let had: Vec<usize> = ticked.iter().copied().filter(|i| saved_before.contains(i)).collect();
+        let fetch: Vec<usize> = ticked.iter().copied().filter(|i| !had.contains(i)).collect();
+        if fetch.is_empty() {
+            if finished {
+                // Nothing new: it just remembers which are wanted.
+                entry.saved.request.pick(ticked);
+                save(entry);
+            } else {
+                crate::platform::show_toast("Those are saved already: pick one that isn't");
+            }
+            return None;
+        }
+        entry.saved.had = had;
+        entry.saved.request.pick(&fetch);
+        if finished {
+            // Into the folder it saved, under the name it has now.
+            if let Some(name) = entry.saved.path.as_deref().filter(|p| !is_document(p)).and_then(|p| std::path::Path::new(p).file_name()) {
+                entry.saved.request.filename = name.to_string_lossy().into_owned();
+            }
+            save(entry);
+            return Some(DownloadRequest { resume: true, ..entry.saved.request.clone() });
+        }
+        let running = matches!(entry.saved.state, State::Active | State::Queued);
+        // A torrent file picked now that wasn't: what it has (pieces shared
+        // with picked ones, which aria2 counts as done) comes out of hiding,
+        // or those pieces would be missing from it.
+        let hidden = downloader::unpicked_dir(id);
+        if let Some(root) = entry.handle.as_ref().and_then(|h| torrent_root(h, &entry.saved.request.choices)) {
+            for choice in entry.saved.request.choices.iter().filter(|c| fetch.contains(&c.index)) {
+                let from = hidden.join(choice.index.to_string());
+                if from.is_file() {
+                    moves.push((from, root.join(&choice.path)));
+                }
+            }
+        }
+        // Whatever's running (or paused in aria2) is replaced.
+        if let Some(handle) = entry.handle.take() {
+            downloader::cancel(&handle);
+            entry.retired.push(handle);
+        }
+        if entry.saved.state == State::Failed {
+            entry.saved.message.clear();
+        }
+        save(entry);
+        running.then(|| DownloadRequest { resume: true, ..entry.saved.request.clone() })
+    });
+    for (from, to) in moves {
+        if to.exists() {
+            continue;
+        }
+        if let Some(parent) = to.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        // Across filesystems (app storage to Download/Eddy) a copy.
+        if std::fs::rename(&from, &to).is_err() && std::fs::copy(&from, &to).is_ok() {
+            let _ = std::fs::remove_file(&from);
+        }
+    }
+    if let Some(request) = restart {
+        if let Err(e) = crate::platform::start_download(&request) {
+            ended(id, None, &downloader::label_for(&request), false, &e, None);
+        }
+    }
+}
+
+/// Where a running torrent's files are, as its choices' paths go on from
+/// (a .torrent's leave out its folder, a magnet's don't): from where aria2
+/// has a picked one.
+fn torrent_root(handle: &Handle, choices: &[downloader::Choice]) -> Option<std::path::PathBuf> {
+    let Handle::Aria(gid) = handle else {
+        return None;
+    };
+    downloader::engine().files(gid).into_iter().enumerate().find_map(|(i, (path, _, _, selected))| {
+        let choice = choices.iter().find(|c| c.index == i + 1).filter(|_| selected)?;
+        path.strip_suffix(&choice.path).map(std::path::PathBuf::from)
+    })
+}
+
+/// Fetching more of a finished download's files: its staged copy goes into
+/// the folder it copied before, rather than one beside it.
+pub fn adding(id: i64) -> bool {
+    with_entries(|entries| entries.iter().any(|e| e.id == id && !e.saved.had.is_empty()))
+}
+
 /// "Refresh link": a new link to the same file (one that expired, say).
 /// The file keeps its name, so aria2 carries on with what it has.
 fn refresh_link(id: i64, url: &str) {
@@ -1138,13 +1412,45 @@ pub fn install(ui: &DownloaderApp) {
     APP.with(|app| *app.borrow_mut() = Some(ui.as_weak()));
     let folder_files = ui.global::<FolderFiles>();
     folder_files.on_open_file(|id, index| {
+        let missing = || crate::platform::show_toast("This file can't be found. It may have been moved or deleted");
         match folder_file(id as i64, Some(index as usize)) {
-            Some((_, Some(file))) if file.is_file() => crate::platform::open_file(&file.to_string_lossy()),
-            _ => crate::platform::show_toast("This file can't be found. It may have been moved or deleted"),
+            // Found inside the picked folder by Android (it says if it's gone).
+            Some((folder, _, Some(rel))) if is_document(&folder) => crate::platform::open_in_folder(&folder, &rel),
+            Some((folder, _, Some(rel))) => {
+                let file = std::path::Path::new(&folder).join(rel);
+                if file.is_file() { crate::platform::open_file(&file.to_string_lossy()) } else { missing() }
+            }
+            _ => missing(),
         }
     });
+    folder_files.on_choose_files(|id| show_choices(id as i64));
+    ui.global::<ChooseFiles>().on_select_all(|on| {
+        let Some(ui) = APP.with(|app| app.borrow().as_ref().and_then(|w| w.upgrade())) else {
+            return;
+        };
+        let sheet = ui.global::<ChooseFiles>();
+        let files = sheet.get_files();
+        for row in 0..files.row_count() {
+            if let Some(mut file) = files.row_data(row).filter(|f| f.selected != on) {
+                file.selected = on;
+                files.set_row_data(row, file);
+            }
+        }
+        sheet.set_selected(if on { files.row_count() as i32 } else { 0 });
+    });
+    ui.global::<ChooseFiles>().on_apply(|id| {
+        let Some(ui) = APP.with(|app| app.borrow().as_ref().and_then(|w| w.upgrade())) else {
+            return;
+        };
+        let sheet = ui.global::<ChooseFiles>();
+        let ticked: Vec<usize> = sheet.get_files().iter().filter(|f| f.selected).map(|f| f.index as usize).collect();
+        sheet.set_open(false);
+        choose_files(id as i64, &ticked);
+        pump();
+        refresh_now();
+    });
     folder_files.on_open_folder(|id| match folder_file(id as i64, None) {
-        Some((dir, _)) if dir.is_dir() => crate::platform::open_file(&dir.to_string_lossy()),
+        Some((folder, ..)) if is_document(&folder) || std::path::Path::new(&folder).is_dir() => crate::platform::open_file(&folder),
         _ => crate::platform::show_toast("This folder can't be found. It may have been moved or deleted"),
     });
 
@@ -1165,6 +1471,7 @@ pub fn install(ui: &DownloaderApp) {
             ItemAction::UpdateBook => update_book(id),
             ItemAction::ChangeFolder => change_folder(id),
             ItemAction::RefreshLink => refresh_link(id, &value),
+            ItemAction::ChooseFiles => show_choices(id),
         }
         // A paused, cancelled or deleted one makes room.
         pump();
@@ -1473,11 +1780,13 @@ fn view(entry: &Entry, state: State) -> DownloadItem {
             Backend::Torrent => LinkBackend::Torrent,
             Backend::Media => LinkBackend::Media,
             Backend::Book => LinkBackend::Book,
+            Backend::Drive => LinkBackend::Drive,
             Backend::Direct | Backend::Auto => LinkBackend::Direct,
         },
         folder: saved.folder.clone().into(),
         part: entry.part.as_ref().filter(|_| running).map(|(p, _)| p.clone()).unwrap_or_default().into(),
         is_folder: if state == State::Completed { saved.is_folder } else { saved.several },
+        can_choose: saved.request.choices.len() > 1,
         options: options_of(&saved.request.settings),
     }
 }
@@ -1545,7 +1854,7 @@ fn guess_type(request: &DownloadRequest) -> FileType {
                 FileType::Video
             }
         }
-        Backend::Direct | Backend::Auto => {
+        Backend::Direct | Backend::Auto | Backend::Drive => {
             let name = if request.filename.is_empty() { downloader::label_for(request) } else { request.filename.clone() };
             crate::links::file_type_for(&name, None)
         }

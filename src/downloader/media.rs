@@ -326,7 +326,7 @@ fn saved_name(files: &[PathBuf], label: String) -> String {
 }
 
 /// A file name that's safe on every filesystem.
-fn safe_name(name: &str) -> String {
+pub(super) fn safe_name(name: &str) -> String {
     let cleaned: String = name
         .chars()
         .map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() { '_' } else { c })
@@ -409,7 +409,7 @@ async fn download_native(
             let mut fetch = fetch.clone();
             let mut refreshed = 0;
             loop {
-                match save(job, &fetch, &path, settings, resume || refreshed > 0).await {
+                match save(job, &fetch.url, &fetch.headers, &path, settings, resume || refreshed > 0).await {
                     Ok(saved) => break saved,
                     // Its link ran out (they're signed, and don't last):
                     // a fresh one, carrying on from what's saved.
@@ -436,7 +436,7 @@ async fn download_native(
 }
 
 /// Where a file is written until it's whole.
-fn part_path(path: &Path) -> PathBuf {
+pub(super) fn part_path(path: &Path) -> PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
     name.push(".part");
     path.with_file_name(name)
@@ -448,7 +448,14 @@ fn part_path(path: &Path) -> PathBuf {
 /// A pause removes the aria2 download but keeps the .part and its .aria2,
 /// which `resume` carries on from, even from a fresh link. Otherwise any
 /// left from before are dropped first.
-async fn save(job: u64, fetch: &Fetch, path: &Path, settings: &super::DownloadSettings, resume: bool) -> Result<PathBuf, String> {
+pub(super) async fn save(
+    job: u64,
+    url: &str,
+    headers: &[(String, String)],
+    path: &Path,
+    settings: &super::DownloadSettings,
+    resume: bool,
+) -> Result<PathBuf, String> {
     let part = part_path(path);
     let control = part.with_file_name(format!("{}.aria2", part.file_name().unwrap_or_default().to_string_lossy()));
     if !resume {
@@ -458,7 +465,7 @@ async fn save(job: u64, fetch: &Fetch, path: &Path, settings: &super::DownloadSe
     let dir = path.parent().unwrap_or(Path::new(".")).to_string_lossy().into_owned();
     let out = part.file_name().unwrap_or_default().to_string_lossy().into_owned();
     let engine = super::engine();
-    let gid = engine.start_download_with_headers(&fetch.url, &dir, Some(&out), None, settings, &fetch.headers)?;
+    let gid = engine.start_download_with_headers(url, &dir, Some(&out), None, settings, headers, None)?;
     set_aria(job, Some(gid.clone()));
     let result = loop {
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
@@ -473,6 +480,7 @@ async fn save(job: u64, fetch: &Fetch, path: &Path, settings: &super::DownloadSe
         }
     };
     set_aria(job, None);
+    engine.drop_lock_file(&gid);
     result?;
     if tokio::fs::metadata(&part).await.map(|m| m.len()).unwrap_or(0) == 0 {
         let _ = tokio::fs::remove_file(&part).await;
@@ -484,7 +492,7 @@ async fn save(job: u64, fetch: &Fetch, path: &Path, settings: &super::DownloadSe
 /// Moves a finished `part` to `path`. Something already there (another
 /// download's file, an old copy) is replaced with `replace`; otherwise this
 /// one takes the first free "name (n)" beside it. Returns where it went.
-async fn settle(part: &Path, path: &Path, replace: bool) -> Result<PathBuf, String> {
+pub(super) async fn settle(part: &Path, path: &Path, replace: bool) -> Result<PathBuf, String> {
     let target = if replace {
         if tokio::fs::metadata(path).await.is_ok_and(|m| m.is_file()) {
             let _ = tokio::fs::remove_file(path).await;
@@ -499,7 +507,7 @@ async fn settle(part: &Path, path: &Path, replace: bool) -> Result<PathBuf, Stri
 
 /// An error that means the file's link has run out: the site refusing it
 /// (403), or no longer knowing it (404, 410).
-fn link_expired(error: &str) -> bool {
+pub(super) fn link_expired(error: &str) -> bool {
     ["error: 403", "error: 404", "error: 410", "403 Forbidden", "404 Not Found", "410 Gone"].iter().any(|code| error.contains(code))
 }
 

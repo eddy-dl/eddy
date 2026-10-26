@@ -65,8 +65,9 @@ export component SwitchRow inherits SettingsCard {
                 height: switch.height;
                 switch := ModernSwitch {
                     checked: root.checked;
+                    held: switch_ta.pressed;
                 }
-                TouchArea {
+                switch_ta := TouchArea {
                     enabled: root.enabled;
                     clicked => {
                         root.checked = !root.checked;

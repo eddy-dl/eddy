@@ -243,11 +243,13 @@ class DownloadService : Service() {
             val staging = parts.getOrNull(3) ?: ""
             val tree = parts.getOrNull(4) ?: ""
             val id = parts.getOrNull(5)?.toLongOrNull() ?: 0L
+            // More of a finished download's files: into its folder there.
+            val merge = parts.getOrNull(6) == "1"
             if (ok && staging.isNotEmpty() && tree.isNotEmpty()) {
                 // Copy into the picked folder off the main thread, then say so.
                 copying += 1
                 Thread {
-                    val delivered = TreeCopy.deliver(applicationContext, java.io.File(staging), tree)
+                    val delivered = TreeCopy.deliver(applicationContext, java.io.File(staging), tree, merge)
                     // Where it ended up, so the list can open it there.
                     delivered.uri?.let { EddyNative.delivered(id, it.toString()) }
                     handler.post {

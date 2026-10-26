@@ -47,6 +47,10 @@ export component DownloadSettings inherits Rectangle {
 
                 HorizontalLayout {
                     padding: 8px;
+                    // Room for a subtitle that wraps (MD3: 12 for three lines;
+                    // the card's 72 minimum keeps shorter rows as they were).
+                    padding-top: 12px;
+                    padding-bottom: 12px;
                     padding-left: SettingsLayout.inset;
                     padding-right: SettingsLayout.inset;
                     alignment: space-between;
@@ -87,6 +91,10 @@ export component DownloadSettings inherits Rectangle {
 
                 HorizontalLayout {
                     padding: 8px;
+                    // Room for a subtitle that wraps (MD3: 12 for three lines;
+                    // the card's 72 minimum keeps shorter rows as they were).
+                    padding-top: 12px;
+                    padding-bottom: 12px;
                     padding-left: SettingsLayout.inset;
                     padding-right: SettingsLayout.inset;
                     spacing: 16px;
@@ -120,10 +128,11 @@ export component DownloadSettings inherits Rectangle {
                             height: switch.height;
                             switch := ModernSwitch {
                                 checked: AppSettings.all_files_access;
+                                held: access_ta.pressed || access_switch_ta.pressed;
                             }
                             // Over the switch, so it never flips by itself:
                             // it follows the permission.
-                            TouchArea {
+                            access_switch_ta := TouchArea {
                                 clicked => { AppSettings.request_all_files_access(); }
                             }
                         }
@@ -144,6 +153,10 @@ export component DownloadSettings inherits Rectangle {
 
                 HorizontalLayout {
                     padding: 8px;
+                    // Room for a subtitle that wraps (MD3: 12 for three lines;
+                    // the card's 72 minimum keeps shorter rows as they were).
+                    padding-top: 12px;
+                    padding-bottom: 12px;
                     padding-left: SettingsLayout.inset;
                     padding-right: SettingsLayout.inset;
                     spacing: 16px;
@@ -210,6 +223,10 @@ export component DownloadSettings inherits Rectangle {
 
                 HorizontalLayout {
                     padding: 8px;
+                    // Room for a subtitle that wraps (MD3: 12 for three lines;
+                    // the card's 72 minimum keeps shorter rows as they were).
+                    padding-top: 12px;
+                    padding-bottom: 12px;
                     padding-left: SettingsLayout.inset;
                     padding-right: SettingsLayout.inset;
                     spacing: 16px;
@@ -267,6 +284,10 @@ export component DownloadSettings inherits Rectangle {
 
                 HorizontalLayout {
                     padding: 8px;
+                    // Room for a subtitle that wraps (MD3: 12 for three lines;
+                    // the card's 72 minimum keeps shorter rows as they were).
+                    padding-top: 12px;
+                    padding-bottom: 12px;
                     padding-left: SettingsLayout.inset;
                     padding-right: SettingsLayout.inset;
                     spacing: 16px;
@@ -324,6 +345,10 @@ export component DownloadSettings inherits Rectangle {
 
                 HorizontalLayout {
                     padding: 8px;
+                    // Room for a subtitle that wraps (MD3: 12 for three lines;
+                    // the card's 72 minimum keeps shorter rows as they were).
+                    padding-top: 12px;
+                    padding-bottom: 12px;
                     padding-left: SettingsLayout.inset;
                     padding-right: SettingsLayout.inset;
                     spacing: 16px;

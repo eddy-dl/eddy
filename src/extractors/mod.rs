@@ -6,6 +6,7 @@
 //! slow, blocked or missing (it can't run on iOS at all); yt-dlp handles every
 //! other site, and steps in when one of them fails.
 
+pub mod gdrive;
 pub mod http;
 pub mod instagram;
 pub mod packed;

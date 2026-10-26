@@ -20,8 +20,11 @@ export global FolderFiles {
     in property <[FolderFile]> files;
     // How many of them are gone.
     in property <int> missing;
+    // Its files can be picked again (a torrent's, a yt-dlp playlist's).
+    in property <bool> can_choose;
     callback open_file(id: int, index: int);
     callback open_folder(id: int);
+    callback choose_files(id: int);
 }
 
 component FileRow inherits Rectangle {
@@ -97,7 +100,10 @@ export component FolderFilesSheet inherits Rectangle {
     TouchArea { }
 
     VerticalLayout {
+        // Only its own height: the list below takes the rest (a layout
+        // would otherwise share it, squeezing the list).
         header := VerticalLayout {
+            vertical-stretch: 0;
             handle := DragHandle {
                 dismissed => { root.dismiss_requested(); }
             }
@@ -128,7 +134,29 @@ export component FolderFilesSheet inherits Rectangle {
                     }
                 }
 
-                // MD3 text button.
+                // MD3 text buttons.
+                if FolderFiles.can_choose: VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        height: 40px;
+                        width: choose_label.preferred-width + 24px;
+                        border-radius: 20px;
+                        background: choose_ta.pressed ? ThemeSettings.primary_accent.transparentize(88%) : transparent;
+                        animate background { duration: 150ms; }
+
+                        choose_ta := TouchArea {
+                            clicked => { FolderFiles.choose_files(FolderFiles.id); }
+                        }
+                        choose_label := Text {
+                            text: @tr("Choose files");
+                            font-size: 14px;
+                            font-weight: 500;
+                            color: ThemeSettings.primary_accent;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
                 VerticalLayout {
                     alignment: center;
                     Rectangle {

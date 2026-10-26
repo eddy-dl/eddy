@@ -1,4 +1,6 @@
 import { TextArea } from "TextArea.slint";
+import { SwitchRow } from "SwitchRow.slint";
+import { AppSettings } from "../globals/AppSettings.slint";
 import { ThemeSettings } from "../themes/theme.slint";
 import { ActionButton } from "Buttons.slint";
 
@@ -9,10 +11,25 @@ export component AddLinksSheet inherits Rectangle {
     callback process();
     callback cancel();
 
-    // Moves the keyboard to the text box (called when the sheet opens).
-    public function focus_input() { input.focus(); }
+    // Moves the keyboard to the text box (called when the sheet opens), and
+    // starts "Links with spaces" from Settings again.
+    public function focus_input() {
+        root.spaces = AppSettings.links_with_spaces;
+        input.focus();
+    }
+
+    // "Links with spaces", for this paste only (Settings keeps its own).
+    out property <bool> spaces: AppSettings.links_with_spaces;
 
     private property <bool> has_text: !root.text.is-empty;
+
+    // Takes the focus off the text box before Add reads it.
+    park := FocusScope {
+        x: 0;
+        y: 0;
+        width: 0;
+        height: 0;
+    }
 
     height: layout.preferred-height;
     background: ThemeSettings.surface;
@@ -69,6 +86,14 @@ export component AddLinksSheet inherits Rectangle {
             placeholder-text: @tr("Paste links, or any text containing them");
         }
 
+        SwitchRow {
+            flush: true;
+            compact: true;
+            title: @tr("Links with spaces");
+            subtitle: @tr("For this paste: Settings keeps its own");
+            checked <=> root.spaces;
+        }
+
         Text {
             text: @tr("Each link is checked before it's added, so you can pick how to download it.");
             font-size: 12px;
@@ -92,6 +117,9 @@ export component AddLinksSheet inherits Rectangle {
                 opacity: root.has_text ? 1.0 : 0.4;
                 animate opacity { duration: 150ms; }
                 clicked => {
+                    // The keyboard's unfinished word (a suggestion still underlined) only
+                    // reaches the field when it loses focus: so first, or it's left out.
+                    park.focus();
                     if (root.has_text) {
                         root.process();
                     }

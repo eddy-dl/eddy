@@ -28,14 +28,30 @@ impl BtCheckpoint {
         num_pieces: usize,
         info_hash: [u8; 20],
     ) -> Result<Self> {
+        Self::open_checked(output_path, |_| payload_exists, total_length, piece_length, num_pieces, info_hash).await
+    }
+
+    /// Eddy: `open`, with the payload checked against the checkpoint's own
+    /// bitfield (`payload_ok`): only the files its finished pieces are in
+    /// need to be there. With some files picked and no pre-allocation, the
+    /// others may never be written, and requiring every file threw the
+    /// progress away on each restart.
+    pub(crate) async fn open_checked(
+        output_path: &Path,
+        payload_ok: impl Fn(&[u8]) -> bool,
+        total_length: u64,
+        piece_length: u32,
+        num_pieces: usize,
+        info_hash: [u8; 20],
+    ) -> Result<Self> {
         let path = ControlFile::control_path_for(output_path);
         let expected_bitfield_len = num_pieces.div_ceil(8);
         let control_file = match ControlFile::load(&path).await {
             Ok(Some(mut control_file))
                 if control_file.is_torrent_checkpoint()
                     && control_file.total_length() == total_length
-                    && payload_exists
                     && control_file.bitfield().len() == expected_bitfield_len
+                    && payload_ok(control_file.bitfield())
                     && valid_trailing_bits(control_file.bitfield(), num_pieces)
                     && control_file.torrent_info_hash() == Some(info_hash)
                     && control_file

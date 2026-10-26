@@ -26,6 +26,8 @@ thread_local! {
     static NEXT_ID: Cell<i32> = const { Cell::new(1) };
     // Media links' extractor details, by link id (needed again to download).
     static MEDIA: RefCell<HashMap<i32, MediaMeta>> = RefCell::new(HashMap::new());
+    // Drive folders' files, by link id, in the preview's order.
+    static DRIVE: RefCell<HashMap<i32, Vec<extractors::gdrive::Entry>>> = RefCell::new(HashMap::new());
     // Run when the last pending link is dealt with (the share popup closes).
     static ON_EMPTY: RefCell<Option<Box<dyn Fn()>>> = const { RefCell::new(None) };
 }
@@ -41,8 +43,10 @@ where
     links.set_pending(PENDING.with(|m| ModelRc::from(m.clone())));
     links.set_ytdlp_available(crate::platform::ytdlp_ready());
 
-    links.on_process_text(|text| {
-        add_links_from_text(&text);
+    links.on_process_text(|text, spaces| {
+        extract_links_with(&text, spaces).iter().for_each(|url| {
+            add_url(url, true);
+        });
     });
 
     links.on_skip(|id| {
@@ -56,6 +60,7 @@ where
             LinkBackend::Torrent => Backend::Torrent,
             LinkBackend::Media => Backend::Media,
             LinkBackend::Book => Backend::Book,
+            LinkBackend::Drive => Backend::Drive,
             _ => Backend::Direct,
         };
         start_link(id, backend, format.to_string(), filename.to_string(), &options);
@@ -133,10 +138,14 @@ where
         for link in links {
             let torrent = link.backends.row_data(0) == Some(LinkBackend::Torrent);
             let book = link.backends.row_data(0) == Some(LinkBackend::Book);
+            let drive = link.backends.row_data(0) == Some(LinkBackend::Drive);
             let backend = match choice {
                 _ if torrent => Backend::Torrent,
                 // Books stay books, with the Books defaults.
                 _ if book => Backend::Book,
+                // Drive links have no other way; a folder unchecked yet
+                // downloads all its files.
+                _ if drive => Backend::Drive,
                 QuickBackend::Direct => Backend::Direct,
                 QuickBackend::Media => Backend::Media,
                 _ => Backend::Auto,
@@ -395,7 +404,36 @@ fn start_link(id: i32, backend: Backend, format: String, filename: String, optio
     let format = match backend {
         Backend::Media => serde_json::to_string(&media_request(id, &link, &format)).unwrap_or_default(),
         Backend::Book => serde_json::to_string(&book_options(&format)).unwrap_or_default(),
+        // A Drive folder's picked files.
+        Backend::Drive => match DRIVE.with(|d| d.borrow().get(&id).cloned()) {
+            Some(entries) => {
+                let picked: std::collections::HashSet<i32> = link.files.iter().filter(|f| f.selected).map(|f| f.index).collect();
+                if picked.is_empty() {
+                    crate::platform::show_toast("Pick at least one file to download");
+                    return;
+                }
+                let files = entries.into_iter().enumerate().filter(|(i, _)| picked.contains(&(*i as i32 + 1))).map(|(_, e)| e).collect();
+                serde_json::to_string(&extractors::gdrive::DriveRequest { files }).unwrap_or_default()
+            }
+            None => String::new(),
+        },
         _ => format,
+    };
+    // The torrent's other files, kept out of its folder.
+    let unpicked = if backend == Backend::Torrent && !select_files.is_empty() {
+        link.files.iter().filter(|f| !f.selected).map(|f| f.index as usize).collect()
+    } else {
+        Vec::new()
+    };
+    // A torrent's files and a yt-dlp playlist's items, to pick again later.
+    let ytdlp = MEDIA.with(|m| m.borrow().get(&id).is_some_and(|m| m.service == extractors::Service::YtDlp));
+    let choices = if link.files.row_count() > 1 && (backend == Backend::Torrent || (backend == Backend::Media && ytdlp)) {
+        link.files
+            .iter()
+            .map(|f| crate::downloader::Choice { index: f.index as usize, path: f.path.to_string(), size: f.size.to_string() })
+            .collect()
+    } else {
+        Vec::new()
     };
     let request = DownloadRequest {
         url: link.url.to_string(),
@@ -408,6 +446,8 @@ fn start_link(id: i32, backend: Backend, format: String, filename: String, optio
         // A book saved before is updated in place of a second copy.
         id: if backend == Backend::Book { link.book_saved_id as i64 } else { 0 },
         resume: false,
+        unpicked,
+        choices,
     };
     match crate::platform::start_download(&request) {
         Ok(()) => {
@@ -433,6 +473,10 @@ fn download_settings(options: &crate::LinkOptions, link: &PendingLink, audio: bo
             false => String::new(),
             true if link.backends.row_data(0) == Some(LinkBackend::Book) => "Books".to_string(),
             true if audio => category_folder(FileType::Audio).to_string(),
+            // A Drive folder's files aren't a torrent's.
+            true if link.file_type == FileType::Folder && link.backends.row_data(0) == Some(LinkBackend::Drive) => {
+                category_folder(FileType::Other).to_string()
+            }
             true => category_folder(link.file_type).to_string(),
         },
         replace_existing: crate::preferences::replace_existing(),
@@ -505,6 +549,7 @@ fn take_pending(id: i32) -> Option<PendingLink> {
         Some(m.remove(index))
     })?;
     MEDIA.with(|m| m.borrow_mut().remove(&id));
+    DRIVE.with(|d| d.borrow_mut().remove(&id));
     if PENDING.with(|m| m.row_count() == 0) {
         // Nothing left to show a check's result to.
         crate::children::stop_checks();
@@ -519,22 +564,73 @@ fn take_pending(id: i32) -> Option<PendingLink> {
 
 // --- Finding links ---
 
-/// Every link in `text`, in order, without duplicates. Magnets are found as
-/// whole words; anything else that looks like a web address counts too, with
-/// https:// assumed when the scheme is missing.
+/// Every link in `text`, in order, without duplicates (Settings → "Links
+/// with spaces" says how far one runs).
 pub fn extract_links(text: &str) -> Vec<String> {
+    extract_links_with(text, crate::preferences::links_with_spaces())
+}
+
+/// `extract_links`. Magnets are found word by word (see below); anything
+/// else that looks like a web address counts too, with https:// assumed
+/// when the scheme is missing. With `spaces`, a link runs on through spaces
+/// (kept as %20) until a word starts another (a protocol, or www.) or the
+/// line ends.
+pub fn extract_links_with(text: &str, spaces: bool) -> Vec<String> {
     let mut found: Vec<String> = Vec::new();
     let mut rest = String::with_capacity(text.len());
+    let trim = |w: &'_ str| -> String { w.trim_matches(|c| matches!(c, '<' | '>' | '"' | '\'' | '(' | ')' | ',')).to_string() };
+    let is_magnet = |w: &str| w.len() > 8 && w[..7].eq_ignore_ascii_case("magnet:");
+    let starts_link = |w: &str| {
+        let w = w.trim_start_matches(|c| matches!(c, '<' | '"' | '\'' | '('));
+        is_magnet(w) || w.starts_with("http://") || w.starts_with("https://")
+    };
 
-    for word in text.split_whitespace() {
-        let word = word.trim_matches(|c| matches!(c, '<' | '>' | '"' | '\'' | '(' | ')' | ','));
-        if word.len() > 8 && word[..7].eq_ignore_ascii_case("magnet:") {
-            found.push(word.to_string());
-        } else {
-            // Kept apart from magnets so their tracker URLs aren't picked up.
-            rest.push_str(word);
-            rest.push(' ');
+    for line in text.lines() {
+        if spaces {
+            let line = line.trim();
+            let starts = link_starts(line);
+            // What's before the first one goes to the usual finder.
+            rest.push_str(&line[..starts.first().copied().unwrap_or(line.len())]);
+            rest.push('\n');
+            for (k, &start) in starts.iter().enumerate() {
+                let end = starts.get(k + 1).copied().unwrap_or(line.len());
+                let link = trim(line[start..end].trim()).trim_end_matches(|c| matches!(c, '.' | ';' | ':' | '!' | '?')).to_string();
+                let link = link.split_whitespace().collect::<Vec<_>>().join("%20");
+                found.push(if link.contains(':') { link } else { format!("https://{link}") });
+            }
+            continue;
         }
+        let words: Vec<&str> = line.split_whitespace().collect();
+        let mut i = 0;
+        while i < words.len() {
+            let word = trim(words[i]);
+            if !is_magnet(&word) {
+                // Kept apart from magnets so their tracker URLs aren't picked up.
+                rest.push_str(&word);
+                rest.push(' ');
+                i += 1;
+                continue;
+            }
+            // A name pasted with its spaces in (dn=Some Name) splits the
+            // magnet into words: it carries on, on the same line and before
+            // the next link, through the last word still holding one of its
+            // parameters; the spaces become %20.
+            let end = (i + 1..words.len())
+                .take_while(|&j| !starts_link(words[j]))
+                .filter(|&j| MAGNET_PARAMS.iter().any(|p| words[j].contains(p)))
+                .last();
+            match end {
+                Some(end) => {
+                    found.push(trim(&words[i..=end].join("%20")));
+                    i = end + 1;
+                }
+                None => {
+                    found.push(word);
+                    i += 1;
+                }
+            }
+        }
+        rest.push('\n');
     }
 
     let mut finder = linkify::LinkFinder::new();
@@ -558,21 +654,55 @@ pub fn extract_links(text: &str) -> Vec<String> {
     unique
 }
 
+/// Where links start in `line`: a protocol, or www., at the start of a
+/// word (a tracker's http:// inside a magnet isn't one), past an opening
+/// bracket or quote.
+fn link_starts(line: &str) -> Vec<usize> {
+    let lower = line.to_ascii_lowercase();
+    let mut starts = Vec::new();
+    for scheme in ["magnet:", "http://", "https://", "ftp://", "www."] {
+        for (at, _) in lower.match_indices(scheme) {
+            let before = line[..at].chars().next_back();
+            if before.is_none_or(|c| c.is_whitespace() || matches!(c, '<' | '"' | '\'' | '(')) {
+                starts.push(at);
+            }
+        }
+    }
+    starts.sort_unstable();
+    starts
+}
+
+/// A magnet's parameters past its first: the words of a name with spaces
+/// end before the next of these.
+const MAGNET_PARAMS: [&str; 11] = ["&xt=", "&dn=", "&tr=", "&xl=", "&ws=", "&as=", "&xs=", "&kt=", "&mt=", "&so=", "&x.pe="];
+
 // --- What the UI shows before and after the check ---
 
 fn initial_link(id: i32, url: &str) -> PendingLink {
     let magnet = is_magnet(url);
-    let filename = if magnet { magnet_name(url) } else { name_from_url(url) }.unwrap_or_default();
+    let drive = extractors::gdrive::parse_link(url);
+    // A Drive link's path says nothing of the file ("view", "uc").
+    let filename = if magnet { magnet_name(url) } else if drive.is_some() { None } else { name_from_url(url) }.unwrap_or_default();
     PendingLink {
         id,
         url: url.into(),
         state: ProbeState::Probing,
         error: SharedString::new(),
-        file_type: if magnet { torrent_type(&[], &filename) } else { file_type_for(&filename, None) },
+        file_type: match &drive {
+            Some(extractors::gdrive::Link::Folder(_)) => FileType::Folder,
+            _ if magnet => torrent_type(&[], &filename),
+            _ => file_type_for(&filename, None),
+        },
         filename: filename.into(),
         size: SharedString::new(),
         source: if magnet { "BitTorrent".into() } else { host_of(url).into() },
-        backends: backends_model(&[if magnet { LinkBackend::Torrent } else { LinkBackend::Direct }]),
+        backends: backends_model(&[if magnet {
+            LinkBackend::Torrent
+        } else if drive.is_some() {
+            LinkBackend::Drive
+        } else {
+            LinkBackend::Direct
+        }]),
         formats: ModelRc::new(VecModel::default()),
         files: ModelRc::new(VecModel::default()),
         files_selected: 0,
@@ -615,6 +745,8 @@ struct Probe {
     media: Option<MediaMeta>,
     /// A web novel's chapter counts, for book links.
     book: Option<BookMeta>,
+    /// A Drive folder's files, next to `files` (their ids, to download).
+    drive: Option<Vec<extractors::gdrive::Entry>>,
 }
 
 #[derive(Clone, Debug)]
@@ -698,6 +830,9 @@ fn apply_probe(id: i32, result: Result<Probe, String>) {
                 link.files_selected = probe.files.len() as i32;
                 link.files = files_model(&probe.files, &probe.items);
                 link.files_audio = 0;
+                if let Some(entries) = probe.drive {
+                    DRIVE.with(|d| d.borrow_mut().insert(id, entries));
+                }
                 if let Some(media) = probe.media {
                     link.service = media.service.label().into();
                     link.media_kind = match media.kind {
@@ -762,6 +897,7 @@ pub async fn pick_backend(url: &str) -> (Backend, String) {
                 Some(LinkBackend::Torrent) => Backend::Torrent,
                 Some(LinkBackend::Media) => Backend::Media,
                 Some(LinkBackend::Book) => Backend::Book,
+                Some(LinkBackend::Drive) => Backend::Drive,
                 _ => Backend::Direct,
             };
             // Best quality; music stays audio.
@@ -816,6 +952,7 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
             items: Vec::new(),
             media: None,
             book: None,
+            drive: None,
         });
     }
 
@@ -838,7 +975,14 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
             items: Vec::new(),
             media: None,
             book: Some(BookMeta { site: book.site, id: book.id.clone(), chapters: book.chapters.len(), locked, cover }),
+            drive: None,
         });
+    }
+
+    // Google Drive: a shared file's real name and size, or a shared
+    // folder's files.
+    if let Some(link) = extractors::gdrive::identify(url).await {
+        return drive_probe(link).await;
     }
 
     // TikTok, Instagram, Pinterest: their own extractors (yt-dlp if those fail).
@@ -861,6 +1005,7 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
                 items: Vec::new(),
                 media: None,
                 book: None,
+                drive: None,
             });
         }
         return Err(format!("Unsupported link type ({scheme})"));
@@ -922,6 +1067,7 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
                 items: Vec::new(),
                 media: None,
                 book: None,
+                drive: None,
             });
         }
     }
@@ -955,6 +1101,7 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
         items: Vec::new(),
         media: None,
         book: None,
+        drive: None,
     })
 }
 
@@ -990,7 +1137,63 @@ async fn probe_torrent_link(url: &str, filename: &str) -> Result<Probe, String> 
         items: Vec::new(),
         media: None,
         book: None,
+        drive: None,
     })
+}
+
+/// A Drive file: its name and size (worked out again when it downloads, as
+/// its link doesn't last). A folder: its files, like a torrent's.
+async fn drive_probe(link: extractors::gdrive::Link) -> Result<Probe, String> {
+    use extractors::gdrive::{self, Link};
+    let empty = Probe {
+        filename: String::new(),
+        file_type: FileType::Other,
+        size: String::new(),
+        backends: vec![LinkBackend::Drive],
+        formats: Vec::new(),
+        files: Vec::new(),
+        items: Vec::new(),
+        media: None,
+        book: None,
+        drive: None,
+    };
+    match link {
+        Link::File(id) => {
+            let file = gdrive::resolve(&id, "").await?;
+            Ok(Probe {
+                file_type: file_type_for(&file.name, None),
+                size: file.size.map(format_size).unwrap_or_default(),
+                filename: file.name,
+                ..empty
+            })
+        }
+        Link::Folder(id) => {
+            let folder = gdrive::list_folder(&id).await?;
+            if folder.entries.is_empty() {
+                return Err("This Drive folder has no files to download".to_string());
+            }
+            if folder.truncated {
+                log::warn!("Drive folder {id} has more than {} files; listing the first", gdrive::MAX_FILES);
+            }
+            let files: Vec<(usize, String, u64)> =
+                folder.entries.iter().enumerate().map(|(i, e)| (i + 1, e.path.clone(), e.size.unwrap_or(0))).collect();
+            // Sizes are known for most: a total of those, marked as at least.
+            let total: u64 = folder.entries.iter().filter_map(|e| e.size).sum();
+            let all_sized = folder.entries.iter().all(|e| e.size.is_some());
+            Ok(Probe {
+                filename: clean_name(&folder.name),
+                file_type: FileType::Folder,
+                size: match (total, all_sized) {
+                    (0, _) => String::new(),
+                    (n, true) => format_size(n),
+                    (n, false) => format!("{}+", format_size(n)),
+                },
+                files,
+                drive: Some(folder.entries),
+                ..empty
+            })
+        }
+    }
 }
 
 /// A torrent's files in its own order, numbered from 1 like aria2's
@@ -1143,7 +1346,7 @@ fn describe_error(error: reqwest::Error) -> String {
 
 /// The file name from a Content-Disposition header, preferring the
 /// `filename*=UTF-8''…` form.
-fn disposition_name(value: &str) -> Option<String> {
+pub(crate) fn disposition_name(value: &str) -> Option<String> {
     let mut plain = None;
     for part in value.split(';').map(str::trim) {
         if let Some(encoded) = part.strip_prefix("filename*=") {
@@ -1275,6 +1478,7 @@ async fn media_probe(info: MediaInfo) -> Probe {
             info_json: info.info_json,
         }),
         book: None,
+        drive: None,
     }
 }
 
@@ -1526,11 +1730,46 @@ mod tests {
                     <magnet:?xt=urn:btih:abc&dn=Some+Thing&tr=http://tracker.example/announce> \
                     and https://example.com/a.zip again";
         assert_eq!(
-            extract_links(text),
+            extract_links_with(text, false),
             vec![
                 "magnet:?xt=urn:btih:abc&dn=Some+Thing&tr=http://tracker.example/announce",
                 "https://example.com/a.zip",
                 "https://example.org/b.iso",
+            ]
+        );
+    }
+
+    #[test]
+    fn magnet_with_spaces_in_its_name() {
+        let text = "magnet:?xt=urn:btih:8ca5&dn=Avatar Seven Havens S01E09 [ UIndex.org ]&tr=udp://t.example:1337/announce&tr=udp://u.example:6969/announce well\n\
+                    magnet:?xt=urn:btih:abc&dn=Plain and https://example.com/a.zip";
+        assert_eq!(
+            extract_links_with(text, false),
+            vec![
+                "magnet:?xt=urn:btih:8ca5&dn=Avatar%20Seven%20Havens%20S01E09%20[%20UIndex.org%20]&tr=udp://t.example:1337/announce&tr=udp://u.example:6969/announce",
+                "magnet:?xt=urn:btih:abc&dn=Plain",
+                "https://example.com/a.zip",
+            ]
+        );
+        assert_eq!(
+            magnet_name("magnet:?xt=urn:btih:8ca5&dn=Avatar%20Seven%20Havens%20S01E09&tr=udp://t").as_deref(),
+            Some("Avatar Seven Havens S01E09")
+        );
+    }
+
+    #[test]
+    fn links_with_spaces() {
+        let text = "see https://example.com/My File.pdf.\n\
+                    magnet:?xt=urn:btih:abc&dn=A Name&tr=udp://t.example https://x.org/b c.zip www.y.net/d e\n\
+                    and example.org/plain";
+        assert_eq!(
+            extract_links_with(text, true),
+            vec![
+                "https://example.com/My%20File.pdf",
+                "magnet:?xt=urn:btih:abc&dn=A%20Name&tr=udp://t.example",
+                "https://x.org/b%20c.zip",
+                "https://www.y.net/d%20e",
+                "https://example.org/plain",
             ]
         );
     }

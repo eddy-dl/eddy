@@ -28,9 +28,9 @@ impl BtDownloadCommand {
         network_info_hash: [u8; 20],
     ) -> Result<IntegrityPreparation> {
         let payload_exists = self.bt_payload_exists();
-        let checkpoint = crate::engine::bittorrent::persistence::checkpoint::BtCheckpoint::open(
+        let checkpoint = crate::engine::bittorrent::persistence::checkpoint::BtCheckpoint::open_checked(
             &self.output_path,
-            payload_exists,
+            self.bt_checkpoint_files_exist(),
             total_size,
             piece_length,
             num_pieces as usize,

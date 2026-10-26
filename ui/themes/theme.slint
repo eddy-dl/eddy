@@ -68,6 +68,17 @@ export global ThemeSettings {
         (amoled_dark ? #111111 : neutral_dark_surface.mix(primary_base, 88%)) :
         neutral_light_surface.mix(primary_base, 95%);
 
+    // The settings pages' background. In light mode an accent-tinted
+    // surface container (MD3 surface-container), so the near-white cards
+    // stand out from it; in dark mode the cards are lighter than the page
+    // already.
+    out property <color> settings_background: is_dark ? background :
+        #e9ebee.mix(primary_base, 90%);
+    // Their header once the page is scrolled: a step darker (MD3
+    // surface-container-high).
+    out property <color> settings_header: is_dark ? surface :
+        #e1e3e6.mix(primary_base, 88%);
+
     // Settings rows' cards: apart from both the page and the surface a
     // scrolled header takes.
     out property <color> card: is_dark ?

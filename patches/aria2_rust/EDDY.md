@@ -2,7 +2,8 @@
 
 aria2-core and aria2-protocol from <https://github.com/balovess/aria2_rust/>
 at e75732eb21d83bbf4bf016037dbf02df7b91a0c9, with a fix for resuming HTTP
-downloads (Cargo.toml's `[patch]` points here). Only these two crates of
+downloads and fixes for starting a torrent again (Cargo.toml's `[patch]`
+points here). Only these two crates of
 the workspace are kept; the rest is unchanged upstream code (GPL-3.0, see
 LICENSE).
 
@@ -88,6 +89,37 @@ dropped into the gap fallback on the phone).
   spending its retries. Servers that limit requests per second (hetzner's
   speed-test mirror, no Retry-After) otherwise failed a resumed download
   at once.
+
+## Starting a torrent again
+
+Eddy starts a torrent again to change its options, to pick other files
+("Choose files") while it runs, and to fetch more of a finished one's files.
+All of these failed or started over, in one engine:
+
+- A finished torrent's command isn't dropped at once (nor, with
+  keep-alive, soon), and it held the torrent's info-hash route and its
+  files' reservation until it was: a new download of the same torrent
+  failed with "info-hash route is already registered" or "is being
+  downloaded by other command". `download/execute/finalization.rs`
+  releases both first thing on completion.
+- A removed (or finished) download winds down for a moment (its trackers
+  told it stopped) still holding its route, BtRegistry entry and file
+  reservation, so a restart straight after failed ("InfoHash … is already
+  registered"). `download/execute/peer_session.rs` and `command.rs` wait
+  for them up to 10 s (250 ms steps); `registry.rs` gains
+  `unregister_bt_download` to undo a registration while it waits for the
+  files.
+- A checkpoint was only trusted if every file of the torrent existed. With
+  some files picked and no pre-allocation, unpicked files (and picked ones
+  not reached yet) never do, so every restart threw the progress away and
+  downloaded from 0. `persistence/checkpoint.rs` gains `open_checked`,
+  which tests the checkpoint's bitfield; `download/execute/environment.rs`
+  and `state.rs` require only the files holding finished pieces.
+
+Checked on Sintel's torrent (resume-test `repick`): paused at 41 MB with two
+files unpicked, one of them picked and restarted, it carries on from 41 MB
+and every file matches a whole download; a finished one gets the newly
+picked file into its (renamed) folder with the others untouched.
 
 Upstream issue: <https://github.com/balovess/aria2_rust/issues/78>. Drop this
 copy once a fix is released.

@@ -501,6 +501,8 @@ pub extern "system" fn Java_dev_pah_eddy_EddyNative_startDownload<'caller>(
                 settings: Default::default(),
                 id: 0,
                 resume: false,
+                unpicked: Vec::new(),
+                choices: Vec::new(),
             }))
             // The whole request as JSON, when it's there.
             .map(|request| {
@@ -554,7 +556,8 @@ pub extern "system" fn Java_dev_pah_eddy_EddyNative_takeFinished<'caller>(
                 Some(d) => (d.staging.to_string_lossy().into_owned(), d.tree_uri.clone()),
                 None => (String::new(), String::new()),
             };
-            format!("{}\t{}\t{}\t{}\t{}\t{}", f.ok as u8, clean(&f.name), clean(&f.message), staging, tree, f.id)
+            let merge = f.deliver.as_ref().is_some_and(|d| d.merge);
+            format!("{}\t{}\t{}\t{}\t{}\t{}\t{}", f.ok as u8, clean(&f.name), clean(&f.message), staging, tree, f.id, merge as u8)
         })
         .collect();
     let text = text.join("\n");
@@ -747,6 +750,26 @@ pub fn share(files: &[String], text: &str) {
     });
     if let Err(e) = result {
         log::error!("Couldn't share: {e}");
+    }
+}
+
+/// Opens `rel` ("sub/file", inside the download's folder) in a picked
+/// folder's copy of a download (`doc`: that folder's document, or the
+/// category folder it sits in).
+pub fn open_in_folder(doc: &str, rel: &str) {
+    let result = with_env(|env, activity| {
+        let doc = env.new_string(doc)?;
+        let rel = env.new_string(rel)?;
+        env.call_method(
+            activity,
+            jni_str!("openInFolder"),
+            jni_sig!("(Ljava/lang/String;Ljava/lang/String;)V"),
+            &[JValue::Object(&doc), JValue::Object(&rel)],
+        )?;
+        Ok(())
+    });
+    if let Err(e) = result {
+        log::error!("Couldn't open the file: {e}");
     }
 }
 

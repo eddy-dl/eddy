@@ -160,11 +160,13 @@ impl AriaEngineClient {
         select_files: Option<&str>,
         settings: &super::DownloadSettings,
     ) -> Result<String, String> {
-        self.start_download_with_headers(uri, save_dir, out, select_files, settings, &[])
+        self.start_download_with_headers(uri, save_dir, out, select_files, settings, &[], None)
     }
 
     /// `start_download`, sending `headers` with every request (a site's
-    /// Referer and cookies, for the native extractors' files).
+    /// Referer and cookies, for the native extractors' files); a torrent's
+    /// `index_out` ("N=path" lines) puts those of its files elsewhere.
+    #[allow(clippy::too_many_arguments)]
     pub fn start_download_with_headers(
         &self,
         uri: &str,
@@ -173,6 +175,7 @@ impl AriaEngineClient {
         select_files: Option<&str>,
         settings: &super::DownloadSettings,
         headers: &[(String, String)],
+        index_out: Option<&str>,
     ) -> Result<String, String> {
         let gid = self.group_man.next_available_gid();
 
@@ -180,6 +183,7 @@ impl AriaEngineClient {
         options.dir = Some(save_dir.to_string());
         options.out = out.map(str::to_string);
         options.select_file = select_files.map(str::to_string);
+        options.index_out = index_out.map(str::to_string);
         options.continue_download = true;
         apply(&mut options, settings);
         // Asks for the size first, so a named download can split from the
@@ -358,6 +362,7 @@ impl AriaEngineClient {
         torrent: Vec<u8>,
         save_dir: &str,
         select_files: Option<&str>,
+        index_out: Option<&str>,
         settings: &super::DownloadSettings,
     ) -> Result<String, String> {
         let gid = self.group_man.next_available_gid();
@@ -365,6 +370,7 @@ impl AriaEngineClient {
         let mut options = DownloadOptions::default();
         options.dir = Some(save_dir.to_string());
         options.select_file = select_files.map(str::to_string);
+        options.index_out = index_out.map(str::to_string);
         options.continue_download = true;
         apply(&mut options, settings);
 
@@ -405,6 +411,64 @@ impl AriaEngineClient {
                 !probe && matches!(group.status(), DownloadStatus::Active | DownloadStatus::Waiting)
             })
             .count()
+    }
+
+    /// A finished torrent's files that weren't picked (written only where a
+    /// piece ran over into them), and the folders that leaves empty, inside
+    /// the folder it was saved in.
+    pub fn remove_unpicked(&self, gid_hex: &str) {
+        // Still in the list, or already among the stopped ones.
+        let result = GroupId::from_hex_string(gid_hex)
+            .and_then(|gid| self.group_man.find_group(gid))
+            .map(|group| group.recover().create_download_result())
+            .or_else(|| self.group_man.find_stopped_result(gid_hex));
+        let Some(result) = result.filter(|r| !r.dir.is_empty()) else {
+            return;
+        };
+        let base = std::path::PathBuf::from(&result.dir);
+        for file in result.files.iter().filter(|f| !f.selected && !f.path.is_empty()) {
+            let path = if std::path::Path::new(&file.path).is_absolute() { std::path::PathBuf::from(&file.path) } else { base.join(&file.path) };
+            if !path.starts_with(&base) {
+                continue;
+            }
+            let _ = std::fs::remove_file(&path);
+            let mut dir = path.parent();
+            while let Some(d) = dir.filter(|d| d.starts_with(&base) && *d != base) {
+                if std::fs::remove_dir(d).is_err() {
+                    break;
+                }
+                dir = d.parent();
+            }
+        }
+    }
+
+    /// aria2's `.aria2.lock` in a download's folder, once nothing is
+    /// downloading: an empty file it keeps a lock on while downloading there,
+    /// left behind after (in Download/Eddy, where it's seen). With nothing
+    /// running nothing holds it; aria2 makes it again when it needs it.
+    pub fn drop_lock_file(&self, gid_hex: &str) {
+        if self.active_count() > 0 {
+            return;
+        }
+        let dir = GroupId::from_hex_string(gid_hex)
+            .and_then(|gid| self.group_man.find_group(gid))
+            .and_then(|group| group.recover().options().dir.clone())
+            .or_else(|| self.group_man.find_stopped_result(gid_hex).map(|r| r.dir).filter(|d| !d.is_empty()));
+        if let Some(dir) = dir {
+            let _ = std::fs::remove_file(std::path::Path::new(&dir).join(".aria2.lock"));
+        }
+    }
+
+    /// A finished download's first picked file (a torrent's first file may
+    /// be one that wasn't picked), as a full path.
+    pub fn first_picked(&self, gid_hex: &str) -> Option<std::path::PathBuf> {
+        let result = GroupId::from_hex_string(gid_hex)
+            .and_then(|gid| self.group_man.find_group(gid))
+            .map(|group| group.recover().create_download_result())
+            .or_else(|| self.group_man.find_stopped_result(gid_hex))?;
+        let file = result.files.iter().find(|f| f.selected && !f.path.is_empty())?;
+        let path = std::path::Path::new(&file.path);
+        Some(if path.is_absolute() { path.to_path_buf() } else { std::path::Path::new(&result.dir).join(path) })
     }
 
     /// Why a download stopped, if aria2 recorded a reason.
@@ -475,6 +539,18 @@ fn apply(options: &mut DownloadOptions, settings: &super::DownloadSettings) {
     // or replaces it.
     options.allow_overwrite = settings.replace_existing;
     options.auto_file_renaming = !settings.replace_existing;
+    // Some of a torrent's files picked: nothing allocated ahead (aria2 would
+    // make every file, picked or not, at full size); files appear as their
+    // data comes. Unpicked ones get at most a boundary piece's spill-over,
+    // removed when it's done (`remove_unpicked`).
+    if options.select_file.is_some() {
+        options.file_allocation = Some("none".to_string());
+    }
+    // No seeding once a torrent's done (aria2 would go on until it had
+    // uploaded as much: the card and the notification stayed at 100%, and
+    // the phone kept uploading). An explicit 0 turns it off; leaving it
+    // unset seeds to the 1.0 ratio.
+    options.seed_time = Some(0.0);
     // A moment between retries (aria2's default is none): a phone's network
     // drops out for seconds, and instant retries use them all up at once.
     options.retry_wait = 2;

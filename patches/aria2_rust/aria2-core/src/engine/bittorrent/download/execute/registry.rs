@@ -46,6 +46,28 @@ impl BtDownloadCommand {
         }
     }
 
+    /// Eddy: undoes `register_bt_download` (as dropping the command does),
+    /// to try again in a moment.
+    pub(super) fn unregister_bt_download(&mut self) {
+        let Some(registry) = self.bt_registry.as_ref() else {
+            return;
+        };
+        let gid = self.group.recover().gid().value();
+        let mut registry = registry
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let owns_registration = self.tracker_runtime.as_ref().is_some_and(|runtime| {
+            registry
+                .get(gid)
+                .and_then(|object| object.tracker_runtime.as_ref())
+                .is_some_and(|registered| Arc::ptr_eq(registered, runtime))
+        });
+        if owns_registration {
+            registry.remove(gid);
+        }
+        self.tracker_runtime = None;
+    }
+
     pub(super) fn register_bt_download(&mut self) -> std::result::Result<(), String> {
         let Some(registry) = self.bt_registry.as_ref() else {
             return Ok(());

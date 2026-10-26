@@ -32,6 +32,8 @@ export struct DownloadItem {
     part: string,
     // Done, and it saved a folder (several files): shown as one.
     is_folder: bool,
+    // Its files can be picked again (a torrent's, a yt-dlp playlist's).
+    can_choose: bool,
     options: LinkOptions, // its speed limit, connections, user agent, folder
 }
 

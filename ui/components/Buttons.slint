@@ -121,57 +121,74 @@ export component ColorCircle inherits Rectangle {
 }
 
 
+// MD3 switch: a 52×32 track; the handle 16 (off) or 24 with a check (on),
+// 28 while pressed, with a 40 state layer round it. No shadow: MD3's handle
+// is flat.
 export component ModernSwitch inherits Rectangle {
     in-out property <bool> checked;
+    // Pressed from outside (a row that toggles it on its own tap).
+    in property <bool> held: false;
     callback toggled;
+
+    private property <bool> pressed: ta.pressed || root.held;
+    private property <bool> hovered: ta.has-hover;
+    // MD3 roles: primary / on-primary, and on-primary-container for the
+    // check; off, surface-container-highest with an outline.
+    private property <color> on_track: ThemeSettings.is_dark ? Colors.white.mix(ThemeSettings.primary_accent, 40%) : ThemeSettings.primary_accent;
+    private property <color> on_handle: ThemeSettings.is_dark ? ThemeSettings.primary_accent.darker(2.0) : #ffffff;
+    private property <color> on_icon: ThemeSettings.is_dark ? root.on_track : ThemeSettings.primary_accent.darker(0.6);
+    private property <color> outline: ThemeSettings.is_dark ? #8E918F : #747775;
+    private property <color> off_track: ThemeSettings.is_dark ? #444746 : #E3E3E3;
 
     width: 52px;
     height: 32px;
     border-radius: 16px;
-    // ThemeSettings.primary_accent.brighter(0.7)
-
-    background: root.checked ? (ThemeSettings.is_dark ? Colors.white.mix(ThemeSettings.primary_accent, 40%) : ThemeSettings.primary_accent) :
-        (ThemeSettings.is_dark ? #444746 : #E3E3E3);
-
+    background: root.checked ? root.on_track : root.off_track;
     border-width: root.checked ? 0px : 2px;
-    border-color: root.checked ? transparent :
-        (ThemeSettings.is_dark ? #8E918F : #747775);
+    border-color: root.checked ? transparent : root.outline;
+    animate background, border-color { duration: 200ms; easing: cubic-bezier(0.2, 0.0, 0, 1.0); }
 
-    animate background { duration: 250ms; }
-    animate border-color { duration: 250ms; }
-    animate border-width { duration: 250ms; }
+    // Handle's centre: 16 from the end it's at.
+    private property <length> centre: root.checked ? root.width - 16px : 16px;
+    animate centre { duration: 250ms; easing: cubic-bezier(0.2, 0.0, 0, 1.0); }
+    private property <length> size: root.pressed ? 28px : root.checked ? 24px : 16px;
+    animate size { duration: 200ms; easing: cubic-bezier(0.2, 0.0, 0, 1.0); }
 
+    // State layer: 8% hovered, 12% pressed, in the handle's role colour.
     Rectangle {
-        width: root.checked ? 24px : 16px;
-        height: root.checked ? 24px : 16px;
-        border-radius: self.width / 2;
-
-        background: root.checked ?
-            (ThemeSettings.is_dark ? ThemeSettings.primary_accent.darker(2.0) : #ffffff) :
-            (ThemeSettings.is_dark ? #8E918F : #747775);
-
-        x: root.checked ? parent.width - self.width - 4px : 8px;
+        width: 40px;
+        height: 40px;
+        x: root.centre - self.width / 2;
         y: (parent.height - self.height) / 2;
-
-        animate x {
-            duration: 250ms;
-            easing: cubic-bezier(0.2, 0.0, 0, 1.0);
-        }
-        animate width {
-            duration: 250ms;
-            easing: cubic-bezier(0.2, 0.0, 0, 1.0);
-        }
-        animate height {
-            duration: 250ms;
-            easing: cubic-bezier(0.2, 0.0, 0, 1.0);
-        }
-        animate background { duration: 250ms; }
-
-        drop-shadow-blur: root.checked ? 4px : 0px;
-        drop-shadow-color: root.checked ? #00000040 : transparent;
+        border-radius: 20px;
+        background: (root.checked ? root.on_track : ThemeSettings.text_color)
+            .transparentize(root.pressed ? 88% : root.hovered ? 92% : 100%);
+        animate background { duration: 150ms; }
     }
 
-    TouchArea {
+    Rectangle {
+        width: root.size;
+        height: root.size;
+        x: root.centre - self.width / 2;
+        y: (parent.height - self.height) / 2;
+        border-radius: self.width / 2;
+        // Off and pressed: on-surface-variant.
+        background: root.checked ? root.on_handle : root.pressed ? ThemeSettings.text_color.transparentize(25%) : root.outline;
+        animate background { duration: 200ms; }
+
+        Image {
+            source: @image-url("../icons/rounded/check.svg");
+            width: 16px;
+            height: 16px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            colorize: root.on_icon;
+            opacity: root.checked ? 1 : 0;
+            animate opacity { duration: 150ms; }
+        }
+    }
+
+    ta := TouchArea {
         clicked => {
             root.checked = !root.checked;
             root.toggled();
