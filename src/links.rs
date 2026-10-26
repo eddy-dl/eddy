@@ -28,6 +28,8 @@ thread_local! {
     static MEDIA: RefCell<HashMap<i32, MediaMeta>> = RefCell::new(HashMap::new());
     // Drive folders' files, by link id, in the preview's order.
     static DRIVE: RefCell<HashMap<i32, Vec<extractors::gdrive::Entry>>> = RefCell::new(HashMap::new());
+    // MEGA folders' files (with their keys), by link id, in the preview's order.
+    static MEGA: RefCell<HashMap<i32, Vec<extractors::mega::Entry>>> = RefCell::new(HashMap::new());
     // Run when the last pending link is dealt with (the share popup closes).
     static ON_EMPTY: RefCell<Option<Box<dyn Fn()>>> = const { RefCell::new(None) };
 }
@@ -61,6 +63,7 @@ where
             LinkBackend::Media => Backend::Media,
             LinkBackend::Book => Backend::Book,
             LinkBackend::Drive => Backend::Drive,
+            LinkBackend::Mega => Backend::Mega,
             _ => Backend::Direct,
         };
         start_link(id, backend, format.to_string(), filename.to_string(), &options);
@@ -139,6 +142,7 @@ where
             let torrent = link.backends.row_data(0) == Some(LinkBackend::Torrent);
             let book = link.backends.row_data(0) == Some(LinkBackend::Book);
             let drive = link.backends.row_data(0) == Some(LinkBackend::Drive);
+            let mega = link.backends.row_data(0) == Some(LinkBackend::Mega);
             let backend = match choice {
                 _ if torrent => Backend::Torrent,
                 // Books stay books, with the Books defaults.
@@ -146,6 +150,7 @@ where
                 // Drive links have no other way; a folder unchecked yet
                 // downloads all its files.
                 _ if drive => Backend::Drive,
+                _ if mega => Backend::Mega,
                 QuickBackend::Direct => Backend::Direct,
                 QuickBackend::Media => Backend::Media,
                 _ => Backend::Auto,
@@ -417,6 +422,21 @@ fn start_link(id: i32, backend: Backend, format: String, filename: String, optio
             }
             None => String::new(),
         },
+        // A MEGA folder's picked files (a link to one file in a folder has
+        // no list to pick from: that file).
+        Backend::Mega => match MEGA.with(|d| d.borrow().get(&id).cloned()) {
+            Some(entries) if link.files.row_count() == 0 => serde_json::to_string(&extractors::mega::MegaRequest { files: entries }).unwrap_or_default(),
+            Some(entries) => {
+                let picked: std::collections::HashSet<i32> = link.files.iter().filter(|f| f.selected).map(|f| f.index).collect();
+                if picked.is_empty() {
+                    crate::platform::show_toast("Pick at least one file to download");
+                    return;
+                }
+                let files = entries.into_iter().enumerate().filter(|(i, _)| picked.contains(&(*i as i32 + 1))).map(|(_, e)| e).collect();
+                serde_json::to_string(&extractors::mega::MegaRequest { files }).unwrap_or_default()
+            }
+            None => String::new(),
+        },
         _ => format,
     };
     // The torrent's other files, kept out of its folder.
@@ -473,8 +493,8 @@ fn download_settings(options: &crate::LinkOptions, link: &PendingLink, audio: bo
             false => String::new(),
             true if link.backends.row_data(0) == Some(LinkBackend::Book) => "Books".to_string(),
             true if audio => category_folder(FileType::Audio).to_string(),
-            // A Drive folder's files aren't a torrent's.
-            true if link.file_type == FileType::Folder && link.backends.row_data(0) == Some(LinkBackend::Drive) => {
+            // A Drive or MEGA folder's files aren't a torrent's.
+            true if link.file_type == FileType::Folder && matches!(link.backends.row_data(0), Some(LinkBackend::Drive | LinkBackend::Mega)) => {
                 category_folder(FileType::Other).to_string()
             }
             true => category_folder(link.file_type).to_string(),
@@ -550,6 +570,7 @@ fn take_pending(id: i32) -> Option<PendingLink> {
     })?;
     MEDIA.with(|m| m.borrow_mut().remove(&id));
     DRIVE.with(|d| d.borrow_mut().remove(&id));
+    MEGA.with(|d| d.borrow_mut().remove(&id));
     if PENDING.with(|m| m.row_count() == 0) {
         // Nothing left to show a check's result to.
         crate::children::stop_checks();
@@ -681,8 +702,9 @@ const MAGNET_PARAMS: [&str; 11] = ["&xt=", "&dn=", "&tr=", "&xl=", "&ws=", "&as=
 fn initial_link(id: i32, url: &str) -> PendingLink {
     let magnet = is_magnet(url);
     let drive = extractors::gdrive::parse_link(url);
-    // A Drive link's path says nothing of the file ("view", "uc").
-    let filename = if magnet { magnet_name(url) } else if drive.is_some() { None } else { name_from_url(url) }.unwrap_or_default();
+    let mega = extractors::mega::parse_link(url);
+    // A Drive or MEGA link's path says nothing of the file ("view", a handle).
+    let filename = if magnet { magnet_name(url) } else if drive.is_some() || mega.is_some() { None } else { name_from_url(url) }.unwrap_or_default();
     PendingLink {
         id,
         url: url.into(),
@@ -690,6 +712,7 @@ fn initial_link(id: i32, url: &str) -> PendingLink {
         error: SharedString::new(),
         file_type: match &drive {
             Some(extractors::gdrive::Link::Folder(_)) => FileType::Folder,
+            _ if matches!(mega, Some(extractors::mega::Link::Folder { node: None, .. })) => FileType::Folder,
             _ if magnet => torrent_type(&[], &filename),
             _ => file_type_for(&filename, None),
         },
@@ -700,6 +723,8 @@ fn initial_link(id: i32, url: &str) -> PendingLink {
             LinkBackend::Torrent
         } else if drive.is_some() {
             LinkBackend::Drive
+        } else if mega.is_some() {
+            LinkBackend::Mega
         } else {
             LinkBackend::Direct
         }]),
@@ -747,6 +772,8 @@ struct Probe {
     book: Option<BookMeta>,
     /// A Drive folder's files, next to `files` (their ids, to download).
     drive: Option<Vec<extractors::gdrive::Entry>>,
+    /// A MEGA folder's files, next to `files` (their handles and keys).
+    mega: Option<Vec<extractors::mega::Entry>>,
 }
 
 #[derive(Clone, Debug)]
@@ -833,6 +860,9 @@ fn apply_probe(id: i32, result: Result<Probe, String>) {
                 if let Some(entries) = probe.drive {
                     DRIVE.with(|d| d.borrow_mut().insert(id, entries));
                 }
+                if let Some(entries) = probe.mega {
+                    MEGA.with(|d| d.borrow_mut().insert(id, entries));
+                }
                 if let Some(media) = probe.media {
                     link.service = media.service.label().into();
                     link.media_kind = match media.kind {
@@ -898,6 +928,7 @@ pub async fn pick_backend(url: &str) -> (Backend, String) {
                 Some(LinkBackend::Media) => Backend::Media,
                 Some(LinkBackend::Book) => Backend::Book,
                 Some(LinkBackend::Drive) => Backend::Drive,
+                Some(LinkBackend::Mega) => Backend::Mega,
                 _ => Backend::Direct,
             };
             // Best quality; music stays audio.
@@ -953,6 +984,7 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
             media: None,
             book: None,
             drive: None,
+            mega: None,
         });
     }
 
@@ -976,7 +1008,14 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
             media: None,
             book: Some(BookMeta { site: book.site, id: book.id.clone(), chapters: book.chapters.len(), locked, cover }),
             drive: None,
+            mega: None,
         });
+    }
+
+    // MEGA: a file's name and size (decrypted with the link's key), or a
+    // folder's files.
+    if let Some(link) = extractors::mega::parse_link(url) {
+        return mega_probe(link).await;
     }
 
     // Google Drive: a shared file's real name and size, or a shared
@@ -1006,6 +1045,7 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
                 media: None,
                 book: None,
                 drive: None,
+                mega: None,
             });
         }
         return Err(format!("Unsupported link type ({scheme})"));
@@ -1068,6 +1108,7 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
                 media: None,
                 book: None,
                 drive: None,
+                mega: None,
             });
         }
     }
@@ -1102,6 +1143,7 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
         media: None,
         book: None,
         drive: None,
+        mega: None,
     })
 }
 
@@ -1138,6 +1180,7 @@ async fn probe_torrent_link(url: &str, filename: &str) -> Result<Probe, String> 
         media: None,
         book: None,
         drive: None,
+        mega: None,
     })
 }
 
@@ -1156,6 +1199,7 @@ async fn drive_probe(link: extractors::gdrive::Link) -> Result<Probe, String> {
         media: None,
         book: None,
         drive: None,
+        mega: None,
     };
     match link {
         Link::File(id) => {
@@ -1190,10 +1234,62 @@ async fn drive_probe(link: extractors::gdrive::Link) -> Result<Probe, String> {
                 },
                 files,
                 drive: Some(folder.entries),
+                mega: None,
                 ..empty
             })
         }
     }
+}
+
+async fn mega_probe(link: extractors::mega::Link) -> Result<Probe, String> {
+    use extractors::mega::{self, Link};
+    let empty = Probe {
+        filename: String::new(),
+        file_type: FileType::Other,
+        size: String::new(),
+        backends: vec![LinkBackend::Mega],
+        formats: Vec::new(),
+        files: Vec::new(),
+        items: Vec::new(),
+        media: None,
+        book: None,
+        drive: None,
+        mega: None,
+    };
+    let (handle, key, node) = match link {
+        Link::File { handle, key } => {
+            let file = mega::resolve_file(&handle, &key).await?;
+            return Ok(Probe { file_type: file_type_for(&file.name, None), size: format_size(file.size), filename: file.name, ..empty });
+        }
+        Link::Folder { handle, key, node } => (handle, key, node),
+    };
+    let folder = mega::list_folder(&handle, &key, node.as_deref()).await?;
+    if folder.entries.is_empty() {
+        return Err("This MEGA folder has no files to download".to_string());
+    }
+    if folder.truncated {
+        log::warn!("MEGA folder {handle} has more than {} files; listing the first", mega::MAX_FILES);
+    }
+    // The link points at one file in the folder: that file, as a file.
+    if folder.single {
+        let entry = &folder.entries[0];
+        return Ok(Probe {
+            file_type: file_type_for(&entry.path, None),
+            size: format_size(entry.size),
+            filename: entry.path.clone(),
+            mega: Some(folder.entries),
+            ..empty
+        });
+    }
+    let files: Vec<(usize, String, u64)> = folder.entries.iter().enumerate().map(|(i, e)| (i + 1, e.path.clone(), e.size)).collect();
+    Ok(Probe {
+        filename: clean_name(&folder.name),
+        file_type: FileType::Folder,
+        size: format_size(folder.entries.iter().map(|e| e.size).sum()),
+        files,
+        mega: Some(folder.entries),
+        ..empty
+    })
 }
 
 /// A torrent's files in its own order, numbered from 1 like aria2's
@@ -1479,6 +1575,7 @@ async fn media_probe(info: MediaInfo) -> Probe {
         }),
         book: None,
         drive: None,
+        mega: None,
     }
 }
 
@@ -1755,6 +1852,21 @@ mod tests {
             magnet_name("magnet:?xt=urn:btih:8ca5&dn=Avatar%20Seven%20Havens%20S01E09&tr=udp://t").as_deref(),
             Some("Avatar Seven Havens S01E09")
         );
+    }
+
+    #[test]
+    fn mega_links_stay_whole() {
+        // The key is in the fragment; old links use "!" between its parts.
+        let new = "https://mega.nz/file/nFcGFbbA#oHX8U0ZjGepKhGjpWrxlxF8UVDpPuWDmGAkZyNLcGwA";
+        let old = "https://mega.nz/#!nFcGFbbA!oHX8U0ZjGepKhGjpWrxlxF8UVDpPuWDmGAkZyNLcGwA";
+        let folder = "https://mega.nz/folder/TqBmgDyI#USMnXad535FoQtIkHPEb9g/file/myZRBRaa";
+        let old_folder = "https://mega.nz/#F!TqBmgDyI!USMnXad535FoQtIkHPEb9g";
+        let want = vec![new.to_string(), old.to_string(), folder.to_string(), old_folder.to_string()];
+        let text = format!("get it here: {new}\nold one ({old}) and {folder}.\nfolder: {old_folder}!");
+        assert_eq!(extract_links_with(&text, false), want);
+        // With spaces a link runs to the line's end: one per line.
+        let text = format!("get it here: {new}\nold one: {old}\n{folder}.\nfolder: {old_folder}!");
+        assert_eq!(extract_links_with(&text, true), want);
     }
 
     #[test]

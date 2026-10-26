@@ -2023,11 +2023,13 @@ dependencies = [
 name = "eddy-ui"
 version = "0.1.0"
 dependencies = [
+ "aes 0.9.3",
  "android-activity 0.6.1",
  "android_logger",
  "aria2-core",
  "aria2-protocol",
  "base64 0.21.7",
+ "ctr 0.10.1",
  "dirs 5.0.1",
  "ego-tree",
  "jni 0.22.4",
