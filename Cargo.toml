@@ -10,7 +10,9 @@ exclude = ["patches/aria2_rust"]
 # Android/IOS build target
 [lib]
 name = "eddy"
-crate-type = ["cdylib", "staticlib", "rlib"]
+# cdylib: Android's libeddy.so; rlib: the desktop binary below. An iOS build
+# would need a static library: `cargo rustc --lib --crate-type staticlib`.
+crate-type = ["cdylib", "rlib"]
 
 # Linux/Win/Mac build target
 [[bin]]
