@@ -18,7 +18,8 @@ Paste or share a link: Eddy works out what it is, shows a preview, and downloads
 - **Pages whose file only comes from a click**, in Eddy's own browser.
 
 Downloads go to `Download/Eddy` (by type, if you like) or a folder you pick.
-English and French.
+English and French. The French translation was written by an AI model, not a translator, and
+hasn't been checked by a native speaker: corrections are welcome.
 
 ## Building
 
