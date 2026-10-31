@@ -64,4 +64,3 @@ browser (`BrowserActivity`). Kotlin talks to Rust through `EddyNative` (JNI, in
 - Commits on `main` carry no `Co-Authored-By` lines. Feature branches go in as one squash
   commit with a hand-written message (pass the body, as GitHub copies the trailers otherwise).
 - Never commit keystores or passwords (`*.keystore` and `*.jks` are ignored).
-- GitHub Actions may be out of minutes: check locally rather than waiting for CI.
