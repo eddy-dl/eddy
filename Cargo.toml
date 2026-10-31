@@ -2,6 +2,7 @@
 name = "eddy-ui"
 version = "0.1.0"
 edition = "2024"
+license = "GPL-3.0-or-later"
 
 [workspace]
 # aria2_rust, patched (see patches/aria2_rust), is a workspace of its own.

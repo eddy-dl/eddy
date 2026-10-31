@@ -63,3 +63,9 @@ slint-viewer --style material ui/app.slint
 Warnings and errors are written to Eddy's own storage. Settings → Advanced → Debug can keep them
 in `Download/Eddy/logs` instead, or share them for a bug report. They list the links you
 download, so look at them before sending them anywhere.
+
+## License
+
+Eddy is free software, under the GNU General Public License, version 3 or (at your option) any
+later version: see [LICENSE](LICENSE). The patched crates in `patches/` keep their own licenses
+(aria2_rust is GPL-3.0-or-later too; Slint's Android backend keeps Slint's).
