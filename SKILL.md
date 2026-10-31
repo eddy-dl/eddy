@@ -5,16 +5,16 @@ description: How to work on Eddy, the Rust + Slint download manager for Android 
 
 # Working on Eddy
 
-Eddy is a Rust library (`src/`, built as `libeddy.so`) with a Slint UI (`ui/`), inside a small
-Kotlin Android app (`platforms/android/`) that hosts it: the download service, notifications,
+Eddy is a Rust app with a Slint UI (`ui/`), for Android, Windows and Linux. On Android it's a
+library (`src/`, built as `libeddy.so`) inside a small Kotlin app (`platforms/android/`) that
+hosts it: the download service, notifications,
 the browser check (`CloudflareActivity`), the hidden page fetcher (`PageFetcher`) and Eddy's
 browser (`BrowserActivity`). Kotlin talks to Rust through `EddyNative` (JNI, in
 `src/platform/android.rs`).
 
 ## Checking a change
 
-- **Rust:** check against Android, not the host (the desktop binary in `src/main.rs` doesn't
-  build at the moment):
+- **Rust:** check against Android (most of the app's platform code is there):
 
   ```sh
   ANDROID_JAR=$ANDROID_SDK/platforms/android-36/android.jar ANDROID_PLATFORM=android-36 \
@@ -24,6 +24,8 @@ browser (`BrowserActivity`). Kotlin talks to Rust through `EddyNative` (JNI, in
   The release profile is LTO with one codegen unit: `check` skips that, so use `build` only when
   an APK is wanted. On a phone, run it niced on the small cores
   (`taskset -c 0-5 nice -n 19 …`). Code changed while a check runs: stop it and start again.
+  The desktop app (`src/main.rs`, `src/platform/desktop.rs`) builds with plain
+  `SLINT_STYLE=fluent cargo build --release`; CI builds Windows, Linux and Android.
 - **Slint only:** no Rust build needed. Open it in the viewer, in both styles:
 
   ```sh

@@ -1,6 +1,7 @@
 # Eddy
 
-A download manager for Android, written in Rust with a [Slint](https://slint.dev) interface.
+A download manager for Android, Windows and Linux, written in Rust with a [Slint](https://slint.dev)
+interface.
 Paste or share a link: Eddy works out what it is, shows a preview, and downloads it.
 
 ## What it downloads
@@ -23,7 +24,7 @@ hasn't been checked by a native speaker: corrections are welcome.
 
 ## Building
 
-You need Rust (edition 2024), the Android NDK and SDK (API 36), and
+For Android, you need Rust (edition 2024), the Android NDK and SDK (API 36), and
 [cargo-ndk](https://github.com/bbqsrc/cargo-ndk).
 
 ```sh
@@ -40,6 +41,12 @@ The release build is signed with the keystore named by `KEYSTORE_FILE`, `KEYSTOR
 repository's root (`debug.keystore`, not committed).
 
 Android 8 (API 26) or newer.
+
+On Windows and Linux, the desktop app is a plain Cargo build:
+
+```sh
+SLINT_STYLE=fluent cargo build --release
+```
 
 To look at the interface without building the app, open it in `slint-viewer`:
 
