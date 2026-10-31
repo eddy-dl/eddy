@@ -1,5 +1,7 @@
 # Eddy
 
+[![Latest release](https://img.shields.io/github/v/release/eddy-dl/eddy)](https://github.com/eddy-dl/eddy/releases/latest)
+
 A download manager for Android, Windows and Linux, written in Rust with a [Slint](https://slint.dev)
 interface.
 Paste or share a link: Eddy works out what it is, shows a preview, and downloads it.
