@@ -27,8 +27,25 @@ aside.author-note { margin-top: 2em; padding: 0.6em 0.8em; border-left: 3px soli
 .info dt { font-weight: bold; margin-top: 0.6em; }
 ";
 
-/// The book as EPUB bytes. `cover` is the cover image's bytes and type.
-pub fn pack(book: &Book, chapters: &[Chapter], cover: Option<(Vec<u8>, String)>, images: Vec<Image>) -> Result<Vec<u8>, String> {
+/// The book as EPUB bytes. `cover` is the cover image's bytes and type;
+/// `part`: the book comes in parts (updates in files of their own), and
+/// this is the nth, so readers list them together, in order, as a series.
+/// The same chapters always make the same bytes (no dates in it), so a
+/// reader that knows books by their contents knows it again.
+pub fn pack(book: &Book, chapters: &[Chapter], cover: Option<(Vec<u8>, String)>, images: Vec<Image>, part: Option<usize>) -> Result<Vec<u8>, String> {
+    // A later part is a book of its own: its title says which part, and its
+    // id isn't the first part's.
+    let series = part.map(|n| (book.title.clone(), n));
+    let mut parted;
+    let book = match part {
+        Some(n) if n > 1 => {
+            parted = book.clone();
+            parted.title = format!("{} (part {n})", book.title);
+            parted.id = format!("{}-part{n}", book.id);
+            &parted
+        }
+        _ => book,
+    };
     let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
     let stored = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
     let deflated = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
@@ -65,7 +82,7 @@ pub fn pack(book: &Book, chapters: &[Chapter], cover: Option<(Vec<u8>, String)>,
     }
     add("OEBPS/nav.xhtml", nav(book, chapters, cover_path.is_some()).as_bytes(), true)?;
     add("OEBPS/toc.ncx", ncx(book, chapters).as_bytes(), true)?;
-    add("OEBPS/content.opf", opf(book, chapters, cover.as_ref().map(|(_, t)| t.as_str()), &images).as_bytes(), true)?;
+    add("OEBPS/content.opf", opf(book, chapters, cover.as_ref().map(|(_, t)| t.as_str()), &images, series.as_ref()).as_bytes(), true)?;
 
     zip.finish().map(|c| c.into_inner()).map_err(|e| e.to_string())
 }
@@ -112,7 +129,7 @@ fn info(book: &Book) -> String {
         html += &format!("<dt>Tags</dt><dd>{}</dd>\n", escape(&book.tags.join(", ")));
     }
     html += &format!("<dt>Source</dt><dd><a href=\"{0}\">{0}</a> ({1})</dd>\n", escape(&book.url), book.site.label());
-    html += &format!("<dt>Saved</dt><dd>{} with Eddy</dd>\n", today());
+    html += "<dt>Saved</dt><dd>with Eddy</dd>\n";
     html += "</dl>";
     html
 }
@@ -183,13 +200,14 @@ fn ncx(book: &Book, chapters: &[Chapter]) -> String {
     )
 }
 
-fn opf(book: &Book, chapters: &[Chapter], cover_type: Option<&str>, images: &[Image]) -> String {
+fn opf(book: &Book, chapters: &[Chapter], cover_type: Option<&str>, images: &[Image], series: Option<&(String, usize)>) -> String {
     let mut metadata = format!(
         "<dc:identifier id=\"book-id\">{}</dc:identifier>\n<dc:title>{}</dc:title>\n<dc:language>{}</dc:language>\n<meta property=\"dcterms:modified\">{}</meta>\n<dc:source>{}</dc:source>\n<dc:publisher>{}</dc:publisher>\n",
         escape(&identifier(book)),
         escape(&book.title),
         escape(book.language.as_deref().unwrap_or("en")),
-        now_utc(),
+        // Required; fixed, so the same chapters make the same file.
+        "2000-01-01T00:00:00Z",
         escape(&book.url),
         book.site.label(),
     );
@@ -203,6 +221,14 @@ fn opf(book: &Book, chapters: &[Chapter], cover_type: Option<&str>, images: &[Im
     }
     for tag in &book.tags {
         metadata += &format!("<dc:subject>{}</dc:subject>\n", escape(tag));
+    }
+    if let Some((name, index)) = series {
+        // The series and its place in it, as EPUB 3 and Calibre write them
+        // (readers' series shelves use one or the other).
+        metadata += &format!(
+            "<meta property=\"belongs-to-collection\" id=\"series\">{0}</meta>\n<meta refines=\"#series\" property=\"collection-type\">series</meta>\n<meta refines=\"#series\" property=\"group-position\">{index}</meta>\n<meta name=\"calibre:series\" content=\"{0}\"/>\n<meta name=\"calibre:series_index\" content=\"{index}\"/>\n",
+            escape(name)
+        );
     }
 
     let mut manifest = String::from(
@@ -245,28 +271,3 @@ fn identifier(book: &Book) -> String {
     format!("urn:eddy:{}:{}", book.site.label().to_lowercase().replace(' ', ""), book.id)
 }
 
-/// "2026-10-22T08:30:00Z".
-fn now_utc() -> String {
-    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) as i64;
-    let (y, m, d) = civil_from_days(secs.div_euclid(86_400));
-    let rest = secs.rem_euclid(86_400);
-    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", rest / 3600, rest % 3600 / 60, rest % 60)
-}
-
-fn today() -> String {
-    now_utc()[..10].to_string()
-}
-
-/// Days since 1970-01-01 → (year, month, day) (Howard Hinnant's algorithm).
-fn civil_from_days(z: i64) -> (i64, u32, u32) {
-    let z = z + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
-    let y = yoe + era * 400 + if m <= 2 { 1 } else { 0 };
-    (y, m, d)
-}

@@ -3,37 +3,69 @@ import { ThemeSettings } from "../themes/theme.slint";
 import { FileType, FileTypeIcon } from "FileTypeIcon.slint";
 import { DragHandle } from "DragHandle.slint";
 import { ActionButton } from "Buttons.slint";
+import { GroupRow } from "GroupRow.slint";
+import { RangePicker } from "RangePicker.slint";
+import { Note } from "Note.slint";
+import { TextField } from "TextField.slint";
+import { SectionLabel } from "Chips.slint";
+import { SwitchRow } from "SwitchRow.slint";
 
-// One of a download's files (a torrent's) or items (a yt-dlp playlist's).
+// One of a download's files (a torrent's), items (a yt-dlp playlist's) or
+// chapters (a book's).
 export struct ChoiceFile {
     index: int, // 1-based, as the preview listed it
-    path: string, // inside the torrent; an item's title
+    path: string, // inside the torrent; an item's or a chapter's title
+    // What its row shows ("" for `path`): a file's name inside its group.
+    name: string,
     size: string,
     file_type: FileType,
     selected: bool,
     // Saved already (a finished download's): ticked, it stays as it is.
     saved: bool,
+    // The folder or volume it's under ("" for none), and that group's
+    // ticks: 0 none, 1 some, 2 all.
+    group: string,
+    group_state: int,
+    // A book's locked chapter: listed, can't be picked.
+    locked: bool,
 }
 
-// Which of a torrent's files, or a yt-dlp playlist's items, a download
-// fetches: picked again from the files the preview listed, at any point
-// (downloading, paused, finished). Filled in by Rust.
+// Which of a torrent's files, a yt-dlp playlist's items or a book's
+// chapters a download fetches: picked again from what the preview listed,
+// at any point (downloading, paused, finished). Filled in by Rust.
 export global ChooseFiles {
     in-out property <bool> open: false;
     in property <int> id;
     in property <string> title;
     in-out property <[ChoiceFile]> files;
-    // How many of `files` are ticked.
+    // How many of `files` are ticked, and can be (locked chapters can't).
     in-out property <int> selected;
+    in property <int> selectable;
+    // The rows of the first and last ticked (-1 for none).
+    in property <int> first;
+    in property <int> last;
+    // How many group headers the list has (for the sheet's height).
+    in property <int> groups;
+    // A book: it's made again with the ticked chapters, and the title
+    // (its site's, `site_title`, unless it was given another).
+    in property <bool> book;
+    in-out property <string> book_title;
+    in property <string> site_title;
+    // A book's Title field and chapter list, folded away until tapped.
+    in-out property <bool> title_open;
+    in-out property <bool> chapters_open;
+    // New chapters come as a part of their own (this book's choice; saved
+    // as soon as it's changed).
+    in-out property <bool> parts;
+    callback parts_changed(on: bool);
     // Download with the ticked files (Rust reads `files`).
     callback apply(id: int);
-    // Ticks every file, or none.
+    // Ticks every file, or none; one (its row in `files`); a group's.
     callback select_all(on: bool);
-
-    public function toggle(i: int) {
-        self.files[i].selected = !self.files[i].selected;
-        self.selected += self.files[i].selected ? 1 : -1;
-    }
+    callback toggle(row: int);
+    callback select_group(group: string, on: bool);
+    // Ticks the rows from one to another (both included), and no others.
+    callback select_range(first: int, last: int);
 }
 
 component ChoiceRow inherits Rectangle {
@@ -63,7 +95,7 @@ component ChoiceRow inherits Rectangle {
                 height: 18px;
                 border-radius: 2px;
                 border-width: root.file.selected ? 0px : 2px;
-                border-color: ThemeSettings.text_color.transparentize(30%);
+                border-color: ThemeSettings.text_color.transparentize(root.file.locked ? 75% : 30%);
                 background: root.file.selected ? ThemeSettings.primary_accent : transparent;
                 animate background { duration: 150ms; }
 
@@ -80,19 +112,57 @@ component ChoiceRow inherits Rectangle {
         }
 
         Text {
-            text: root.file.path;
+            text: root.file.name != "" ? root.file.name : root.file.path;
             font-size: 14px;
-            color: root.file.selected ? ThemeSettings.text_color : ThemeSettings.text_color.transparentize(45%);
+            color: root.file.selected ? ThemeSettings.text_color : ThemeSettings.text_color.transparentize(root.file.locked ? 65% : 45%);
             vertical-alignment: center;
             horizontal-stretch: 1;
             overflow: elide;
         }
 
         Text {
-            text: root.file.saved ? @tr("Saved") : root.file.size;
+            text: root.file.locked ? @tr("Locked") : root.file.saved ? @tr("Saved") : root.file.size;
             font-size: 12px;
             font-weight: root.file.saved ? 600 : 400;
             color: root.file.saved ? ThemeSettings.primary_accent : ThemeSettings.text_color.transparentize(35%);
+            vertical-alignment: center;
+        }
+    }
+}
+
+// A part of the sheet that folds away: its name, what it holds, and an
+// arrow; a tap opens or folds it.
+component FoldRow inherits Rectangle {
+    in property <string> label;
+    in property <string> summary;
+    in property <bool> open;
+    callback clicked();
+
+    height: 56px;
+    background: ta.pressed ? ThemeSettings.text_color.transparentize(92%) : transparent;
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+    HorizontalLayout {
+        padding-left: 24px;
+        padding-right: 24px;
+        spacing: 8px;
+        SectionLabel {
+            text: root.label;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.summary;
+            font-size: 12px;
+            color: ThemeSettings.text_color.transparentize(35%);
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+        Text {
+            text: root.open ? "▲" : "▼";
+            font-size: 12px;
+            color: ThemeSettings.text_color.transparentize(35%);
             vertical-alignment: center;
         }
     }
@@ -113,7 +183,9 @@ export component ChooseFilesSheet inherits Rectangle {
         handle.reset();
     }
 
-    height: Math.min(header.preferred-height + ChooseFiles.files.length * 48px + footer.preferred-height, root.available_height);
+    private property <bool> list_shown: !ChooseFiles.book || ChooseFiles.chapters_open;
+    height: Math.min(header.preferred-height + (root.list_shown ? ChooseFiles.files.length * 48px + ChooseFiles.groups * 40px + 1px : 0px)
+        + footer.preferred-height, root.available_height);
     background: ThemeSettings.surface;
     animate background { duration: ThemeSettings.fade; easing: ease-in-out; }
     border-radius: 28px;
@@ -121,8 +193,19 @@ export component ChooseFilesSheet inherits Rectangle {
     drop-shadow-blur: 12px;
     drop-shadow-color: #00000020;
 
+    // Takes the focus off the Title field when tapped away from (so the
+    // keyboard goes and Back works on the sheet again).
+    park := FocusScope {
+        x: 0;
+        y: 0;
+        width: 0;
+        height: 0;
+    }
+
     // Keeps taps on the sheet's gaps from reaching the backdrop behind it.
-    TouchArea { }
+    TouchArea {
+        clicked => { park.focus(); }
+    }
 
     VerticalLayout {
         // Only its own height: the list below takes the rest.
@@ -144,12 +227,12 @@ export component ChooseFilesSheet inherits Rectangle {
                     spacing: 2px;
 
                     Text {
-                        text: @tr("Choose files");
+                        text: ChooseFiles.book ? @tr("Choose chapters") : @tr("Choose files");
                         font-size: 22px;
                         color: ThemeSettings.text_color;
                     }
                     Text {
-                        text: @tr("{} of {} selected", ChooseFiles.selected, ChooseFiles.files.length) + " · " + ChooseFiles.title;
+                        text: @tr("{} of {} selected", ChooseFiles.selected, ChooseFiles.selectable) + " · " + ChooseFiles.title;
                         font-size: 13px;
                         color: ThemeSettings.text_color.transparentize(35%);
                         overflow: elide;
@@ -161,7 +244,7 @@ export component ChooseFilesSheet inherits Rectangle {
                 VerticalLayout {
                     alignment: center;
                     Rectangle {
-                        property <bool> all_selected: ChooseFiles.selected == ChooseFiles.files.length;
+                        property <bool> all_selected: ChooseFiles.selected == ChooseFiles.selectable;
                         height: 40px;
                         width: all_label.preferred-width + 24px;
                         border-radius: 20px;
@@ -183,18 +266,78 @@ export component ChooseFilesSheet inherits Rectangle {
                 }
             }
 
-            Rectangle {
+            // A range, picked from the list: a book's chapters always,
+            // else when there are too many to tick one by one.
+            if ChooseFiles.book || ChooseFiles.files.length > 10: HorizontalLayout {
+                padding-left: 24px;
+                padding-right: 24px;
+                padding-bottom: 12px;
+                RangePicker {
+                    count: ChooseFiles.files.length;
+                    first: ChooseFiles.first;
+                    last: ChooseFiles.last;
+                    label(row) => {
+                        (row + 1) + ". " + (ChooseFiles.files[row].name != "" ? ChooseFiles.files[row].name : ChooseFiles.files[row].path)
+                    }
+                    unavailable(row) => { ChooseFiles.files[row].locked; }
+                    picked(first, last) => { ChooseFiles.select_range(first, last); }
+                }
+            }
+
+            // A book's title, then its chapters: each folded away until
+            // tapped (MD3 one-line list items).
+            if ChooseFiles.book: FoldRow {
+                label: @tr("Title");
+                summary: ChooseFiles.book_title != "" ? ChooseFiles.book_title : ChooseFiles.site_title;
+                open: ChooseFiles.title_open;
+                clicked => { ChooseFiles.title_open = !ChooseFiles.title_open; }
+            }
+            if ChooseFiles.book && ChooseFiles.title_open: HorizontalLayout {
+                padding-left: 24px;
+                padding-right: 24px;
+                padding-bottom: 8px;
+                TextField {
+                    text <=> ChooseFiles.book_title;
+                    font-size: 14px;
+                    placeholder-text: ChooseFiles.site_title;
+                }
+            }
+            if ChooseFiles.book: FoldRow {
+                label: @tr("Chapters");
+                summary: @tr("{} of {} selected", ChooseFiles.selected, ChooseFiles.selectable);
+                open: ChooseFiles.chapters_open;
+                clicked => { ChooseFiles.chapters_open = !ChooseFiles.chapters_open; }
+            }
+
+            // Over the list: gone with it.
+            if root.list_shown: Rectangle {
                 height: 1px;
                 background: ThemeSettings.text_color.transparentize(90%);
             }
         }
 
-        ListView {
+        if root.list_shown: ListView {
             vertical-stretch: 1;
-            for file[i] in ChooseFiles.files: ChoiceRow {
-                file: file;
-                clicked => { ChooseFiles.toggle(i); }
+            for file[i] in ChooseFiles.files: VerticalLayout {
+                // A folder's or volume's header above its first file.
+                if file.group != "" && (i == 0 || ChooseFiles.files[i - 1].group != file.group): GroupRow {
+                    title: file.group;
+                    state: file.group_state;
+                    inset: 24px;
+                    border-radius: 0;
+                    clicked => { ChooseFiles.select_group(file.group, file.group_state != 2); }
+                }
+                ChoiceRow {
+                    file: file;
+                    clicked => { ChooseFiles.toggle(i); }
+                }
             }
+        }
+
+        // Under the list, edge to edge: gone with it.
+        if root.list_shown: Rectangle {
+            height: 1px;
+            background: ThemeSettings.text_color.transparentize(90%);
         }
 
         footer := VerticalLayout {
@@ -203,21 +346,39 @@ export component ChooseFilesSheet inherits Rectangle {
             padding-top: 8px;
             spacing: 8px;
 
-            Rectangle {
-                height: 1px;
-                background: ThemeSettings.text_color.transparentize(90%);
+            // How the book's updates come (lined up with the rows above, 24
+            // from the edges).
+            if ChooseFiles.book: HorizontalLayout {
+                padding-left: 4px;
+                padding-right: 4px;
+                SwitchRow {
+                    compact: true;
+                    title: @tr("New chapters as a new part");
+                    checked <=> ChooseFiles.parts;
+                    toggled => { ChooseFiles.parts_changed(ChooseFiles.parts); }
+                }
             }
-            Text {
-                text: @tr("Unticked files that are saved already stay where they are");
-                font-size: 12px;
-                color: ThemeSettings.text_color.transparentize(35%);
-                wrap: word-wrap;
+            if ChooseFiles.book: Note {
+                text: ChooseFiles.parts
+                    ? @tr("Check for new chapters saves them in a file of their own, beside this one, which stays as it is: e-book apps keep your progress")
+                    : @tr("Check for new chapters makes this book again with them");
+                font_size: 12px;
+            }
+            Note {
+                text: ChooseFiles.book && ChooseFiles.parts
+                    ? @tr("Ticked chapters that no part has are saved as a new part; a part with chapters unticked is made again without them")
+                    : ChooseFiles.book ? @tr("The book is made again with the ticked chapters; ones fetched before aren't fetched again")
+                    : @tr("Unticked files that are saved already stay where they are");
+                font_size: 12px;
             }
             ActionButton {
                 text: @tr("Download");
                 primary: true;
                 opacity: ChooseFiles.selected > 0 ? 1.0 : 0.38;
                 clicked => {
+                    // The keyboard's unfinished word only reaches the Title
+                    // field when it loses focus: so first.
+                    park.focus();
                     if (ChooseFiles.selected > 0) {
                         ChooseFiles.apply(ChooseFiles.id);
                     }

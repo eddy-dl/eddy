@@ -57,11 +57,20 @@ export component BookSettings inherits Rectangle {
             SwitchRow {
                 title: @tr("Small images");
                 first: false;
-                last: true;
+                last: false;
                 subtitle: @tr("Asks for smaller versions where the site has them. Animated GIFs are saved as a still either way, as e-book apps don't play them.");
                 text_color: root.text_color;
                 enabled: AppSettings.novel_images;
                 checked <=> AppSettings.novel_small_images;
+                toggled => { AppSettings.preferences_changed(); }
+            }
+            SwitchRow {
+                title: @tr("New chapters as a new part");
+                first: false;
+                last: true;
+                subtitle: @tr("Updates save new chapters in a file of their own, beside the book, instead of making the book again. E-book apps that know books by their contents keep your progress.");
+                text_color: root.text_color;
+                checked <=> AppSettings.novel_parts;
                 toggled => { AppSettings.preferences_changed(); }
             }
 

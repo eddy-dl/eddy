@@ -117,7 +117,10 @@ fn shared_preferences<'local>(
             activity,
             jni_str!("getSharedPreferences"),
             jni_sig!("(Ljava/lang/String;I)Landroid/content/SharedPreferences;"),
-            &[JValue::Object(&name), JValue::Int(0)],
+            // MODE_MULTI_PROCESS: re-read when another of Eddy's processes
+            // changed them (the share popup's copy otherwise stays as it
+            // was when it first read them, e.g. category folders off).
+            &[JValue::Object(&name), JValue::Int(4)],
         )?
         .l()?)
 }
@@ -294,6 +297,71 @@ pub fn trigger_haptic(kind: super::Haptic) {
         env.call_method(activity, jni_str!("triggerHaptic"), jni_sig!("(I)V"), &[JValue::Int(kind as i32)])?;
         Ok(())
     });
+}
+
+/// Asks the download service to open a site's Cloudflare check in a WebView
+/// (CloudflareActivity), or to post a notification for it when Eddy isn't
+/// on screen. The outcome is written to `result` (see novels::fetch). Works
+/// from any of Eddy's processes; false if it couldn't be asked.
+pub fn open_site_check(url: &str, result: &str) -> bool {
+    ask_service("dev.pah.eddy.CHECK_SITE", &[("url", url), ("result", result)])
+        .inspect_err(|e| log::warn!("couldn't ask for a browser check: {e:?}"))
+        .is_ok()
+}
+
+/// Asks the download service to load `url` in the background browser
+/// (PageFetcher), which writes how it went and the page's HTML to `result`
+/// (see novels::fetch).
+pub fn fetch_page(url: &str, result: &str) -> bool {
+    ask_service("dev.pah.eddy.FETCH_PAGE", &[("url", url), ("result", result)])
+        .inspect_err(|e| log::warn!("couldn't ask the background browser: {e:?}"))
+        .is_ok()
+}
+
+/// Asks the download service to open `page` in Eddy's browser
+/// (BrowserActivity), where the user clicks its download: the file's link
+/// and what came with it are written to `result` (see crate::browser).
+pub fn open_browser(page: &str, result: &str) -> bool {
+    ask_service("dev.pah.eddy.BROWSE", &[("page", page), ("result", result)])
+        .inspect_err(|e| log::warn!("couldn't open the browser: {e:?}"))
+        .is_ok()
+}
+
+/// Starts the download service (if it isn't running) with `action` and
+/// string `extras`.
+fn ask_service(action: &str, extras: &[(&str, &str)]) -> Result<(), PrefError> {
+    with_env(|env, context| {
+        let package = env.call_method(context, jni_str!("getPackageName"), jni_sig!("()Ljava/lang/String;"), &[])?.l()?;
+        let intent_class = env.find_class(jni_str!("android/content/Intent"))?;
+        let intent = env.new_object(&intent_class, jni_sig!("()V"), &[])?;
+        let service = env.new_string("dev.pah.eddy.DownloadService")?;
+        env.call_method(
+            &intent,
+            jni_str!("setClassName"),
+            jni_sig!("(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;"),
+            &[JValue::Object(&package), JValue::Object(&service)],
+        )?;
+        let action = env.new_string(action)?;
+        env.call_method(&intent, jni_str!("setAction"), jni_sig!("(Ljava/lang/String;)Landroid/content/Intent;"), &[JValue::Object(&action)])?;
+        for (key, value) in extras {
+            let key = env.new_string(key)?;
+            let value = env.new_string(value)?;
+            env.call_method(
+                &intent,
+                jni_str!("putExtra"),
+                jni_sig!("(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;"),
+                &[JValue::Object(&key), JValue::Object(&value)],
+            )?;
+        }
+        // The service may not be running yet (a book checked from the app).
+        env.call_method(
+            context,
+            jni_str!("startForegroundService"),
+            jni_sig!("(Landroid/content/Intent;)Landroid/content/ComponentName;"),
+            &[JValue::Object(&intent)],
+        )?;
+        Ok(())
+    })
 }
 
 pub fn open_native_url(url: &str) {
@@ -503,6 +571,7 @@ pub extern "system" fn Java_dev_pah_eddy_EddyNative_startDownload<'caller>(
                 resume: false,
                 unpicked: Vec::new(),
                 choices: Vec::new(),
+                browser: None,
             }))
             // The whole request as JSON, when it's there.
             .map(|request| {
@@ -523,8 +592,9 @@ pub extern "system" fn Java_dev_pah_eddy_EddyNative_startDownload<'caller>(
     }
 }
 
-/// The notification's text: "count\tfirst name\tprogress" (progress in
-/// thousandths, -1 when the sizes aren't known).
+/// The notification's text: "count\tfirst name\tprogress\ttype" (progress in
+/// thousandths, -1 when the sizes aren't known; type: the one running
+/// download's FileType place, -1 for several).
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pah_eddy_EddyNative_status<'caller>(
     mut unowned_env: EnvUnowned<'caller>,
@@ -532,15 +602,17 @@ pub extern "system" fn Java_dev_pah_eddy_EddyNative_status<'caller>(
 ) -> JString<'caller> {
     let (count, name, progress) = crate::downloader::summary();
     let permille = progress.map(|p| (p * 1000.0) as i64).unwrap_or(-1);
-    let text = format!("{count}\t{}\t{permille}", name.replace(['\t', '\n'], " "));
+    let kind = crate::downloads::running_type().unwrap_or(-1);
+    let text = format!("{count}\t{}\t{permille}\t{kind}", name.replace(['\t', '\n'], " "));
     unowned_env
         .with_env(|env| -> jni::errors::Result<_> { env.new_string(text) })
         .resolve::<LogErrorAndDefault>()
 }
 
 /// Downloads that ended since the last call, one per line:
-/// "1 or 0 (succeeded)\tname\tmessage\tstaging folder\tpicked folder's tree URI\tid".
-/// The last two are set when the files still have to be copied into the
+/// "1 or 0 (succeeded)\tname\tmessage\tstaging folder\tpicked folder's tree URI\tid\tmerge\ttype"
+/// (type: FileType's place, -1 unknown).
+/// The folder and URI are set when the files still have to be copied into the
 /// picked folder (the service does that, then deletes the staging folder).
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pah_eddy_EddyNative_takeFinished<'caller>(
@@ -557,7 +629,8 @@ pub extern "system" fn Java_dev_pah_eddy_EddyNative_takeFinished<'caller>(
                 None => (String::new(), String::new()),
             };
             let merge = f.deliver.as_ref().is_some_and(|d| d.merge);
-            format!("{}\t{}\t{}\t{}\t{}\t{}\t{}", f.ok as u8, clean(&f.name), clean(&f.message), staging, tree, f.id, merge as u8)
+            let kind = crate::downloads::type_of(f.id).unwrap_or(-1);
+            format!("{}\t{}\t{}\t{}\t{}\t{}\t{}\t{kind}", f.ok as u8, clean(&f.name), clean(&f.message), staging, tree, f.id, merge as u8)
         })
         .collect();
     let text = text.join("\n");
@@ -587,6 +660,32 @@ pub extern "system" fn Java_dev_pah_eddy_EddyNative_delivered<'caller>(
     if !uri.is_empty() {
         crate::downloads::delivered(id, &uri);
     }
+}
+
+/// The file a finished download saved, for its notification to open (null
+/// for a folder: the app shows those).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pah_eddy_EddyNative_downloadFile<'caller>(
+    mut unowned_env: EnvUnowned<'caller>,
+    _class: JClass<'caller>,
+    id: jni::sys::jlong,
+) -> JString<'caller> {
+    let Some(path) = crate::downloads::file_of(id) else {
+        return JString::default();
+    };
+    unowned_env
+        .with_env(|env| -> jni::errors::Result<_> { env.new_string(path) })
+        .resolve::<LogErrorAndDefault>()
+}
+
+/// A "Downloaded" notification tapped: its download opens, as its card does.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pah_eddy_EddyNative_openDownload<'caller>(
+    _unowned_env: EnvUnowned<'caller>,
+    _class: JClass<'caller>,
+    id: jni::sys::jlong,
+) {
+    crate::downloads::open_when_ready(id);
 }
 
 /// The progress notification's Pause (0) and Cancel (1): every running or

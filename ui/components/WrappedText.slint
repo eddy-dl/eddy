@@ -1,0 +1,24 @@
+// Word-wrapped text that takes the height it needs at the width it's given.
+// Inside a layout, Slint 1.18 can measure a wrapped Text at a wider width
+// than it gets (the row's, with a switch or an arrow beside it), so it's
+// given too few lines' height and a card that clips cuts the last one off.
+// Out of the layout, the Text measures itself at its own width.
+export component WrappedText {
+    in property <string> text;
+    in property <length> font-size;
+    in property <int> font-weight: 400;
+    in property <color> color;
+
+    height: label.preferred-height;
+
+    label := Text {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        text: root.text;
+        font-size: root.font-size;
+        font-weight: root.font-weight;
+        color: root.color;
+        wrap: word-wrap;
+    }
+}

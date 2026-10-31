@@ -4,13 +4,14 @@ import { DownloadOptionsEditor } from "DownloadOptionsEditor.slint";
 import { ThemeSettings } from "../themes/theme.slint";
 import { ActionButton } from "Buttons.slint";
 import { SectionLabel } from "Chips.slint";
+import { Note } from "Note.slint";
 import { FileTypeIcon } from "FileTypeIcon.slint";
 import { DownloadItem, DownloadState } from "DownloadCards.slint";
 import { LinkBackend, LinkOptions } from "../globals/Links.slint";
 
 // Things that can be done to one download. `Rename` and `RefreshLink` come
 // with the new name or link.
-export enum ItemAction { Pause, Resume, Cancel, Delete, Rename, ChangeFolder, RefreshLink, Open, UpdateBook, ChooseFiles }
+export enum ItemAction { Pause, Resume, Cancel, Delete, Rename, ChangeFolder, RefreshLink, Open, UpdateBook, ChooseFiles, BrowserLink }
 
 // One option: icon, label, and a detail line (the current value).
 component OptionRow inherits Rectangle {
@@ -263,6 +264,14 @@ export component DownloadOptionsSheet inherits Rectangle {
                         root.editing = 2;
                     }
                 }
+                // Caught in Eddy's browser: its page again, to click its
+                // download for a fresh link.
+                if root.can_refresh && root.item.browser_page != "": OptionRow {
+                    label: @tr("Get a new link in the browser");
+                    detail: root.item.browser_page;
+                    icon: @image-url("../icons/rounded/refresh.svg");
+                    clicked => { root.action(ItemAction.BrowserLink, ""); }
+                }
                 OptionRow {
                     label: root.copied ? @tr("Link copied") : @tr("Copy link");
                     detail: root.item.url;
@@ -299,11 +308,9 @@ export component DownloadOptionsSheet inherits Rectangle {
                     ua_custom <=> root.opt_ua_custom;
                     category <=> root.opt_category;
                 }
-                if root.running: Text {
+                if root.running: Note {
                     text: @tr("Saving restarts the download with these, carrying on from where it got to.");
-                    font-size: 12px;
-                    color: ThemeSettings.text_color.transparentize(35%);
-                    wrap: word-wrap;
+                    font_size: 12px;
                 }
                 HorizontalLayout {
                     padding-top: 4px;
@@ -344,11 +351,9 @@ export component DownloadOptionsSheet inherits Rectangle {
                 SectionLabel {
                     text: root.editing == 1 ? @tr("File name") : @tr("New link");
                 }
-                if root.editing == 2: Text {
+                if root.editing == 2: Note {
                     text: @tr("A new link to the same file, e.g. after it expired. The download carries on from where it got to.");
-                    font-size: 12px;
-                    color: ThemeSettings.text_color.transparentize(35%);
-                    wrap: word-wrap;
+                    font_size: 12px;
                 }
                 edit := TextField {
                     text <=> root.edit_text;

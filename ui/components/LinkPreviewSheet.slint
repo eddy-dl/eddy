@@ -6,6 +6,9 @@ import { FileTypeIcon } from "FileTypeIcon.slint";
 import { ActionButton } from "Buttons.slint";
 import { SwitchRow } from "SwitchRow.slint";
 import { DownloadOptionsEditor } from "DownloadOptionsEditor.slint";
+import { GroupRow } from "GroupRow.slint";
+import { RangePicker } from "RangePicker.slint";
+import { Note } from "Note.slint";
 import { AppSettings } from "../globals/AppSettings.slint";
 import { Chip, SectionLabel } from "Chips.slint";
 import { LinkBackend, LinkFormat, LinkOptions, Links, PendingLink, ProbeState, TorrentFile } from "../globals/Links.slint";
@@ -112,7 +115,8 @@ component FileRow inherits Rectangle {
                 height: 18px;
                 border-radius: 2px;
                 border-width: root.file.selected ? 0px : 2px;
-                border-color: ThemeSettings.text_color.transparentize(30%);
+                // A locked chapter can't be picked.
+                border-color: ThemeSettings.text_color.transparentize(root.file.kind == 4 ? 75% : 30%);
                 background: root.file.selected ? ThemeSettings.primary_accent : transparent;
                 animate background { duration: 150ms; }
 
@@ -150,16 +154,16 @@ component FileRow inherits Rectangle {
         }
 
         Text {
-            text: root.file.path;
+            text: root.file.name != "" ? root.file.name : root.file.path;
             font-size: 13px;
-            color: root.file.selected ? ThemeSettings.text_color : ThemeSettings.text_color.transparentize(45%);
+            color: root.file.selected ? ThemeSettings.text_color : ThemeSettings.text_color.transparentize(root.file.kind == 4 ? 65% : 45%);
             vertical-alignment: center;
             horizontal-stretch: 1;
             overflow: elide;
         }
 
         Text {
-            text: root.file.size;
+            text: root.file.kind == 4 ? @tr("Locked") : root.file.size;
             font-size: 12px;
             color: ThemeSettings.text_color.transparentize(35%);
             vertical-alignment: center;
@@ -240,6 +244,10 @@ export component LinkPreviewSheet inherits Rectangle {
         root.audio_mode = false;
         root.filename_text = root.link.filename;
         root.name_edited = false;
+        root.title_text = root.link.book_title;
+        root.title_edited = false;
+        root.title_open = false;
+        root.chapters_open = false;
         root.reset_book();
         root.reset_options();
     }
@@ -269,15 +277,27 @@ export component LinkPreviewSheet inherits Rectangle {
         }
     }
 
-    // Books: the chapter range and options, from the Books defaults once the
-    // link has been checked.
+    // A book's title (the site's to start with), and its Title field and
+    // chapter list, folded away until tapped.
+    private property <string> title_text: root.link.book_title;
+    private property <bool> title_edited: false;
+    private property <string> site_title: root.link.book_title;
+    changed site_title => {
+        if (!root.title_edited) {
+            root.title_text = root.site_title;
+        }
+    }
+    private property <bool> title_open: false;
+    private property <bool> chapters_open: false;
+
+    // Books: the options, from the Books defaults once the link has been
+    // checked (the chapters are picked in the list).
     private property <bool> is_book: root.backend == LinkBackend.Book;
-    private property <string> book_from: "1";
-    private property <string> book_to: "";
     private property <bool> book_notes: true;
     private property <bool> book_images: true;
     private property <bool> book_note_images: false;
     private property <bool> book_small_images: false;
+    private property <bool> book_parts: true;
     private property <int> book_chapters: root.link.book_chapters;
     changed book_chapters => { root.reset_book(); }
     init => {
@@ -285,17 +305,20 @@ export component LinkPreviewSheet inherits Rectangle {
         root.reset_options();
     }
     function reset_book() {
-        root.book_from = "1";
-        root.book_to = root.link.book_chapters > 0 ? "" + root.link.book_chapters : "";
         root.book_notes = root.link.book_notes;
         root.book_images = root.link.book_images;
         root.book_note_images = root.link.book_note_images;
         root.book_small_images = root.link.book_small_images;
+        root.book_parts = root.link.book_parts;
     }
-    // "book|<from>|<to>|<notes>|<images>|<note images>|<small images>"
-    private property <string> book_format: "book|" + Math.max(1, root.book_from.to-float()) + "|" + Math.max(0, root.book_to.to-float())
+    // "book|<from>|<to>|<notes>|<images>|<note images>|<small images>|<parts>|<title>":
+    // every chapter here; the Rust side narrows it to the ones picked in the
+    // list.
+    private property <string> book_format: "book|1|0"
         + "|" + (root.book_notes ? "1" : "0") + "|" + (root.book_images ? "1" : "0")
-        + "|" + (root.book_note_images ? "1" : "0") + "|" + (root.book_small_images ? "1" : "0");
+        + "|" + (root.book_note_images ? "1" : "0") + "|" + (root.book_small_images ? "1" : "0")
+        + "|" + (root.book_parts ? "1" : "0")
+        + "|" + root.title_text;
 
     private property <LinkBackend> backend: root.link.backends.length > 0
         ? root.link.backends[Math.min(root.backend_index, root.link.backends.length - 1)] : LinkBackend.Direct;
@@ -321,8 +344,10 @@ export component LinkPreviewSheet inherits Rectangle {
     // A post's or playlist's items get picked the same way, and a Drive or
     // MEGA folder's files (even just one: they still go in its folder).
     private property <bool> drive_folder: (root.backend == LinkBackend.Drive || root.backend == LinkBackend.Mega) && root.link.files.length > 0;
-    private property <bool> show_files: ((root.backend == LinkBackend.Torrent || root.is_media) && root.link.files.length > 1) || root.drive_folder;
-    private property <bool> can_download: !((root.backend == LinkBackend.Torrent || root.is_media || root.drive_folder)
+    // A book's chapters too (picked one by one, or a volume at a time).
+    private property <bool> show_files: ((root.backend == LinkBackend.Torrent || root.is_media) && root.link.files.length > 1) || root.drive_folder
+        || (root.is_book && root.link.files.length > 0);
+    private property <bool> can_download: !((root.backend == LinkBackend.Torrent || root.is_media || root.drive_folder || root.is_book)
         && root.link.files.length > 0 && root.link.files_selected == 0);
 
     height: Math.min(root.content_height, root.available_height);
@@ -624,23 +649,7 @@ export component LinkPreviewSheet inherits Rectangle {
                     }
                 }
 
-                // Books: which chapters, and how.
-                if root.is_book: HorizontalLayout {
-                    spacing: 8px;
-                    SectionLabel {
-                        text: @tr("Chapters");
-                        vertical-alignment: center;
-                    }
-                    Text {
-                        text: root.link.book_locked > 0
-                            ? @tr("{} · {} locked, not saved", root.link.book_chapters, root.link.book_locked)
-                            : "" + root.link.book_chapters;
-                        font-size: 12px;
-                        color: ThemeSettings.text_color.transparentize(35%);
-                        vertical-alignment: center;
-                        horizontal-stretch: 1;
-                    }
-                }
+                // Books: which chapters (in the list below), and how.
                 // In the library already: downloading updates that copy.
                 if root.is_book && root.link.book_saved_id != 0: Text {
                     text: root.link.book_new == 0 ? @tr("Saved before · no new chapters")
@@ -648,33 +657,6 @@ export component LinkPreviewSheet inherits Rectangle {
                     font-size: 12px;
                     color: ThemeSettings.primary_accent;
                     wrap: word-wrap;
-                }
-                if root.is_book: HorizontalLayout {
-                    spacing: 8px;
-                    Text {
-                        text: @tr("From");
-                        font-size: 14px;
-                        color: ThemeSettings.text_color;
-                        vertical-alignment: center;
-                    }
-                    TextField {
-                        text <=> root.book_from;
-                        input-type: InputType.number;
-                        horizontal-stretch: 1;
-                        font-size: 14px;
-                    }
-                    Text {
-                        text: @tr("to");
-                        font-size: 14px;
-                        color: ThemeSettings.text_color;
-                        vertical-alignment: center;
-                    }
-                    TextField {
-                        text <=> root.book_to;
-                        input-type: InputType.number;
-                        horizontal-stretch: 1;
-                        font-size: 14px;
-                    }
                 }
                 if root.is_book: VerticalLayout {
                     SwitchRow {
@@ -698,6 +680,11 @@ export component LinkPreviewSheet inherits Rectangle {
                         title: @tr("Small images");
                         enabled: root.book_images;
                         checked <=> root.book_small_images;
+                    }
+                    SwitchRow {
+                        compact: true;
+                        title: @tr("New chapters as a new part");
+                        checked <=> root.book_parts;
                     }
                 }
 
@@ -777,41 +764,79 @@ export component LinkPreviewSheet inherits Rectangle {
                     }
                 }
 
-                if root.show_files: HorizontalLayout {
-                    spacing: 8px;
-                    SectionLabel {
-                        text: root.is_media ? @tr("Items") : @tr("Files");
-                        vertical-alignment: center;
+                // A book's list folds away (the range under it picks too).
+                if root.show_files: Rectangle {
+                    min-height: header_row.preferred-height;
+                    border-radius: 8px;
+                    background: root.is_book && ta_chapters.pressed ? ThemeSettings.text_color.transparentize(92%) : transparent;
+                    ta_chapters := TouchArea {
+                        enabled: root.is_book;
+                        clicked => { root.chapters_open = !root.chapters_open; }
                     }
-                    Text {
-                        text: @tr("{} of {} selected", root.link.files_selected, root.link.files.length);
-                        font-size: 12px;
-                        color: ThemeSettings.text_color.transparentize(35%);
-                        vertical-alignment: center;
-                        horizontal-stretch: 1;
-                    }
-                    // Selects everything, or nothing once everything is selected.
-                    Rectangle {
-                        property <bool> all_selected: root.link.files_selected == root.link.files.length;
-                        width: all_label.preferred-width + 20px;
-                        height: 28px;
-                        border-radius: 14px;
-                        background: ta_all.pressed ? ThemeSettings.text_color.transparentize(88%) : transparent;
-                        all_label := Text {
-                            text: parent.all_selected ? @tr("None") : @tr("All");
-                            font-size: 13px;
-                            font-weight: 600;
-                            color: ThemeSettings.primary_accent;
+                    header_row := HorizontalLayout {
+                        spacing: 8px;
+                        SectionLabel {
+                            text: root.is_book ? @tr("Chapters") : root.is_media ? @tr("Items") : @tr("Files");
                             vertical-alignment: center;
                         }
-                        ta_all := TouchArea {
-                            clicked => { Links.select_all_files(root.link.id, !parent.all_selected); }
+                        Text {
+                            text: root.is_book && root.link.book_locked > 0
+                                ? @tr("{} of {} selected · {} locked", root.link.files_selected, root.link.files.length - root.link.book_locked, root.link.book_locked)
+                                : @tr("{} of {} selected", root.link.files_selected, root.link.files.length);
+                            font-size: 12px;
+                            color: ThemeSettings.text_color.transparentize(35%);
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        // Selects everything, or nothing once everything is selected.
+                        Rectangle {
+                            property <bool> all_selected: root.link.files_selected == root.link.files.length - (root.is_book ? root.link.book_locked : 0);
+                            width: all_label.preferred-width + 20px;
+                            height: 28px;
+                            border-radius: 14px;
+                            background: ta_all.pressed ? ThemeSettings.text_color.transparentize(88%) : transparent;
+                            all_label := Text {
+                                text: parent.all_selected ? @tr("None") : @tr("All");
+                                font-size: 13px;
+                                font-weight: 600;
+                                color: ThemeSettings.primary_accent;
+                                vertical-alignment: center;
+                            }
+                            ta_all := TouchArea {
+                                clicked => { Links.select_all_files(root.link.id, !parent.all_selected); }
+                            }
+                        }
+                        if root.is_book: Text {
+                            text: root.chapters_open ? "▲" : "▼";
+                            font-size: 12px;
+                            color: ThemeSettings.text_color.transparentize(35%);
+                            vertical-alignment: center;
                         }
                     }
                 }
 
-                if root.show_files: VerticalLayout {
-                    for file[i] in root.link.files: FileRow {
+                // A range, picked from the list: a book's chapters always,
+                // else when there are too many to tick one by one.
+                if root.show_files && (root.is_book || root.link.files.length > 10): RangePicker {
+                    count: root.link.files.length;
+                    first: root.link.files_first;
+                    last: root.link.files_last;
+                    label(row) => {
+                        (row + 1) + ". " + (root.link.files[row].name != "" ? root.link.files[row].name : root.link.files[row].path)
+                    }
+                    unavailable(row) => { root.link.files[row].kind == 4; }
+                    picked(first, last) => { Links.select_range(root.link.id, first, last); }
+                }
+
+                if root.show_files && (!root.is_book || root.chapters_open): VerticalLayout {
+                    for file[i] in root.link.files: VerticalLayout {
+                    // A folder's or volume's header above its first file.
+                    if file.group != "" && (i == 0 || root.link.files[i - 1].group != file.group): GroupRow {
+                        title: file.group;
+                        state: file.group_state;
+                        clicked => { Links.select_group(root.link.id, file.group, file.group_state != 2); }
+                    }
+                    FileRow {
                         file: file;
                         clicked => { Links.toggle_file(root.link.id, file.index); }
                         audio_toggled => { Links.toggle_audio(root.link.id, file.index); }
@@ -823,15 +848,55 @@ export component LinkPreviewSheet inherits Rectangle {
                             }
                         }
                     }
+                    }
+                }
+
+                // A book's title (in the book, and its file's name): folded
+                // away, showing it, until tapped.
+                if root.is_book: Rectangle {
+                    // MD3 one-line list item, as Download options.
+                    height: 56px;
+                    border-radius: 8px;
+                    background: ta_title.pressed ? ThemeSettings.text_color.transparentize(92%) : transparent;
+                    ta_title := TouchArea {
+                        clicked => { root.title_open = !root.title_open; }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        SectionLabel {
+                            text: @tr("Title");
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: root.title_text != "" ? root.title_text : root.site_title;
+                            font-size: 12px;
+                            color: ThemeSettings.text_color.transparentize(35%);
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: root.title_open ? "▲" : "▼";
+                            font-size: 12px;
+                            color: ThemeSettings.text_color.transparentize(35%);
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                if root.is_book && root.title_open: TextField {
+                    text <=> root.title_text;
+                    edited => { root.title_edited = true; }
+                    font-size: 14px;
+                    placeholder-text: root.site_title;
                 }
 
                 // Several files: they go in a folder of this name, each
                 // keeping its own. A single torrent file keeps its name.
-                if root.backend != LinkBackend.Torrent || root.multi: SectionLabel {
+                if !root.is_book && (root.backend != LinkBackend.Torrent || root.multi): SectionLabel {
                     text: root.show_files ? @tr("Folder name") : @tr("File name");
                 }
 
-                if root.backend != LinkBackend.Torrent || root.multi: HorizontalLayout {
+                if !root.is_book && (root.backend != LinkBackend.Torrent || root.multi): HorizontalLayout {
                     spacing: 6px;
                     TextField {
                         text <=> root.filename_text;
@@ -840,7 +905,7 @@ export component LinkPreviewSheet inherits Rectangle {
                         font-size: 14px;
                         input-method-hints: { capitalization: CapitalizationMode.none, auto-correct: false, auto-complete: false };
                         placeholder-text: root.drive_folder ? (root.backend == LinkBackend.Mega ? @tr("The MEGA folder's name") : @tr("The Drive folder's name"))
-                            : root.show_files ? @tr("The playlist's or post's name") : @tr("Chosen when the download starts");
+                            : root.show_files && !root.is_book ? @tr("The playlist's or post's name") : @tr("Chosen when the download starts");
                     }
                     if root.torrent_file_direct: Text {
                         text: ".torrent";
@@ -848,6 +913,51 @@ export component LinkPreviewSheet inherits Rectangle {
                         color: ThemeSettings.text_color.transparentize(35%);
                         vertical-alignment: center;
                     }
+                }
+
+                // A page whose file comes from its own download button
+                // (a countdown, a captcha): clicked through in Eddy's
+                // browser, and the file it starts downloads here.
+                if root.backend == LinkBackend.Direct && !root.torrent_link: Rectangle {
+                    height: 48px;
+                    border-radius: 24px;
+                    border-width: 1px;
+                    border-color: ThemeSettings.text_color.transparentize(70%);
+                    background: ta_browser.pressed ? ThemeSettings.primary_accent.transparentize(88%) : transparent;
+                    ta_browser := TouchArea {
+                        clicked => {
+                            park.focus();
+                            Links.open_browser(root.link.id, root.name_edited ? root.filename_text : "", {
+                                speed_kbps: root.opt_speed_kbps,
+                                connections: root.opt_connections,
+                                ua_mode: root.opt_ua_mode,
+                                ua_custom: root.opt_ua_custom,
+                                category: root.opt_category,
+                            });
+                        }
+                    }
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: 8px;
+                        Image {
+                            source: @image-url("../icons/rounded/link.svg");
+                            width: 18px;
+                            height: 18px;
+                            y: (parent.height - self.height) / 2;
+                            colorize: ThemeSettings.primary_accent;
+                        }
+                        Text {
+                            text: @tr("Open in browser");
+                            font-size: 14px;
+                            font-weight: 500;
+                            color: ThemeSettings.primary_accent;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                if root.backend == LinkBackend.Direct && !root.torrent_link: Note {
+                    text: @tr("For a page with its own download button: click it there, and the file downloads here");
+                    font_size: 12px;
                 }
 
                 // This download's speed, connections, user agent, folder.
@@ -920,7 +1030,9 @@ export component LinkPreviewSheet inherits Rectangle {
                             }
                         }
                         Text {
-                            text: root.link.folder;
+                            // In its category's folder there, when they're on.
+                            text: root.link.folder + (!root.opt_category || root.link.category == "" ? ""
+                                : "/" + (root.as_audio ? "Music" : root.link.category));
                             font-size: 14px;
                             color: ThemeSettings.text_color;
                             vertical-alignment: center;
@@ -974,7 +1086,8 @@ export component LinkPreviewSheet inherits Rectangle {
                                 ? "audio|" + (root.qualities.length > 0 ? root.qualities[Math.min(root.format_index, root.qualities.length - 1)].selector : "0")
                                     + "|" + (root.codec_index == 1 ? "mp3" : "m4a")
                                 : root.show_formats ? root.qualities[Math.min(root.format_index, root.qualities.length - 1)].selector : "",
-                            root.torrent_file_direct && !root.filename_text.is-empty ? root.filename_text + ".torrent" : root.filename_text,
+                            // A book's file is named after its title.
+                            root.is_book ? "" : root.torrent_file_direct && !root.filename_text.is-empty ? root.filename_text + ".torrent" : root.filename_text,
                             {
                                 speed_kbps: root.opt_speed_kbps,
                                 connections: root.opt_connections,

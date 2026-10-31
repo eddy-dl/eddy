@@ -45,7 +45,7 @@ rusqlite = { version = "0.40.1", features = ["bundled"] }
 sha2 = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-slint = { version = "1.17.1" }
+slint = { version = "1.18.1" }
 sys-locale = "0.3"
 tokio = { version = "1.30", features = ["rt-multi-thread", "macros", "time", "sync", "fs", "io-util"] }
 url = "2"
@@ -67,7 +67,7 @@ webbrowser = "1.0"
 notify-rust = "4"
 # The window handle, for Windows' taskbar progress.
 raw-window-handle = "0.6"
-slint = { version = "1.17.1", features = ["raw-window-handle-06"] }
+slint = { version = "1.18.1", features = ["raw-window-handle-06"] }
 
 # Taskbar progress: Windows' ITaskbarList3 (the version Slint already uses).
 # Process groups for the programs Eddy starts (children.rs).
@@ -91,10 +91,10 @@ ndk-context = "0.1"
 # aria2-core and the link checks); set up in platform::init. Its Java half comes from Gradle.
 rustls-platform-verifier = "0.7"
 serde_json = "1.0"
-slint = { version = "1.17.1", features = ["backend-android-activity-06"] }
+slint = { version = "1.18.1", features = ["backend-android-activity-06"] }
 
 [build-dependencies]
-slint-build = { version = "1.17.1" }
+slint-build = { version = "1.18.1" }
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
 winres = "0.1"

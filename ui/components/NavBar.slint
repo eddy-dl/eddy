@@ -1,6 +1,7 @@
 import { ThemeSettings } from "../themes/theme.slint";
 import { HoldTouchArea, HintBubble } from "HoldHint.slint";
 import { TabSwipe } from "../globals/TabSwipe.slint";
+import { PathNumber } from "../globals/PathNumber.slint";
 
 // The animated tab icons, shared by the bottom and top navigation bars.
 // `cutout_color` draws the details that sit on top of an active (filled)
@@ -113,9 +114,9 @@ export component NavIcon inherits Rectangle {
                 // circle, falls straight through it and leaves out the bottom,
                 // then starts again. ±13px is just enough to be fully hidden.
                 y: -4px + (downloading_icon.drop_phase * 26 - 13) * 1px;
-                commands: "M 12 8 L 12 " + downloading_icon.arrow_tip
-                    + " M 8.5 " + (downloading_icon.arrow_tip - 3.5) + " L 12 " + downloading_icon.arrow_tip
-                    + " L 15.5 " + (downloading_icon.arrow_tip - 3.5);
+                commands: "M 12 8 L 12 " + PathNumber.of(downloading_icon.arrow_tip)
+                    + " M 8.5 " + PathNumber.of(downloading_icon.arrow_tip - 3.5) + " L 12 " + PathNumber.of(downloading_icon.arrow_tip)
+                    + " L 15.5 " + PathNumber.of(downloading_icon.arrow_tip - 3.5);
             }
         }
     }
@@ -175,10 +176,10 @@ export component NavIcon inherits Rectangle {
                 easing: ease-in-out;
             }
             // Two diagonals through the centre, rebuilt from the animated arm.
-            commands: "M" + (12 - stopped_icon.cross_arm) + " " + (12 - stopped_icon.cross_arm)
-                + "L" + (12 + stopped_icon.cross_arm) + " " + (12 + stopped_icon.cross_arm)
-                + "M" + (12 + stopped_icon.cross_arm) + " " + (12 - stopped_icon.cross_arm)
-                + "L" + (12 - stopped_icon.cross_arm) + " " + (12 + stopped_icon.cross_arm);
+            commands: "M" + PathNumber.of(12 - stopped_icon.cross_arm) + " " + PathNumber.of(12 - stopped_icon.cross_arm)
+                + "L" + PathNumber.of(12 + stopped_icon.cross_arm) + " " + PathNumber.of(12 + stopped_icon.cross_arm)
+                + "M" + PathNumber.of(12 + stopped_icon.cross_arm) + " " + PathNumber.of(12 - stopped_icon.cross_arm)
+                + "L" + PathNumber.of(12 - stopped_icon.cross_arm) + " " + PathNumber.of(12 + stopped_icon.cross_arm);
         }
     }
 
@@ -259,8 +260,8 @@ export component NavIcon inherits Rectangle {
                 duration: 250ms;
                 easing: ease-in-out;
             }
-            commands: "M12 " + completed_icon.arrow_tail + "V" + completed_icon.arrow_tip
-                + "M9.75 " + (completed_icon.arrow_tip - 2.25) + "l2.25 2.25l2.25 -2.25";
+            commands: "M12 " + PathNumber.of(completed_icon.arrow_tail) + "V" + PathNumber.of(completed_icon.arrow_tip)
+                + "M9.75 " + PathNumber.of(completed_icon.arrow_tip - 2.25) + "l2.25 2.25l2.25 -2.25";
         }
     }
 }

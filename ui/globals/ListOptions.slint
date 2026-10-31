@@ -4,19 +4,55 @@ export enum SortKey { DateAdded, Name, Size, Progress }
 // Other: files of no type Eddy knows (.bin and the like) and programs.
 export enum FileFilter { All, Video, Audio, Image, Document, Archive, Folder, Other }
 
+// The types a tab shows; none set shows everything.
+export struct FileFilters {
+    video: bool,
+    audio: bool,
+    image: bool,
+    document: bool,
+    archive: bool,
+    folder: bool,
+    other: bool,
+}
+
 export struct TabListOptions {
     sort: SortKey,
     ascending: bool,
-    filter: FileFilter,
+    filters: FileFilters,
 }
 
 // Sort & filter choices for each download tab. The UI only records them;
 // the Rust side re-sorts/filters the matching item list on `options_changed`.
 export global ListOptions {
-    in-out property <TabListOptions> downloading: { sort: SortKey.DateAdded, ascending: false, filter: FileFilter.All };
-    in-out property <TabListOptions> stopped: { sort: SortKey.DateAdded, ascending: false, filter: FileFilter.All };
-    in-out property <TabListOptions> completed: { sort: SortKey.DateAdded, ascending: false, filter: FileFilter.All };
+    in-out property <TabListOptions> downloading: { sort: SortKey.DateAdded, ascending: false, filters: {} };
+    in-out property <TabListOptions> stopped: { sort: SortKey.DateAdded, ascending: false, filters: {} };
+    in-out property <TabListOptions> completed: { sort: SortKey.DateAdded, ascending: false, filters: {} };
 
     // Tab index: 0 = Downloading, 1 = Stopped, 2 = Completed.
     callback options_changed(int);
+
+    // Whether `which` is one of the types shown.
+    public pure function shows(f: FileFilters, which: FileFilter) -> bool {
+        which == FileFilter.Video ? f.video
+            : which == FileFilter.Audio ? f.audio
+            : which == FileFilter.Image ? f.image
+            : which == FileFilter.Document ? f.document
+            : which == FileFilter.Archive ? f.archive
+            : which == FileFilter.Folder ? f.folder
+            : which == FileFilter.Other ? f.other
+            : !(f.video || f.audio || f.image || f.document || f.archive || f.folder || f.other)
+    }
+
+    // `f` with `which` shown or not, the others as they were.
+    public pure function toggled(f: FileFilters, which: FileFilter) -> FileFilters {
+        {
+            video: which == FileFilter.Video ? !f.video : f.video,
+            audio: which == FileFilter.Audio ? !f.audio : f.audio,
+            image: which == FileFilter.Image ? !f.image : f.image,
+            document: which == FileFilter.Document ? !f.document : f.document,
+            archive: which == FileFilter.Archive ? !f.archive : f.archive,
+            folder: which == FileFilter.Folder ? !f.folder : f.folder,
+            other: which == FileFilter.Other ? !f.other : f.other,
+        }
+    }
 }

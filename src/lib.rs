@@ -1,3 +1,4 @@
+pub mod browser;
 pub mod cache;
 pub mod children;
 pub mod components;
@@ -18,6 +19,7 @@ pub mod platform;
 pub mod preferences;
 pub mod selection;
 pub mod storage;
+pub mod usage;
 pub mod ytdlp_plugin;
 
 slint::include_modules!();
@@ -77,6 +79,15 @@ fn android_main(app: AndroidApp) {
     let ui_weak = ui.as_weak();
 
     preferences::load_preferences(ui_weak.clone());
+    usage::start(&ui);
+    ui.global::<AppSettings>().on_share_logs(|| {
+        let files = logs::files();
+        if files.is_empty() {
+            platform::show_toast("No logs yet");
+        } else {
+            platform::share(&files, "");
+        }
+    });
     let update_system_bars = move || {
         if let Some(ui) = ui_weak.upgrade() {
             let dark_icons = !ui.global::<ThemeSettings>().get_is_dark();

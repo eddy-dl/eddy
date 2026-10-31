@@ -42,7 +42,12 @@ pub fn parse_book(id: &str, page_url: &str, html: &str) -> Result<Book, String> 
         .map(|h| h.text().collect::<String>().trim().to_string())
         .filter(|t| !t.is_empty())
         .or_else(|| meta("og:title"))
-        .ok_or("No book on this page")?;
+        .ok_or_else(|| {
+            // What came instead, for the logs.
+            log::warn!("{page_url}: no book on the page ({} characters, titled {:?}; saved as unread-page.html beside the logs)", html.len(), fetch::title_of(html));
+            crate::logs::save("unread-page.html", html);
+            "No book on this page".to_string()
+        })?;
     if chapters.is_empty() {
         return Err("This book has no chapters (or the page changed)".to_string());
     }

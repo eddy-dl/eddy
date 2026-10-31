@@ -1,0 +1,67 @@
+import { ThemeSettings } from "../themes/theme.slint";
+
+// A group's header in a list of files to pick (a torrent's folder, a book's
+// volume): its name, and a checkbox that picks or unpicks them all.
+export component GroupRow inherits Rectangle {
+    in property <string> title;
+    // Its files' ticks: 0 none, 1 some, 2 all.
+    in property <int> state;
+    // From the list's edge to the checkbox (rows below line up with it).
+    in property <length> inset: 8px;
+    callback clicked();
+
+    height: 40px;
+    border-radius: 12px;
+    background: ta.pressed ? ThemeSettings.text_color.transparentize(92%) : transparent;
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: root.inset;
+        padding-right: 8px;
+        spacing: 12px;
+
+        VerticalLayout {
+            alignment: center;
+            // MD3 checkbox, indeterminate (a dash) when some are ticked.
+            Rectangle {
+                width: 18px;
+                height: 18px;
+                border-radius: 2px;
+                border-width: root.state == 0 ? 2px : 0px;
+                border-color: ThemeSettings.text_color.transparentize(30%);
+                background: root.state == 0 ? transparent : ThemeSettings.primary_accent;
+                animate background { duration: 150ms; }
+
+                Image {
+                    source: @image-url("../icons/rounded/check.svg");
+                    width: 16px;
+                    height: 16px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    colorize: #ffffff;
+                    opacity: root.state == 2 ? 1 : 0;
+                }
+                Rectangle {
+                    width: 10px;
+                    height: 2px;
+                    border-radius: 1px;
+                    background: #ffffff;
+                    opacity: root.state == 1 ? 1 : 0;
+                }
+            }
+        }
+
+        Text {
+            text: root.title;
+            font-size: 13px;
+            font-weight: 600;
+            color: ThemeSettings.primary_accent;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+    }
+}

@@ -1,6 +1,9 @@
+import { WrappedText } from "../../components/WrappedText.slint";
+import { Note } from "../../components/Note.slint";
+import { SwitchRow } from "../../components/SwitchRow.slint";
 import { AppSettings } from "../../globals/AppSettings.slint";
 import { ThemeSettings } from "../../themes/theme.slint";
-import { SettingsCard, SettingsLayout } from "../SettingsCard.slint";
+import { SectionHeader, SettingsCard, SettingsLayout } from "../SettingsCard.slint";
 
 // Settings → Advanced.
 export component AdvancedSettings inherits Rectangle {
@@ -43,16 +46,6 @@ export component AdvancedSettings inherits Rectangle {
 
                     VerticalLayout {
                         alignment: center;
-                        Image {
-                            source: @image-url("../../icons/rounded/delete_sweep.svg");
-                            width: 24px;
-                            height: 24px;
-                            colorize: root.text_color;
-                        }
-                    }
-
-                    VerticalLayout {
-                        alignment: center;
                         spacing: 4px;
                         horizontal-stretch: 1;
 
@@ -62,22 +55,20 @@ export component AdvancedSettings inherits Rectangle {
                             font-weight: 600;
                             color: root.text_color;
                         }
-                        Text {
+                        WrappedText {
                             text: AppSettings.is_mobile
-                                ? @tr("Link previews' thumbnails and info, downloaded installers, temporary files. Your downloads stay.")
-                                : @tr("Link previews' thumbnails and info, temporary files. Your downloads stay.");
+                                ? @tr("Link previews' thumbnails and info, downloaded installers, temporary files.")
+                                : @tr("Link previews' thumbnails and info, temporary files.");
                             font-size: 13px;
                             color: root.text_color.transparentize(40%);
-                            wrap: word-wrap;
                         }
-                        Text {
+                        WrappedText {
                             text: AppSettings.cache_busy ? @tr("Clearing…")
                                 : AppSettings.cache_size == "" ? @tr("Measuring…")
                                 : AppSettings.downloads_running ? @tr("{} · can be cleared once downloads finish", AppSettings.cache_size)
                                 : AppSettings.cache_size;
                             font-size: 13px;
                             color: ThemeSettings.primary_accent.transparentize(30%);
-                            wrap: word-wrap;
                         }
                     }
 
@@ -98,6 +89,93 @@ export component AdvancedSettings inherits Rectangle {
                             TouchArea {
                                 enabled: root.can_clear;
                                 clicked => { AppSettings.cache_clear(); }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Lined up with the card's text.
+            VerticalLayout {
+                padding-left: SettingsLayout.inset;
+                padding-right: SettingsLayout.inset;
+                padding-top: 8px;
+                Note {
+                    text: @tr("Your downloaded files are not deleted.");
+                    text_color: root.text_color;
+                }
+            }
+
+            // For looking into problems.
+            SectionHeader { text: @tr("Debug"); }
+
+            SwitchRow {
+                first: true;
+                last: false;
+                title: @tr("Show resource usage");
+                subtitle: @tr("Eddy's memory and CPU use, at the top of the screen.");
+                text_color: root.text_color;
+                checked <=> AppSettings.show_usage;
+                toggled => { AppSettings.preferences_changed(); }
+            }
+
+            // Logs: private unless asked (they hold links and file names).
+            SwitchRow {
+                first: false;
+                last: false;
+                title: @tr("Save logs to Downloads");
+                subtitle: @tr("In Download/Eddy/logs, where other apps can read them. They list the links you download.");
+                text_color: root.text_color;
+                checked <=> AppSettings.logs_in_downloads;
+                toggled => { AppSettings.preferences_changed(); }
+            }
+
+            SettingsCard {
+                first: false;
+                last: true;
+
+                HorizontalLayout {
+                    padding: 8px;
+                    padding-top: 12px;
+                    padding-bottom: 12px;
+                    padding-left: SettingsLayout.inset;
+                    padding-right: SettingsLayout.inset;
+                    spacing: 16px;
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        horizontal-stretch: 1;
+
+                        Text {
+                            text: @tr("Logs");
+                            font-size: 18px;
+                            font-weight: 600;
+                            color: root.text_color;
+                        }
+                        WrappedText {
+                            text: @tr("What went wrong with downloads and link checks, to send with a bug report.");
+                            font-size: 13px;
+                            color: root.text_color.transparentize(40%);
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: share_label.preferred-width + 24px;
+                            height: 32px;
+                            border-radius: 16px;
+                            background: ThemeSettings.primary_accent;
+                            share_label := Text {
+                                text: @tr("Share");
+                                font-size: 13px;
+                                font-weight: 600;
+                                color: #ffffff;
+                                vertical-alignment: center;
+                            }
+                            TouchArea {
+                                clicked => { AppSettings.share_logs(); }
                             }
                         }
                     }

@@ -23,16 +23,23 @@ export struct LinkFormat {
     detail: string, // e.g. "mp4 · ~245 MB"
 }
 
-// One file inside a torrent.
-// One of a download's several files: a torrent's, or a post's / playlist's
-// items.
+// One of a download's several files: a torrent's, a post's / playlist's
+// items, or a book's chapters.
 export struct TorrentFile {
     index: int, // 1-based, as aria2's select-file counts
     path: string, // inside the torrent, e.g. "Show/S01E01.mkv"; an item's title
+    // What its row shows ("" for `path`): a file's name inside its group.
+    name: string,
+    // The folder (a torrent's) or volume (a book's) it's in, shown as a
+    // header that picks them all; "" when there are no groups.
+    group: string,
+    // Its group's ticks: 0 none, 1 some, 2 all.
+    group_state: int,
     size: string, // formatted
     selected: bool,
-    // Media items: 1 video, 2 audio, 3 image (0 a torrent's file), its
-    // thumbnail, and whether a video is saved as just its audio.
+    // Media items: 1 video, 2 audio, 3 image (0 a torrent's file; 4 a
+    // book's locked chapter, never saved), its thumbnail, and whether a
+    // video is saved as just its audio.
     kind: int,
     thumbnail: image,
     as_audio: bool,
@@ -64,12 +71,18 @@ export struct PendingLink {
     // the format picked.
     filename: string,
     file_type: FileType,
+    // The category folder it goes in with "Category folders" on ("Books",
+    // "Video"…; as audio it's "Music").
+    category: string,
     size: string, // formatted, "" when unknown
     source: string, // host, e.g. "example.com"
     backends: [LinkBackend], // ways this link can be downloaded, best first
     formats: [LinkFormat], // yt-dlp qualities, best first
     files: [TorrentFile], // a torrent's files, once known; all selected at first
     files_selected: int, // how many of `files` are selected
+    // The rows of the first and last selected ones (-1 when none are).
+    files_first: int,
+    files_last: int,
     files_audio: int, // of the selected ones, how many are saved as audio
     folder: string, // where it'll be saved, as shown to the user
     folder_uri: string, // a folder picked for this link; "" for the usual one
@@ -84,10 +97,14 @@ export struct PendingLink {
     // (Settings → Downloads → Books).
     book_chapters: int,
     book_locked: int,
+    // Its title on the site (the preview's Title field starts with it).
+    book_title: string,
     book_notes: bool,
     book_images: bool,
     book_note_images: bool,
     book_small_images: bool,
+    // Updates as parts of their own (Settings → Books' default).
+    book_parts: bool,
     // Saved before (the download it was saved by; 0 if not): downloading
     // updates it. `book_new`: chapters added since.
     book_saved_id: int,
@@ -141,6 +158,9 @@ export global Links {
     // Download a pending link (and drop it from `pending`). `format` is a
     // LinkFormat selector for yt-dlp, otherwise "".
     callback start(id: int, backend: LinkBackend, format: string, filename: string, options: LinkOptions);
+    // Open a page in Eddy's browser; the download clicked there starts, as
+    // `filename` ("" for the site's name) with `options`.
+    callback open_browser(id: int, filename: string, options: LinkOptions);
     // Drop a pending link without downloading it.
     callback skip(id: int);
     // Pick a different folder for one link (it starts out with the usual one).
@@ -149,6 +169,11 @@ export global Links {
     callback toggle_file(id: int, index: int);
     // Select or unselect all of a torrent link's files.
     callback select_all_files(id: int, selected: bool);
+    // Select or unselect every file in a group (a folder, a volume).
+    callback select_group(id: int, group: string, selected: bool);
+    // Select the files from one row to another (both included), and no
+    // others.
+    callback select_range(id: int, first: int, last: int);
     // A video item saved as just its audio, or not; every item at once.
     callback toggle_audio(id: int, index: int);
     callback set_all_audio(id: int, audio: bool);

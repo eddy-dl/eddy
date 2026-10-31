@@ -1,0 +1,12 @@
+// Numbers for a Path's commands. Slint writes a number in a string with the
+// locale's decimal separator ("12,5" in French), which a path can't read:
+// built from whole numbers instead, which have none.
+export global PathNumber {
+    // `n` to three decimals, with a dot.
+    public pure function of(n: float) -> string {
+        let thousandths = Math.round(Math.abs(n) * 1000);
+        let fraction = Math.mod(thousandths, 1000);
+        (n < 0 && thousandths > 0 ? "-" : "") + Math.floor(thousandths / 1000) + "."
+            + (fraction < 10 ? "00" : fraction < 100 ? "0" : "") + fraction
+    }
+}

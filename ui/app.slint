@@ -8,13 +8,14 @@ import {
 
 import { BottomNavButton, TopNavBar, TabSwipeArea } from "components/NavBar.slint";
 import { SettingsPage } from "settings/SettingsPage.slint";
-import { SettingsTab } from "settings/Enums.slint";
 import { TapToDismissArea } from "components/AnimatedPopup.slint";
 import { ListOptionsSheet } from "components/ListOptionsSheet.slint";
 import { AddLinksSheet } from "components/AddLinksSheet.slint";
 import { LinkPreviewSheet } from "components/LinkPreviewSheet.slint";
 import { ActionIcon, SelectionAction, SelectionActionBar, DeleteConfirmSheet } from "components/SelectionActions.slint";
+import { DownloadInfo, DownloadInfoSheet, InfoRow } from "components/DownloadInfoSheet.slint";
 import { Wordmark } from "components/Wordmark.slint";
+import { HoldTouchArea, HintBubble } from "components/HoldHint.slint";
 import { SnackbarHost } from "components/SnackbarHost.slint";
 import { DownloadOptionsSheet, ItemAction } from "components/DownloadOptionsSheet.slint";
 import { FolderFiles, FolderFilesSheet } from "components/FolderFilesSheet.slint";
@@ -30,11 +31,12 @@ import { AppSettings } from "globals/AppSettings.slint";
 
 export { AccentColor, ThemeMode, ThemeSettings }from "themes/theme.slint";
 export { AppSettings, HelperPackage }from "globals/AppSettings.slint";
-export { ListOptions, SortKey, FileFilter, TabListOptions } from "globals/ListOptions.slint";
+export { ListOptions, SortKey, FileFilter, FileFilters, TabListOptions } from "globals/ListOptions.slint";
 export { Snackbar } from "globals/Snackbar.slint";
 
 export { DownloadItem, DownloadState, FileType } from "components/DownloadCards.slint";
 export { SelectionAction } from "components/SelectionActions.slint";
+export { DownloadInfo, InfoRow } from "components/DownloadInfoSheet.slint";
 export { ItemAction } from "components/DownloadOptionsSheet.slint";
 export { FolderFiles, FolderFile } from "components/FolderFilesSheet.slint";
 export { ChooseFiles, ChoiceFile } from "components/ChooseFilesSheet.slint";
@@ -203,6 +205,9 @@ export component DownloaderApp inherits Window {
             root.delete_files = false;
             root.delete_target = -1;
             root.delete_confirm_open = true;
+        } else if (action == SelectionAction.Info) {
+            // The selection stays, to act on after reading.
+            root.selection_action(root.active_tab, action, false);
         } else {
             root.selection_action(root.active_tab, action, false);
             root.clear_selection();
@@ -391,6 +396,10 @@ export component DownloaderApp inherits Window {
                     root.delete_confirm_open = false;
                     return accept;
                 }
+                if (DownloadInfo.open) {
+                    DownloadInfo.open = false;
+                    return accept;
+                }
                 if (root.item_options_open) {
                     root.close_item_options();
                     return accept;
@@ -473,28 +482,45 @@ export component DownloaderApp inherits Window {
                             running: root.selected_running;
                             paused: root.selected_paused;
                             ended: root.selected_ended;
+                            count: root.selected_count;
                             action(action) => { root.run_selection_action(action); }
                         }
 
-                        // While selecting it holds Select all and Invert.
+                        // Settings; while selecting, a menu of Select all and
+                        // Invert.
                         Rectangle {
                             width: 48px;
                             height: 48px;
                             border-radius: 24px;
-                            background: ta_menu.pressed ? (AppSettings.top_navigation_bar ? ThemeSettings.background : ThemeSettings.surface) : transparent;
+                            background: ta_menu.pressed && !ta_menu.holding ? (AppSettings.top_navigation_bar ? ThemeSettings.background : ThemeSettings.surface) : transparent;
                             animate background { duration: 150ms; }
 
-                            ta_menu := TouchArea {
-                                clicked => { root.menu_open = !root.menu_open; }
+                            ta_menu := HoldTouchArea {
+                                tapped => {
+                                    if (root.selection_mode) {
+                                        root.menu_open = !root.menu_open;
+                                    } else {
+                                        root.show_settings = true;
+                                    }
+                                }
                             }
 
                             Image {
-                                source: @image-url("icons/rounded/more_vert.svg");
+                                source: root.selection_mode ? @image-url("icons/rounded/more_vert.svg") : @image-url("icons/rounded/settings.svg");
                                 width: 24px;
                                 height: 24px;
                                 colorize: ThemeSettings.text_color;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
+                            }
+
+                            // Holding it names it, below it and kept to the
+                            // screen's right edge.
+                            HintBubble {
+                                text: root.selection_mode ? @tr("More options") : @tr("Settings");
+                                shown: ta_menu.holding;
+                                x: parent.width - self.width;
+                                y: parent.height + 8px;
                             }
                         }
                     }
@@ -746,6 +772,7 @@ export component DownloaderApp inherits Window {
                                             item: item;
                                             selecting: root.selection_mode;
                                             update_book => { root.download_action(item.id, ItemAction.UpdateBook, ""); }
+                                            choose_chapters => { root.download_action(item.id, ItemAction.ChooseFiles, ""); }
                                                 clicked => {
                                                     if (root.selection_mode) {
                                                         row_2.selected_in = row_2.selected_in == root.selection_gen ? 0 : root.selection_gen;
@@ -1033,17 +1060,15 @@ export component DownloaderApp inherits Window {
                     spacing: 2px;
                     min-width: 160px;
 
-                    // While selecting: what doesn't fit in the header (Cancel,
-                    // in Stopped), then Select all and Invert selection.
-                    for entry in root.selection_mode
-                        ? (root.selection_cancel_overflows
-                            ? [{ key: 4, label: @tr("Cancel"), icon: @image-url("icons/rounded/cancel.svg") },
-                               { key: 2, label: @tr("Select all"), icon: @image-url("icons/rounded/select_all.svg") },
-                               { key: 3, label: @tr("Invert selection"), icon: @image-url("icons/rounded/flip.svg") }]
-                            : [{ key: 2, label: @tr("Select all"), icon: @image-url("icons/rounded/select_all.svg") },
-                               { key: 3, label: @tr("Invert selection"), icon: @image-url("icons/rounded/flip.svg") }])
-                        : [{ key: 0, label: @tr("Settings"), icon: @image-url("icons/rounded/settings.svg") },
-                           { key: 1, label: @tr("About"), icon: @image-url("icons/rounded/info.svg") }]: Rectangle {
+                    // While selecting (the only time it opens): what doesn't
+                    // fit in the header (Cancel, in Stopped), then Select all
+                    // and Invert selection.
+                    for entry in root.selection_cancel_overflows
+                        ? [{ key: 4, label: @tr("Cancel"), icon: @image-url("icons/rounded/cancel.svg") },
+                           { key: 2, label: @tr("Select all"), icon: @image-url("icons/rounded/select_all.svg") },
+                           { key: 3, label: @tr("Invert selection"), icon: @image-url("icons/rounded/flip.svg") }]
+                        : [{ key: 2, label: @tr("Select all"), icon: @image-url("icons/rounded/select_all.svg") },
+                           { key: 3, label: @tr("Invert selection"), icon: @image-url("icons/rounded/flip.svg") }]: Rectangle {
                         height: 48px;
                         border-radius: 12px;
                         background: entry_ta.pressed ? ThemeSettings.text_color.transparentize(88%)
@@ -1051,16 +1076,10 @@ export component DownloaderApp inherits Window {
                         entry_ta := TouchArea {
                             clicked => {
                                 root.menu_open = false;
-                                if (entry.key == 2 || entry.key == 3) {
-                                    root.select_all(entry.key == 3);
-                                } else if (entry.key == 4) {
+                                if (entry.key == 4) {
                                     root.run_selection_action(SelectionAction.Cancel);
                                 } else {
-                                    // About opens straight on its page.
-                                    if (entry.key == 1) {
-                                        st_page.active_tab = SettingsTab.About;
-                                    }
-                                    root.show_settings = true;
+                                    root.select_all(entry.key == 3);
                                 }
                             }
                         }
@@ -1377,6 +1396,30 @@ export component DownloaderApp inherits Window {
         }
 
         // Delete confirmation for selected downloads (or one, from its options).
+        // One download's details (Info while selecting).
+        Rectangle {
+            z: 90;
+            width: 100%;
+            height: 100%;
+            background: #00000060;
+            opacity: DownloadInfo.open ? 1.0 : 0.0;
+            visible: self.opacity > 0;
+            animate opacity { duration: 250ms; }
+
+            TapToDismissArea {
+                tapped => { DownloadInfo.open = false; }
+            }
+
+            DownloadInfoSheet {
+                width: Math.min(440px, parent.width - 2 * Math.max(24px, root.safe-area-insets.left, root.safe-area-insets.right));
+                available_height: parent.height - 2 * Math.max(48px, root.safe-area-insets.top, root.safe-area-insets.bottom);
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2 + (DownloadInfo.open ? 0px : 24px);
+                animate y { duration: 250ms; easing: ease-out-quad; }
+                close => { DownloadInfo.open = false; }
+            }
+        }
+
         Rectangle {
             z: 90;
             width: 100%;
@@ -1442,6 +1485,24 @@ export component DownloaderApp inherits Window {
                 // take it back before that child slides off-screen and loses it.
                 changed active_tab => { back_scope.focus(); }
             }
+        }
+    }
+
+    // Eddy's memory and CPU use (Settings → Advanced), over everything; it
+    // has no TouchArea, so taps go through to what's under it.
+    if AppSettings.show_usage && AppSettings.usage_text != "": Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: Math.max(24px, root.safe-area-insets.top) + 4px;
+        width: usage_label.preferred-width + 16px;
+        height: usage_label.preferred-height + 8px;
+        border-radius: 8px;
+        background: #000000a0;
+        usage_label := Text {
+            text: AppSettings.usage_text;
+            font-size: 11px;
+            color: #ffffff;
+            horizontal-alignment: center;
+            vertical-alignment: center;
         }
     }
 

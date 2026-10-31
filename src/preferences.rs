@@ -16,6 +16,8 @@ const NOVEL_NOTES_KEY: &str = "novel_author_notes";
 const NOVEL_IMAGES_KEY: &str = "novel_images";
 const NOVEL_NOTE_IMAGES_KEY: &str = "novel_author_note_images";
 const NOVEL_SMALL_IMAGES_KEY: &str = "novel_small_images";
+const NOVEL_PARTS_KEY: &str = "novel_parts";
+const SHOW_USAGE_KEY: &str = "show_usage";
 // Settings → Downloads → Downloading: every download's defaults.
 const DL_SPEED_KEY: &str = "download_max_speed_kbps";
 const DL_CONNECTIONS_KEY: &str = "download_connections";
@@ -154,6 +156,9 @@ pub fn load_preferences(ui_weak: slint::Weak<DownloaderApp>) {
         app_settings.set_novel_images(novel.images);
         app_settings.set_novel_author_note_images(novel.author_note_images);
         app_settings.set_novel_small_images(novel.small_images);
+        app_settings.set_novel_parts(novel.parts);
+        app_settings.set_logs_in_downloads(platform::get_pref(crate::logs::IN_DOWNLOADS_KEY, "false").ok().is_some_and(|v| v == "true"));
+        app_settings.set_show_usage(platform::get_pref(SHOW_USAGE_KEY, "false").ok().is_some_and(|v| v == "true"));
     }
 }
 
@@ -244,6 +249,7 @@ pub fn novel_defaults() -> crate::novels::NovelOptions {
         images: flag(NOVEL_IMAGES_KEY, base.images),
         author_note_images: flag(NOVEL_NOTE_IMAGES_KEY, base.author_note_images),
         small_images: flag(NOVEL_SMALL_IMAGES_KEY, base.small_images),
+        parts: flag(NOVEL_PARTS_KEY, base.parts),
         ..base
     }
 }
@@ -320,11 +326,16 @@ pub fn save_preferences(ui_weak: slint::Weak<DownloaderApp>) {
             (NOVEL_IMAGES_KEY, app_settings.get_novel_images()),
             (NOVEL_NOTE_IMAGES_KEY, app_settings.get_novel_author_note_images()),
             (NOVEL_SMALL_IMAGES_KEY, app_settings.get_novel_small_images()),
+            (NOVEL_PARTS_KEY, app_settings.get_novel_parts()),
+            (SHOW_USAGE_KEY, app_settings.get_show_usage()),
+            (crate::logs::IN_DOWNLOADS_KEY, app_settings.get_logs_in_downloads()),
         ] {
             if let Err(e) = platform::save_pref(key, &value.to_string()) {
                 eprintln!("failed to save {key}: {e}");
             }
         }
+        // The logs follow the setting (moving files: not on the UI thread).
+        std::thread::spawn(crate::logs::relocate);
     }
 }
 

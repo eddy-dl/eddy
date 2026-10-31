@@ -23,6 +23,7 @@
     <string name="pause">Pause</string>
     <string name="pause_all">Tout mettre en pause</string>
     <string name="cancel">Annuler</string>
+    <string name="exit">Quitter</string>
     <string name="cancel_all">Tout annuler</string>
     <string name="downloaded_name">%s téléchargé</string>
     <string name="download_failed_name">Échec du téléchargement : %s</string>
@@ -32,4 +33,10 @@
     <string name="cant_share">Impossible de les partager</string>
     <string name="cant_delete_file">Impossible de supprimer le fichier</string>
     <string name="allow_installs">Autorisez Eddy à installer des applications, puis touchez à nouveau le paquet</string>
+    <string name="checks_channel">Vérifications de sites</string>
+    <string name="check_needed">%1$s demande une vérification du navigateur</string>
+    <string name="check_tap">Touchez pour la passer ; le téléchargement reprend ensuite</string>
+    <string name="check_hint">Ce site vérifie d\'abord qu\'il s\'agit d\'un navigateur. Patientez, ou touchez sa case s\'il en montre une ; cet écran se ferme seul une fois la vérification passée.</string>
+    <string name="browser_hint">Touchez le bouton de téléchargement du site (patientez ou passez sa vérification s\'il en demande une) ; Eddy télécharge le fichier à partir de là.</string>
+    <string name="browser_made_in_page">Ce site crée le fichier dans la page : il n\'y a pas de lien qu\'Eddy puisse télécharger</string>
 </resources>

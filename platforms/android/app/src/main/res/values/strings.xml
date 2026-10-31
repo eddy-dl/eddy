@@ -22,6 +22,7 @@
     <string name="pause">Pause</string>
     <string name="pause_all">Pause all</string>
     <string name="cancel">Cancel</string>
+    <string name="exit">Exit</string>
     <string name="cancel_all">Cancel all</string>
     <string name="downloaded_name">Downloaded %s</string>
     <string name="download_failed_name">Download failed: %s</string>
@@ -31,4 +32,10 @@
     <string name="cant_share">Couldn\'t share them</string>
     <string name="cant_delete_file">Couldn\'t delete the file</string>
     <string name="allow_installs">Allow Eddy to install apps, then tap the package again</string>
+    <string name="checks_channel">Site checks</string>
+    <string name="check_needed">%1$s needs a browser check</string>
+    <string name="check_tap">Tap to pass it; the download carries on after</string>
+    <string name="check_hint">This site checks it\'s a browser first. Wait a moment, or tap its box if it shows one; this closes by itself once it\'s through.</string>
+    <string name="browser_hint">Tap the site\'s download button (wait or solve its check if it asks); Eddy downloads the file from there.</string>
+    <string name="browser_made_in_page">This site makes the file inside the page, so there\'s no link for Eddy to download</string>
 </resources>

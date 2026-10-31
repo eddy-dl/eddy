@@ -1,0 +1,178 @@
+import { ListView } from "std-widgets.slint";
+import { ThemeSettings } from "../themes/theme.slint";
+
+// A field of the range: its label and the item it's at, with a dropdown
+// arrow (MD3 outlined exposed dropdown menu, compact).
+component RangeField inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    callback clicked();
+
+    height: 56px;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: ThemeSettings.text_color.transparentize(60%);
+    background: ta.pressed ? ThemeSettings.text_color.transparentize(92%) : transparent;
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 4px;
+        spacing: 4px;
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            spacing: 2px;
+            Text {
+                text: root.label;
+                font-size: 12px;
+                color: ThemeSettings.text_color.transparentize(35%);
+            }
+            Text {
+                text: root.value;
+                font-size: 14px;
+                color: ThemeSettings.text_color;
+                overflow: elide;
+            }
+        }
+        Image {
+            source: @image-url("../icons/rounded/arrow_drop_down.svg");
+            width: 24px;
+            height: 24px;
+            y: (parent.height - self.height) / 2;
+            colorize: ThemeSettings.text_color.transparentize(30%);
+        }
+    }
+}
+
+// From and To over a list of items (a book's chapters, a playlist's items,
+// a folder's files): each picked from the list itself, so it can't be one
+// that isn't there, and To never comes before From. Picking either selects
+// the items between them, both included.
+export component RangePicker {
+    // How many items, the first and last selected (rows; -1 for none).
+    in property <int> count;
+    in property <int> first;
+    in property <int> last;
+    // An item's name, as the list shows it ("3. Title").
+    pure callback label(row: int) -> string;
+    // Items that can't be picked (a book's locked chapters): shown dimmed.
+    pure callback unavailable(row: int) -> bool;
+    // The new range, From before To.
+    callback picked(first: int, last: int);
+
+    // Which end the list is open for: 0 From, 1 To.
+    private property <int> end: 0;
+    private property <int> shown_first: root.first < 0 ? 0 : root.first;
+    private property <int> shown_last: root.last < 0 ? root.count - 1 : root.last;
+
+    HorizontalLayout {
+        spacing: 8px;
+        RangeField {
+            horizontal-stretch: 1;
+            label: @tr("From");
+            value: root.count > 0 ? root.label(root.shown_first) : "";
+            clicked => {
+                root.end = 0;
+                list.show();
+            }
+        }
+        RangeField {
+            horizontal-stretch: 1;
+            label: @tr("To");
+            value: root.count > 0 ? root.label(root.shown_last) : "";
+            clicked => {
+                root.end = 1;
+                list.show();
+            }
+        }
+    }
+
+    list := PopupWindow {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: Math.min(root.count * 48px + 56px, 420px);
+        close-policy: PopupClosePolicy.close-on-click-outside;
+
+        // A popup takes the window's focus, so Back reaches it here (and
+        // closes it) rather than closing the app.
+        keys := FocusScope {
+            key-pressed(event) => {
+                if (event.text == Key.Back || event.text == Key.Escape) {
+                    list.close();
+                    return accept;
+                }
+                return reject;
+            }
+        }
+        focus_timer := Timer {
+            interval: 1ms;
+            running: true;
+            triggered => {
+                self.running = false;
+                keys.focus();
+            }
+        }
+
+        Rectangle {
+            background: ThemeSettings.surface;
+            border-radius: 12px;
+            drop-shadow-blur: 16px;
+            drop-shadow-color: #00000040;
+            clip: true;
+
+            // Keeps taps on the card's gaps inside it.
+            TouchArea { }
+
+            VerticalLayout {
+                HorizontalLayout {
+                    padding-left: 16px;
+                    Text {
+                        height: 56px;
+                        text: root.end == 0 ? @tr("From") : @tr("To");
+                        font-size: 14px;
+                        font-weight: 600;
+                        color: ThemeSettings.primary_accent;
+                        vertical-alignment: center;
+                    }
+                }
+                ListView {
+                    // Opens with the field's item in view.
+                    content-y: -Math.max(0, (root.end == 0 ? root.shown_first : root.shown_last) - 3) * 48px;
+                    for i in root.count: Rectangle {
+                        property <bool> current: i == (root.end == 0 ? root.shown_first : root.shown_last);
+                        property <bool> off: root.unavailable(i);
+                        height: 48px;
+                        background: row_ta.pressed ? ThemeSettings.text_color.transparentize(88%)
+                            : self.current ? ThemeSettings.primary_accent.transparentize(85%) : transparent;
+                        row_ta := TouchArea {
+                            enabled: !parent.off;
+                            clicked => {
+                                if (root.end == 0) {
+                                    root.picked(i, Math.max(i, root.shown_last));
+                                } else {
+                                    root.picked(Math.min(i, root.shown_first), i);
+                                }
+                                list.close();
+                            }
+                        }
+                        Text {
+                            x: 16px;
+                            width: parent.width - 32px;
+                            text: root.label(i);
+                            font-size: 14px;
+                            font-weight: parent.current ? 600 : 400;
+                            color: ThemeSettings.text_color.transparentize(parent.off ? 65% : 0%);
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

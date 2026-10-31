@@ -3,6 +3,7 @@ import { SwitchRow } from "SwitchRow.slint";
 import { AppSettings } from "../globals/AppSettings.slint";
 import { ThemeSettings } from "../themes/theme.slint";
 import { ActionButton } from "Buttons.slint";
+import { Note } from "Note.slint";
 
 // Sheet for pasting links: any text works, the Rust side picks the links out
 // of it. `process` hands the text over; the owner closes the sheet.
@@ -90,15 +91,13 @@ export component AddLinksSheet inherits Rectangle {
             flush: true;
             compact: true;
             title: @tr("Links with spaces");
-            subtitle: @tr("For this paste: Settings keeps its own");
+            subtitle: @tr("A pasted link runs on through spaces, up to the next link or the end of its line");
             checked <=> root.spaces;
         }
 
-        Text {
+        Note {
             text: @tr("Each link is checked before it's added, so you can pick how to download it.");
-            font-size: 12px;
-            color: ThemeSettings.text_color.transparentize(35%);
-            wrap: word-wrap;
+            font_size: 12px;
         }
 
         HorizontalLayout {

@@ -7,11 +7,12 @@ pub mod clean;
 pub mod epub;
 pub mod fetch;
 pub mod ao3;
+pub mod fanfiction;
 pub mod images;
 pub mod royalroad;
-pub mod sufficientvelocity;
 pub mod wattpad;
 pub mod wuxiaworld;
+pub mod xenforo;
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -24,6 +25,9 @@ pub enum Site {
     Wattpad,
     SufficientVelocity,
     Wuxiaworld,
+    SpaceBattles,
+    FanFiction,
+    FictionPress,
 }
 
 impl Site {
@@ -34,6 +38,9 @@ impl Site {
             Site::Wattpad => "Wattpad",
             Site::SufficientVelocity => "Sufficient Velocity",
             Site::Wuxiaworld => "Wuxiaworld",
+            Site::SpaceBattles => "SpaceBattles",
+            Site::FanFiction => "FanFiction.net",
+            Site::FictionPress => "FictionPress",
         }
     }
 
@@ -45,6 +52,9 @@ impl Site {
             Site::Wattpad => "wattpad",
             Site::SufficientVelocity => "sufficientvelocity",
             Site::Wuxiaworld => "wuxiaworld",
+            Site::SpaceBattles => "spacebattles",
+            Site::FanFiction => "fanfiction",
+            Site::FictionPress => "fictionpress",
         }
     }
 }
@@ -57,12 +67,10 @@ pub fn site_for(url: &str) -> Option<Site> {
         Some(Site::Ao3)
     } else if wattpad::is_book_url(url) {
         Some(Site::Wattpad)
-    } else if sufficientvelocity::is_book_url(url) {
-        Some(Site::SufficientVelocity)
     } else if wuxiaworld::is_book_url(url) {
         Some(Site::Wuxiaworld)
     } else {
-        None
+        xenforo::site_for(url).or_else(|| fanfiction::site_for(url))
     }
 }
 
@@ -118,11 +126,30 @@ pub struct NovelOptions {
     pub author_note_images: bool,
     /// Ask image hosts for smaller versions.
     pub small_images: bool,
+    /// Chapters picked one by one (1-based), in place of `from`..`to`;
+    /// empty for the range.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub chapters: Vec<usize>,
+    /// The book's title in place of the site's (in the EPUB, and the file's
+    /// name when it has none of its own); empty for the site's.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub title: String,
+    /// New chapters (Check for new chapters) come as a part of their own,
+    /// a file beside the book, rather than the book being made again: a
+    /// reader that knows books by their contents keeps its place.
+    pub parts: bool,
+    /// Which part this is (2 on); 0 for the book itself.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub part: usize,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 impl Default for NovelOptions {
     fn default() -> Self {
-        Self { from: 1, to: 0, author_notes: true, images: true, author_note_images: false, small_images: false }
+        Self { from: 1, to: 0, author_notes: true, images: true, author_note_images: false, small_images: false, chapters: Vec::new(), title: String::new(), parts: true, part: 0 }
     }
 }
 
@@ -132,7 +159,8 @@ pub async fn book(url: &str) -> Result<Book, String> {
         Site::RoyalRoad => royalroad::book(url).await,
         Site::Ao3 => ao3::book(url).await,
         Site::Wattpad => wattpad::book(url).await,
-        Site::SufficientVelocity => sufficientvelocity::book(url).await,
+        Site::SufficientVelocity | Site::SpaceBattles => xenforo::book(url).await,
+        Site::FanFiction | Site::FictionPress => fanfiction::book(url).await,
         Site::Wuxiaworld => wuxiaworld::book(url).await,
     }
 }
@@ -149,7 +177,8 @@ async fn chapter(book: &Book, chapter: &ChapterRef, options: &NovelOptions) -> R
                 Site::RoyalRoad => royalroad::chapter(&chapter.url).await?,
                 Site::Ao3 => ao3::chapter(&chapter.url).await?,
                 Site::Wattpad => wattpad::chapter(&chapter.url).await?,
-                Site::SufficientVelocity => sufficientvelocity::chapter(&chapter.url).await?,
+                Site::SufficientVelocity | Site::SpaceBattles => xenforo::chapter(&chapter.url).await?,
+                Site::FanFiction | Site::FictionPress => fanfiction::chapter(&chapter.url).await?,
                 Site::Wuxiaworld => wuxiaworld::chapter(&chapter.url).await?,
             };
             let cached = CachedChapter { body: raw.body, notes: raw.notes, hidden_classes: raw.hidden_classes };
@@ -192,16 +221,13 @@ fn cache_file(book: &Book, chapter: &ChapterRef) -> PathBuf {
         .join(format!("{:016x}.json", hasher.finish()))
 }
 
-/// The chapters `options` picks, locked ones left out.
+/// The chapters `options` picks (one by one, else its range), locked ones
+/// left out.
 pub fn wanted<'a>(book: &'a Book, options: &NovelOptions) -> Vec<&'a ChapterRef> {
     let last = if options.to == 0 { book.chapters.len() } else { options.to.min(book.chapters.len()) };
     let first = options.from.max(1);
-    book.chapters
-        .iter()
-        .enumerate()
-        .filter(|(i, c)| *i + 1 >= first && *i + 1 <= last && !c.locked)
-        .map(|(_, c)| c)
-        .collect()
+    let picked = |n: usize| if options.chapters.is_empty() { n >= first && n <= last } else { options.chapters.contains(&n) };
+    book.chapters.iter().enumerate().filter(|(i, c)| picked(*i + 1) && !c.locked).map(|(_, c)| c).collect()
 }
 
 /// A saved book, for the library: which book it is, and how many chapters
@@ -211,6 +237,13 @@ pub struct SavedBook {
     pub site: Site,
     pub id: String,
     pub chapters: usize,
+    /// Its title on the site (the book may have been given another).
+    #[serde(default)]
+    pub title: String,
+    /// The last chapter saved (1-based; 0 from before it was kept): new
+    /// ones are those after it.
+    #[serde(default)]
+    pub last: usize,
 }
 
 /// Saves the book as `<dir>/<name>.epub`, reporting (chapters done, total).
@@ -222,17 +255,31 @@ pub async fn download(
     name: Option<&str>,
     progress: impl Fn(usize, usize),
 ) -> Result<(PathBuf, SavedBook), String> {
-    let book = book(url).await?;
+    let mut book = book(url).await?;
+    let site_title = book.title.clone();
+    if !options.title.trim().is_empty() {
+        book.title = options.title.trim().to_string();
+    }
     let chapters = wanted(&book, options);
     if chapters.is_empty() {
         return Err("No chapters to save".to_string());
     }
+    let last = book.chapters.iter().rposition(|c| chapters.iter().any(|w| std::ptr::eq(*w, c))).map_or(0, |i| i + 1);
+    // The cover first: a book that has one is never saved without it.
+    let cover = cover(&book).await?;
     let total = chapters.len();
-    progress(0, total);
+    // Chapters saved before (in the cache) count from the start, so a book
+    // carried on with shows what it has straight away.
+    let mut done = chapters.iter().filter(|c| cache_file(&book, c).exists()).count();
+    progress(done, total);
     let mut texts = Vec::with_capacity(total);
-    for (i, c) in chapters.iter().enumerate() {
+    for c in &chapters {
+        let cached = cache_file(&book, c).exists();
         texts.push((*c, chapter(&book, c, options).await?));
-        progress(i + 1, total);
+        if !cached {
+            done += 1;
+            progress(done, total);
+        }
     }
 
     // Images: each once, smaller or as a still where asked.
@@ -242,19 +289,37 @@ pub async fn download(
         let xhtml = if options.images { collected.rewrite(&xhtml).await } else { xhtml };
         packed.push(epub::Chapter { title: c.title.clone(), volume: c.volume.clone(), xhtml });
     }
-    let mut cover = None;
-    for url in &book.covers {
-        if let Ok(image) = images::fetch(url).await {
-            cover = Some(image);
-            break;
-        }
-    }
 
     let file_name = format!("{}.epub", clean::safe_file_name(name.unwrap_or(&default_name(&book))));
     let path = dir.join(file_name);
-    let bytes = epub::pack(&book, &packed, cover, collected.into_images())?;
+    let series = options.parts.then_some(options.part.max(1));
+    let bytes = epub::pack(&book, &packed, cover, collected.into_images(), series)?;
     tokio::fs::write(&path, bytes).await.map_err(|e| e.to_string())?;
-    Ok((path, SavedBook { site: book.site, id: book.id.clone(), chapters: book.chapters.len() }))
+    Ok((path, SavedBook { site: book.site, id: book.id.clone(), chapters: book.chapters.len(), title: site_title, last }))
+}
+
+/// The book's cover (the first of its covers that comes, each tried a few
+/// times); None only when it has none. Err when it has one that won't come.
+async fn cover(book: &Book) -> Result<Option<(Vec<u8>, String)>, String> {
+    if book.covers.is_empty() {
+        return Ok(None);
+    }
+    let mut last = String::new();
+    for url in &book.covers {
+        for attempt in 0..3u64 {
+            match images::fetch(url).await {
+                Ok(image) => return Ok(Some(image)),
+                Err(e) => {
+                    log::warn!(target: "books", "cover {url}: {e}");
+                    last = e;
+                }
+            }
+            if attempt < 2 {
+                tokio::time::sleep(std::time::Duration::from_secs(2 << attempt)).await;
+            }
+        }
+    }
+    Err(format!("Couldn't fetch the book's cover: {last}"))
 }
 
 /// "<title> - <author>".

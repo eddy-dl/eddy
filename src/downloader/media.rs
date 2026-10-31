@@ -405,6 +405,10 @@ async fn download_native(
             let out = if resume || settings.replace_existing { path.clone() } else { super::free_path(&path) };
             save_hls(job, fetch, &out).await?;
             out
+        } else if let Some(audio) = &fetch.audio {
+            let out = if resume || settings.replace_existing { path.clone() } else { super::free_path(&path) };
+            save_joined(job, fetch, audio, &out, settings, resume).await?;
+            out
         } else {
             let mut fetch = fetch.clone();
             let mut refreshed = 0;
@@ -579,6 +583,34 @@ async fn save_hls(job: u64, fetch: &Fetch, path: &Path) -> Result<(), String> {
     );
     args.push(path.to_string_lossy().into_owned());
     ffmpeg(job, args).await
+}
+
+/// Saves a video-only stream and its sound, then joins them into `path`
+/// (stream copy, no re-encoding). Each half resumes on its own.
+async fn save_joined(job: u64, fetch: &Fetch, audio: &str, path: &Path, settings: &super::DownloadSettings, resume: bool) -> Result<(), String> {
+    // A half finished before a pause isn't fetched again.
+    let half = |url: String, file: PathBuf| async move {
+        if resume && !part_path(&file).exists() && file.is_file() {
+            Ok(file)
+        } else {
+            save(job, &url, &fetch.headers, &file, settings, resume).await
+        }
+    };
+    let video = half(fetch.url.clone(), path.with_extension("video.mp4")).await?;
+    let sound = half(audio.to_string(), path.with_extension("audio.m4a")).await?;
+    let mut args = vec!["-y".to_string()];
+    for input in [&video, &sound] {
+        args.extend(["-i".to_string(), input.to_string_lossy().into_owned()]);
+    }
+    args.extend(["-map", "0:v:0", "-map", "1:a:0", "-c", "copy", "-movflags", "+faststart"].iter().map(|s| s.to_string()));
+    args.push(path.to_string_lossy().into_owned());
+    let joined = ffmpeg(job, args).await;
+    if joined.is_err() {
+        let _ = tokio::fs::remove_file(path).await;
+    }
+    let _ = tokio::fs::remove_file(&video).await;
+    let _ = tokio::fs::remove_file(&sound).await;
+    joined
 }
 
 /// Replaces a downloaded video with its audio, as mp3 or m4a.

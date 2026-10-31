@@ -1,0 +1,120 @@
+import { ThemeSettings } from "../themes/theme.slint";
+import { ActionButton } from "Buttons.slint";
+import { Note } from "Note.slint";
+import { WrappedText } from "WrappedText.slint";
+
+// One fact about a download: what it is, its value, and whether a tap
+// copies the value (a link, a path).
+export struct InfoRow {
+    label: string,
+    value: string,
+    copyable: bool,
+}
+
+// A download's details (one picked in the list, its Info): filled in by
+// Rust.
+export global DownloadInfo {
+    in-out property <bool> open: false;
+    in property <string> title;
+    in property <[InfoRow]> rows;
+}
+
+// MD3 dialog: the download's name, then its details, each a label over its
+// value; tapping a link or path copies it.
+export component DownloadInfoSheet inherits Rectangle {
+    // Space it may take; past this its rows scroll.
+    in property <length> available_height: 10000px;
+    callback close();
+
+    // Which row was just copied (-1 for none).
+    private property <int> copied: -1;
+    private property <bool> shown: DownloadInfo.open;
+    changed shown => { root.copied = -1; }
+
+    height: Math.min(layout.preferred-height, root.available_height);
+    background: ThemeSettings.surface;
+    border-radius: 28px;
+    clip: true;
+    drop-shadow-blur: 12px;
+    drop-shadow-color: #00000020;
+
+    // Keeps taps on the sheet's gaps from reaching the backdrop behind it.
+    TouchArea { }
+
+    // Copies a value: TextInput is the one thing with clipboard access.
+    clipboard := TextInput {
+        width: 0px;
+        height: 0px;
+        visible: false;
+    }
+
+    layout := VerticalLayout {
+        padding: 24px;
+        padding-bottom: 16px;
+        spacing: 16px;
+
+        WrappedText {
+            text: DownloadInfo.title;
+            font-size: 22px;
+            color: ThemeSettings.text_color;
+        }
+
+        Flickable {
+            vertical-stretch: 1;
+            // Only as tall as the rows, until there's no room.
+            preferred-height: rows.preferred-height;
+            min-height: Math.min(rows.preferred-height, 120px);
+            content-height: rows.preferred-height;
+
+            // The Flickable's width, so long values wrap to it (and the
+            // height they then take is what scrolls).
+            rows := VerticalLayout {
+                width: parent.width;
+                spacing: 4px;
+                for row[i] in DownloadInfo.rows: Rectangle {
+                    border-radius: 12px;
+                    background: row.copyable && ta.pressed ? ThemeSettings.text_color.transparentize(92%) : transparent;
+                    ta := TouchArea {
+                        enabled: row.copyable;
+                        clicked => {
+                            clipboard.text = row.value;
+                            clipboard.select-all();
+                            clipboard.copy();
+                            root.copied = i;
+                        }
+                    }
+                    VerticalLayout {
+                        padding: 8px;
+                        spacing: 2px;
+                        Text {
+                            text: root.copied == i ? @tr("Copied") : row.label;
+                            font-size: 12px;
+                            font-weight: 500;
+                            color: ThemeSettings.primary_accent;
+                        }
+                        WrappedText {
+                            text: row.value;
+                            font-size: 14px;
+                            color: ThemeSettings.text_color;
+                        }
+                    }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 12px;
+            Note {
+                horizontal-stretch: 1;
+                text: @tr("Tap a link or a path to copy it");
+                font_size: 12px;
+            }
+            ActionButton {
+                text: @tr("Close");
+                width: 104px;
+                height: 40px;
+                clicked => { root.close(); }
+            }
+        }
+    }
+}

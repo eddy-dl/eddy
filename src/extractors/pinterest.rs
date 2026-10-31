@@ -283,7 +283,7 @@ pub async fn resolve(url: &str, request: &MediaRequest) -> Result<Vec<Fetch>, St
                 PinMedia::Image { url, caption, .. } => (url, MediaKind::Image, "jpg", caption),
                 PinMedia::Gif { url, caption, .. } => (url, MediaKind::Image, "gif", caption),
             };
-            Some(Fetch { index, hls: url.contains(".m3u8"), url, headers: headers(), kind, ext: ext.to_string(), caption })
+            Some(Fetch { index, hls: url.contains(".m3u8"), url, audio: None, headers: headers(), kind, ext: ext.to_string(), caption })
         })
         .collect())
 }

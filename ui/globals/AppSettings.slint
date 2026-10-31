@@ -79,6 +79,18 @@ export global AppSettings {
     in-out property <bool> novel_images: true;
     in-out property <bool> novel_author_note_images: false;
     in-out property <bool> novel_small_images: false;
+    // New chapters come as a part of their own rather than the book being
+    // made again (each book keeps its own choice).
+    in-out property <bool> novel_parts: true;
+
+    // Settings → Advanced: an overlay of Eddy's own memory and CPU use
+    // (usage.rs fills `usage_text` once a second while it's on).
+    in-out property <bool> show_usage: false;
+    // Settings → Advanced: the logs in the download folder, where other apps
+    // (Termux) can read them, rather than in Eddy's own; and sharing them.
+    in-out property <bool> logs_in_downloads: false;
+    callback share_logs();
+    in property <string> usage_text: "";
 
     // Settings → Advanced: the download cache (thumbnails, link info,
     // installers, temporary files). `cache_refresh` measures it; clearing is

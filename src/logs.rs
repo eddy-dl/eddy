@@ -1,7 +1,9 @@
-//! Logs for users: warnings and errors written to `logs/` in the download
-//! folder (or Eddy's own folder when that can't be written), one file per
-//! part of the app, so a failed download or link check can be looked into
-//! without logcat:
+//! Logs for users: warnings and errors written to `logs/` in Eddy's own
+//! (private) folder, or in the download folder when Settings → Advanced
+//! says so (other apps can read them there: they hold links and file
+//! names). Settings → Advanced also shares them. One file per part of the
+//! app, so a failed download or link check can be looked into without
+//! logcat:
 //!
 //! - ytdlp.log: yt-dlp's errors, with the end of what it printed;
 //! - aria2.log: aria2's (direct downloads, torrents, Eddy's own files);
@@ -50,6 +52,7 @@ pub fn trim() {
     static TRIM: Once = Once::new();
     TRIM.call_once(|| {
         std::thread::spawn(|| {
+            relocate();
             let Some(dir) = dir() else {
                 return;
             };
@@ -109,28 +112,99 @@ fn write(file: &str, level: &str, target: &str, message: &str) {
     }
 }
 
+/// Saves `contents` as `name` beside the logs (a page Eddy couldn't read,
+/// say), replacing the one before.
+pub fn save(name: &str, contents: &str) {
+    if let Some(dir) = dir() {
+        if let Err(e) = std::fs::write(dir.join(name), contents) {
+            log::warn!("couldn't save {name} beside the logs: {e}");
+        }
+    }
+}
+
+/// The preference: logs in the download folder (else Eddy's own).
+pub const IN_DOWNLOADS_KEY: &str = "logs_in_downloads";
+
+static CACHE: Mutex<Option<(PathBuf, Instant)>> = Mutex::new(None);
+
 /// The logs folder, looked up again every half minute (the download folder
-/// can change).
+/// and the setting can change).
 fn dir() -> Option<PathBuf> {
-    static CACHE: Mutex<Option<(PathBuf, Instant)>> = Mutex::new(None);
     let mut cache = CACHE.try_lock().ok()?;
     if let Some((dir, at)) = cache.as_ref() {
         if at.elapsed() < Duration::from_secs(30) {
             return Some(dir.clone());
         }
     }
-    let base = match crate::storage::resolve("") {
-        crate::storage::SaveTarget::Dir(dir) => dir,
-        // A picked folder only copied into: Eddy's own instead.
-        crate::storage::SaveTarget::Staged { .. } => PathBuf::from(crate::platform::get_app_data_dir()),
+    let in_downloads = crate::platform::get_pref(IN_DOWNLOADS_KEY, "false").is_ok_and(|v| v == "true");
+    let dir = match in_downloads.then(public_dir).flatten() {
+        Some(dir) if std::fs::create_dir_all(&dir).is_ok() => dir,
+        _ => {
+            let dir = private_dir();
+            std::fs::create_dir_all(&dir).ok()?;
+            dir
+        }
     };
-    let mut dir = base.join("logs");
-    if std::fs::create_dir_all(&dir).is_err() {
-        dir = PathBuf::from(crate::platform::get_app_data_dir()).join("logs");
-        std::fs::create_dir_all(&dir).ok()?;
-    }
     *cache = Some((dir.clone(), Instant::now()));
     Some(dir)
+}
+
+fn private_dir() -> PathBuf {
+    PathBuf::from(crate::platform::get_app_data_dir()).join("logs")
+}
+
+/// `logs/` in the download folder; None for a picked folder (only copied
+/// into).
+fn public_dir() -> Option<PathBuf> {
+    match crate::storage::resolve("") {
+        crate::storage::SaveTarget::Dir(dir) => Some(dir.join("logs")),
+        crate::storage::SaveTarget::Staged { .. } => None,
+    }
+}
+
+/// Moves the logs to where the setting says (from the other place), as it
+/// changes and as the app starts (logs from before, in the download
+/// folder, go private).
+pub fn relocate() {
+    if let Ok(mut cache) = CACHE.lock() {
+        *cache = None;
+    }
+    let (Some(to), Some(public)) = (dir(), public_dir()) else {
+        return;
+    };
+    let from = if to == public { private_dir() } else { public };
+    let Ok(entries) = std::fs::read_dir(&from) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let dest = to.join(entry.file_name());
+        // Across storage, rename can't: copied, then the old one goes.
+        if std::fs::rename(&path, &dest).is_err() && std::fs::copy(&path, &dest).is_ok() {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+    let _ = std::fs::remove_dir(&from);
+}
+
+/// The log files, for sharing.
+pub fn files() -> Vec<String> {
+    let Some(dir) = dir() else {
+        return Vec::new();
+    };
+    let mut files: Vec<String> = std::fs::read_dir(&dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_file() && std::fs::metadata(p).is_ok_and(|m| m.len() > 0))
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    files.sort();
+    files
 }
 
 /// "2026-10-22 10:15:03Z".

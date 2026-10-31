@@ -99,6 +99,38 @@ pub struct DownloadRequest {
     /// files"). Empty for the other downloads.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub choices: Vec<Choice>,
+    /// A file caught in Eddy's browser (a page whose download button had
+    /// to be clicked): the page, to fetch it again from when the link
+    /// expires, and what the browser sent with it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub browser: Option<BrowserPass>,
+}
+
+/// What a file caught in Eddy's browser came with (its user agent goes in
+/// the download's settings).
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct BrowserPass {
+    /// The page it was opened on.
+    pub page: String,
+    /// The browser's cookies for the file's site ("a=b; c=d").
+    pub cookies: String,
+    /// The page the download was clicked on.
+    pub referer: String,
+}
+
+impl BrowserPass {
+    /// The headers a request for the file goes with.
+    pub fn headers(&self) -> Vec<(String, String)> {
+        let mut headers = Vec::new();
+        if !self.cookies.is_empty() {
+            headers.push(("Cookie".to_string(), self.cookies.clone()));
+        }
+        if !self.referer.is_empty() {
+            headers.push(("Referer".to_string(), self.referer.clone()));
+        }
+        headers
+    }
 }
 
 /// One of a download's files to pick from (see `DownloadRequest::choices`).
@@ -111,6 +143,12 @@ pub struct Choice {
     pub path: String,
     /// As shown ("1.2 GB").
     pub size: String,
+    /// The folder or volume it's listed under ("" for none).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub group: String,
+    /// A book's locked chapter: listed, never saved.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub locked: bool,
 }
 
 impl DownloadRequest {
@@ -132,14 +170,27 @@ impl DownloadRequest {
             Backend::Media => serde_json::from_str::<crate::extractors::MediaRequest>(&self.format)
                 .map(|media| media.items.iter().map(|i| i + 1).collect())
                 .unwrap_or_default(),
+            // A book's chapters picked one by one, else its range.
+            Backend::Book => match serde_json::from_str::<crate::novels::NovelOptions>(&self.format) {
+                Ok(options) if !options.chapters.is_empty() => options.chapters,
+                Ok(options) => self
+                    .choices
+                    .iter()
+                    .map(|c| c.index)
+                    .filter(|&n| n >= options.from.max(1) && (options.to == 0 || n <= options.to))
+                    .collect(),
+                Err(_) => Vec::new(),
+            },
             _ => Vec::new(),
         };
-        if picked.is_empty() { self.choices.iter().map(|c| c.index).collect() } else { picked }
+        let picked = if picked.is_empty() { self.choices.iter().map(|c| c.index).collect() } else { picked };
+        // A locked chapter is never saved.
+        picked.into_iter().filter(|i| !self.choices.iter().any(|c| c.index == *i && c.locked)).collect()
     }
 
     /// Fetches just `picked` (`Choice::index`es) of its choices.
     pub fn pick(&mut self, picked: &[usize]) {
-        let all = picked.len() >= self.choices.len() && self.choices.iter().all(|c| picked.contains(&c.index));
+        let all = self.choices.iter().filter(|c| !c.locked).all(|c| picked.contains(&c.index));
         match self.backend {
             Backend::Torrent => {
                 self.select_files = if all { String::new() } else { picked.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",") };
@@ -149,6 +200,14 @@ impl DownloadRequest {
                 if let Ok(mut media) = serde_json::from_str::<crate::extractors::MediaRequest>(&self.format) {
                     media.items = if all { Vec::new() } else { picked.iter().map(|i| i - 1).collect() };
                     self.format = serde_json::to_string(&media).unwrap_or_default();
+                }
+            }
+            // All of them: the whole range again, so updates take new ones.
+            Backend::Book => {
+                if let Ok(mut options) = serde_json::from_str::<crate::novels::NovelOptions>(&self.format) {
+                    (options.from, options.to) = (1, 0);
+                    options.chapters = if all { Vec::new() } else { picked.to_vec() };
+                    self.format = serde_json::to_string(&options).unwrap_or_default();
                 }
             }
             _ => {}
@@ -520,7 +579,11 @@ fn launch(request: &DownloadRequest) -> Result<Option<Handle>, String> {
         // files take their names from the torrent.
         Backend::Torrent => watch(engine().start_download_with_headers(&request.url, &dir, None, select, &request.settings, &[], index_out(request).as_deref())?),
         // Direct on a .torrent link saves the .torrent file itself.
-        Backend::Direct => watch(engine().start_download(&request.url, &dir, name.as_deref(), None, &request.settings)?),
+        // Caught in the browser: with its cookies and the page it was on.
+        Backend::Direct => {
+            let headers = request.browser.as_ref().map(BrowserPass::headers).unwrap_or_default();
+            watch(engine().start_download_with_headers(&request.url, &dir, name.as_deref(), None, &request.settings, &headers, None)?)
+        }
         Backend::Media => Some(Handle::Job(media::start(request, &dir, name, deliver.clone())?)),
         Backend::Book => Some(Handle::Job(book::start(request, &dir, name, deliver.clone())?)),
         Backend::Drive => Some(Handle::Job(drive::start(request, &dir, name, deliver.clone())?)),

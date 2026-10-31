@@ -115,6 +115,7 @@ pub async fn resolve(url: &str, request: &MediaRequest) -> Result<Vec<Fetch>, St
         .map(|(index, m)| Fetch {
             index,
             url: m.source_url,
+            audio: None,
             headers: Vec::new(),
             ext: if m.kind == MediaKind::Video { "mp4" } else { "jpg" }.to_string(),
             kind: m.kind,

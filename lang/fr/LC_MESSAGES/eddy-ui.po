@@ -443,11 +443,14 @@ msgstr "Avancé"
 msgid "Download cache"
 msgstr "Cache des téléchargements"
 
-msgid "Link previews' thumbnails and info, downloaded installers, temporary files. Your downloads stay."
-msgstr "Miniatures et infos des aperçus de liens, installateurs téléchargés, fichiers temporaires. Vos téléchargements restent."
+msgid "Link previews' thumbnails and info, downloaded installers, temporary files."
+msgstr "Miniatures et infos des aperçus de liens, installateurs téléchargés, fichiers temporaires."
 
-msgid "Link previews' thumbnails and info, temporary files. Your downloads stay."
-msgstr "Miniatures et infos des aperçus de liens, fichiers temporaires. Vos téléchargements restent."
+msgid "Link previews' thumbnails and info, temporary files."
+msgstr "Miniatures et infos des aperçus de liens, fichiers temporaires."
+
+msgid "Your downloaded files are not deleted."
+msgstr "Vos fichiers téléchargés ne sont pas supprimés."
 
 msgid "Clearing…"
 msgstr "Nettoyage…"
@@ -490,15 +493,6 @@ msgstr "Demande des versions plus petites quand le site en a. Les GIF animés so
 
 msgid "Chapters"
 msgstr "Chapitres"
-
-msgid "{} · {} locked, not saved"
-msgstr "{} · {} verrouillés, non enregistrés"
-
-msgid "From"
-msgstr "De"
-
-msgid "to"
-msgstr "à"
 
 msgid "{n} chapter"
 msgid_plural "{n} chapters"
@@ -783,9 +777,6 @@ msgstr "Liens avec des espaces"
 msgid "A pasted link runs on through spaces, up to the next link or the end of its line"
 msgstr "Un lien collé continue après les espaces, jusqu'au lien suivant ou à la fin de sa ligne"
 
-msgid "For this paste: Settings keeps its own"
-msgstr "Pour ce collage : les Paramètres gardent le leur"
-
 msgid "Saved"
 msgstr "Enregistré"
 
@@ -800,3 +791,87 @@ msgstr "Choisissez lesquels de ses fichiers télécharger"
 
 msgid "The MEGA folder's name"
 msgstr "Le nom du dossier MEGA"
+
+msgid "Locked"
+msgstr "Verrouillé"
+
+msgid "Choose chapters"
+msgstr "Choisir les chapitres"
+
+msgid "The book is made again with the ticked chapters; ones fetched before aren't fetched again"
+msgstr "Le livre est refait avec les chapitres cochés ; ceux déjà récupérés ne le sont pas à nouveau"
+
+msgid "{} of {} selected · {} locked"
+msgstr "{} sur {} sélectionnés · {} verrouillés"
+
+msgid "From"
+msgstr "De"
+
+msgid "To"
+msgstr "À"
+
+msgid "Title"
+msgstr "Titre"
+
+msgid "Open in browser"
+msgstr "Ouvrir dans le navigateur"
+
+msgid "For a page with its own download button: click it there, and the file downloads here"
+msgstr "Pour une page avec son propre bouton de téléchargement : touchez-le là-bas, et le fichier se télécharge ici"
+
+msgid "Get a new link in the browser"
+msgstr "Obtenir un nouveau lien dans le navigateur"
+
+msgid "Info"
+msgstr "Infos"
+
+msgid "Copied"
+msgstr "Copié"
+
+msgid "Tap a link or a path to copy it"
+msgstr "Touchez un lien ou un chemin pour le copier"
+
+msgid "New chapters as a new part"
+msgstr "Nouveaux chapitres dans une nouvelle partie"
+
+msgid "Updates save new chapters in a file of their own, beside the book, instead of making the book again. E-book apps that know books by their contents keep your progress."
+msgstr "Les mises à jour enregistrent les nouveaux chapitres dans un fichier à part, à côté du livre, au lieu de refaire le livre. Les applications de lecture qui reconnaissent les livres à leur contenu gardent votre progression."
+
+msgid "Check for new chapters saves them in a file of their own, beside this one, which stays as it is: e-book apps keep your progress"
+msgstr "La recherche de nouveaux chapitres les enregistre dans un fichier à part, à côté de celui-ci, qui reste tel quel : les applications de lecture gardent votre progression"
+
+msgid "Check for new chapters makes this book again with them"
+msgstr "La recherche de nouveaux chapitres refait ce livre avec eux"
+
+msgid "Ticked chapters that no part has are saved as a new part; a part with chapters unticked is made again without them"
+msgstr "Les chapitres cochés qu'aucune partie n'a sont enregistrés dans une nouvelle partie ; une partie dont des chapitres sont décochés est refaite sans eux"
+
+msgid "More options"
+msgstr "Plus d’options"
+
+msgid "Check for new chapters"
+msgstr "Rechercher de nouveaux chapitres"
+
+msgid "Show resource usage"
+msgstr "Afficher l’utilisation des ressources"
+
+msgid "Eddy's memory and CPU use, at the top of the screen."
+msgstr "La mémoire et le processeur utilisés par Eddy, en haut de l’écran."
+
+msgid "Save logs to Downloads"
+msgstr "Enregistrer les journaux dans Téléchargements"
+
+msgid "In Download/Eddy/logs, where other apps can read them. They list the links you download."
+msgstr "Dans Download/Eddy/logs, où d’autres applis peuvent les lire. Ils listent les liens que vous téléchargez."
+
+msgid "Logs"
+msgstr "Journaux"
+
+msgid "What went wrong with downloads and link checks, to send with a bug report."
+msgstr "Ce qui s’est mal passé avec les téléchargements et les vérifications de liens, à joindre à un signalement de bug."
+
+msgid "Share"
+msgstr "Partager"
+
+msgid "Debug"
+msgstr "Débogage"

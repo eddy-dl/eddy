@@ -166,6 +166,8 @@ pub fn native_service(url: &str) -> Option<Service> {
 pub struct Fetch {
     pub index: usize,
     pub url: String,
+    /// A video-only stream's sound, a file apart: joined in with ffmpeg.
+    pub audio: Option<String>,
     pub headers: Vec<(String, String)>,
     pub kind: MediaKind,
     pub ext: String,

@@ -4,11 +4,17 @@ Saving web novels from public reading sites (Royal Road first) as EPUB
 books, the way [WebToEpub](https://github.com/dteviot/WebToEpub) does in the
 browser, but inside Eddy's link checks and downloads.
 
-Status: Royal Road, AO3, Wattpad, Sufficient Velocity and Wuxiaworld
-implemented (engine, preview, download, Books settings, library and updates).
-Scribble Hub, SpaceBattles (its threads; its forum index loads), Webnovel,
-FanFiction.net and NovelUpdates are behind Cloudflare's browser check (a 403
-"Just a moment" page), which only a WebView could pass; left for later.
+Status: Royal Road, AO3, Wattpad, Sufficient Velocity, SpaceBattles,
+FanFiction.net, FictionPress and Wuxiaworld implemented (engine, preview,
+download, Books settings, library and updates). SpaceBattles, FanFiction.net
+and FictionPress are behind Cloudflare's browser check (a 403 "Just a
+moment" page), passed in a WebView (CloudflareActivity); FanFiction.net and
+FictionPress are fetched at one page every 3 s, as they block faster readers.
+When a site still turns Eddy's own requests away after the WebView passed
+(Cloudflare judges the connection, not just the cookies), its pages are
+loaded for 30 minutes in an unseen WebView (PageFetcher) and their HTML used.
+Scribble Hub and Webnovel are left for later; NovelUpdates only links to
+translators' own sites.
 
 ## What WebToEpub does, and what carries over
 

@@ -20,6 +20,9 @@ class MainActivity : GameActivity() {
     companion object {
         private const val REQUEST_CODE_FOLDER_PICKER = 1001
         private const val REQUEST_CODE_FILE_PICKER = 1002
+        // A download to open (its record's id), from its "Downloaded"
+        // notification.
+        const val EXTRA_OPEN_DOWNLOAD = "open_download"
 
         init {
             System.loadLibrary("eddy")
@@ -49,11 +52,30 @@ class MainActivity : GameActivity() {
         DownloadService.askForNotifications(this)
         YtdlRuntime.start(this)
         DownloadService.mainAppOpen = true
+        DownloadService.mainActivity = java.lang.ref.WeakReference(this)
         DownloadService.ping(this)
+        openDownloadFrom(intent)
+    }
+
+    // Opened again (it's single-task) from a "Downloaded" notification.
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        openDownloadFrom(intent)
+    }
+
+    // A "Downloaded" notification's download, opened as its card would be;
+    // once (the extra goes, so a recreated activity doesn't open it again).
+    private fun openDownloadFrom(intent: Intent?) {
+        val id = intent?.getLongExtra(EXTRA_OPEN_DOWNLOAD, 0L) ?: 0L
+        if (id == 0L) return
+        intent?.removeExtra(EXTRA_OPEN_DOWNLOAD)
+        EddyNative.openDownload(id)
     }
 
     override fun onDestroy() {
         DownloadService.mainAppOpen = false
+        if (DownloadService.mainActivity?.get() === this) DownloadService.mainActivity = null
         // Not for a rotation or the like: only when it's really going.
         if (isFinishing) EddyNative.screenClosed()
         super.onDestroy()

@@ -9,7 +9,7 @@
 
 use crate::downloader::{self, Backend, DownloadRequest, Handle};
 use crate::{
-    ChoiceFile, ChooseFiles, DownloadItem, DownloadState, DownloaderApp, FileFilter, FileType, FolderFile, FolderFiles, ItemAction, LinkBackend,
+    ChoiceFile, ChooseFiles, DownloadItem, DownloadState, DownloaderApp, FileFilters, FileType, FolderFile, FolderFiles, ItemAction, LinkBackend,
     ListOptions, SelectionAction, SortKey, TabListOptions,
 };
 use slint::ComponentHandle;
@@ -59,8 +59,10 @@ pub struct Saved {
     pub path: Option<String>,
     /// Where it's saved, as shown.
     pub folder: String,
-    /// Unix seconds.
+    /// Unix seconds: added, first started (0 not yet), ended.
     pub added: u64,
+    #[serde(default)]
+    pub started: u64,
     pub ended: u64,
     /// A new name for an unfinished download, given to the file once it's
     /// done.
@@ -247,24 +249,71 @@ pub fn saved_book(site: crate::novels::Site, book_id: &str) -> Option<(i64, usiz
 fn update_book(id: i64) {
     let found = with_entries(|entries| {
         let entry = entries.iter().find(|e| e.id == id && e.saved.state == State::Completed)?;
+        // The book's parts (this download and any saved beside it): how many,
+        // how many chapters they've got to, and the first one's name.
+        let book = entry.saved.book.as_ref();
+        let parts: Vec<&Entry> = match book {
+            Some(book) => entries.iter().filter(|e| e.saved.book.as_ref().is_some_and(|b| b.site == book.site && b.id == book.id)).collect(),
+            None => vec![entry],
+        };
+        let members = book_members(entries, id);
+        let stem = first_part_stem(entries, &members);
         // Saved before Eddy kept count: everything counts as new (the cache
         // still has the chapters).
-        Some((entry.saved.request.clone(), entry.saved.book.as_ref().map(|b| b.chapters)))
+        // The last chapter saved, rather than how many the book had then:
+        // locked ones at its end (early access) count as new once they open.
+        let chapters = parts.iter().filter_map(|e| e.saved.book.as_ref().map(|b| if b.last > 0 { b.last } else { b.chapters })).max();
+        Some((entry.saved.request.clone(), chapters, parts.len(), stem))
     });
-    let Some((request, chapters)) = found else {
+    let Some((request, chapters, count, stem)) = found else {
         return;
     };
+    // Once at a time: its button waits until the check's done.
+    if !CHECKING.with(|c| c.borrow_mut().insert(id)) {
+        return;
+    }
+    refresh_now();
     crate::platform::show_toast("Checking for new chapters…");
     downloader::runtime().spawn(async move {
         let result = crate::novels::book(&request.url).await;
         let _ = slint::invoke_from_event_loop(move || {
+            CHECKING.with(|c| c.borrow_mut().remove(&id));
+            refresh_now();
             let book = match result {
                 Ok(book) => book,
-                Err(e) => return crate::platform::show_toast(&format!("Couldn't check: {e}")),
+                Err(e) => {
+                    log::warn!("couldn't check {} for new chapters: {e}", request.url);
+                    return crate::platform::show_toast(&format!("Couldn't check: {e}"));
+                }
             };
-            let new = book.chapters.len().saturating_sub(chapters.unwrap_or(0));
+            // Locked ones (early access) can't be saved yet, so don't count.
+            let new = book.chapters.iter().skip(chapters.unwrap_or(0)).filter(|c| !c.locked).count();
             if new == 0 {
                 return crate::platform::show_toast("No new chapters");
+            }
+            let options = serde_json::from_str::<crate::novels::NovelOptions>(&request.format).unwrap_or_default();
+            // A part of their own, beside the book, which stays as it is.
+            if let Some(known) = chapters.filter(|_| options.parts) {
+                crate::platform::show_toast(&match new {
+                    1 => "1 new chapter: saving it as a new part".to_string(),
+                    n => format!("{n} new chapters: saving them as a new part"),
+                });
+                let mut request = request;
+                request.choices = book_choices(&book);
+                let new = (known + 1..=book.chapters.len()).filter(|&n| !book.chapters[n - 1].locked).collect();
+                let request = part_request(&request, new, count + 1, &stem);
+                // The others keep the chapters they have now.
+                with_entries(|entries| {
+                    for i in book_members(entries, id) {
+                        freeze_chapters(&mut entries[i].saved);
+                        save(&entries[i]);
+                    }
+                });
+                if let Err(e) = crate::platform::start_download(&request) {
+                    crate::platform::show_toast(&e);
+                }
+                refresh_now();
+                return;
             }
             let message = match (chapters, new) {
                 (None, _) => "Updating".to_string(),
@@ -273,11 +322,27 @@ fn update_book(id: i64) {
             };
             crate::platform::show_toast(&message);
             let mut request = request;
-            // Through to the last chapter, wherever it started.
+            // Through to the last chapter, wherever it started; chapters
+            // picked one by one get the new ones added.
             if let Ok(mut options) = serde_json::from_str::<crate::novels::NovelOptions>(&request.format) {
                 options.to = 0;
+                if !options.chapters.is_empty() {
+                    options.chapters.extend(chapters.unwrap_or(0) + 1..=book.chapters.len());
+                }
                 request.format = serde_json::to_string(&options).unwrap_or(request.format);
             }
+            // The chapters as they are now, to pick from later.
+            request.choices = book_choices(&book);
+            book_folder(&mut request);
+            // Its counts were the saved file's bytes: chapters from here on,
+            // once the first comes in.
+            with_entries(|entries| {
+                if let Some(entry) = entries.iter_mut().find(|e| e.id == id) {
+                    entry.saved.done = 0;
+                    entry.saved.total = 0;
+                    save(entry);
+                }
+            });
             if let Err(e) = crate::platform::start_download(&request) {
                 ended(id, None, &downloader::label_for(&request), false, &e, None);
             }
@@ -345,6 +410,10 @@ pub fn running(id: i64, handle: Handle) {
         if let Some(entry) = entries.iter_mut().find(|e| e.id == id) {
             entry.handle = Some(handle);
             entry.last = None;
+            if entry.saved.started == 0 {
+                entry.saved.started = now();
+                save(entry);
+            }
             if entry.saved.state != State::Active {
                 entry.saved.state = State::Active;
                 entry.saved.message.clear();
@@ -451,6 +520,21 @@ pub fn ended_at(id: i64, handle: Option<&Handle>, name: &str, ok: bool, message:
             if adding {
                 entry.saved.total = entry.saved.total.max(entry.saved.files.iter().map(|(_, size)| size).sum());
                 entry.saved.done = entry.saved.total;
+            }
+            // A book made again under another name or in another folder (a
+            // new title, Books): the old file goes.
+            if entry.saved.request.backend == Backend::Book && !staged {
+                if let (Some(old), Some(new)) = (entry.saved.path.as_deref(), path.as_deref()) {
+                    // Compared as the files they are: the same folder may be
+                    // written two ways (/sdcard, /storage/emulated/0).
+                    let same = match (std::fs::canonicalize(old), std::fs::canonicalize(new)) {
+                        (Ok(a), Ok(b)) => a == b,
+                        _ => true,
+                    };
+                    if !is_document(old) && !same {
+                        let _ = std::fs::remove_file(old);
+                    }
+                }
             }
             entry.saved.path = path.filter(|_| !staged).map(|p| p.to_string_lossy().into_owned());
             entry.saved.done = entry.saved.done.max(entry.saved.total);
@@ -610,6 +694,39 @@ pub fn delivered(id: i64, uri: &str) {
             save(entry);
         }
     });
+}
+
+/// The one file download `id` saved (a path, or its copy's document URI),
+/// for its "Downloaded" notification to open straight away; None for a
+/// folder, or a file that's gone.
+pub fn file_of(id: i64) -> Option<String> {
+    let saved = with_entries(|entries| entries.iter().find(|e| e.id == id).map(|e| e.saved.clone()))?;
+    let path = saved.path.filter(|_| !saved.is_folder)?;
+    (is_document(&path) || std::path::Path::new(&path).is_file()).then_some(path)
+}
+
+/// The type download `id`'s card shows, as FileType's place in its enum
+/// (0 Video … 7 Folder, 8 Other), for its notifications' icon.
+pub fn type_of(id: i64) -> Option<i32> {
+    with_entries(|entries| entries.iter().find(|e| e.id == id).map(type_index))
+}
+
+/// The type of the one download running, for the progress notification's
+/// icon; None with several (or none).
+pub fn running_type() -> Option<i32> {
+    with_entries(|entries| {
+        let mut running = entries.iter().filter(|e| e.saved.state == State::Active);
+        match (running.next(), running.next()) {
+            (Some(entry), None) => Some(type_index(entry)),
+            _ => None,
+        }
+    })
+}
+
+fn type_index(entry: &Entry) -> i32 {
+    let saved = &entry.saved;
+    let folder = if saved.state == State::Completed { saved.is_folder } else { saved.several };
+    if folder { FileType::Folder as i32 } else { file_type(saved.file_type) as i32 }
 }
 
 /// A copy in a picked folder: opened and deleted through Android, not
@@ -781,6 +898,25 @@ fn forget_unpicked(id: i64) {
 
 /// Opens a finished download: its file, or for a folder, the list of its
 /// files (FolderFilesSheet). A file that's gone says so instead.
+/// A download to open once the app's up (from its notification); 0 for none.
+static OPEN_PENDING: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+/// Opens a download as its card does, from any thread: now when the app's
+/// up, else once it is.
+pub fn open_when_ready(id: i64) {
+    OPEN_PENDING.store(id, std::sync::atomic::Ordering::SeqCst);
+    let _ = slint::invoke_from_event_loop(open_pending);
+}
+
+fn open_pending() {
+    if APP.with(|app| app.borrow().is_some()) {
+        match OPEN_PENDING.swap(0, std::sync::atomic::Ordering::SeqCst) {
+            0 => {}
+            id => open(id),
+        }
+    }
+}
+
 fn open(id: i64) {
     let found = with_entries(|entries| entries.iter().find(|e| e.id == id).map(|e| e.saved.clone()));
     let Some(saved) = found else {
@@ -918,6 +1054,12 @@ fn rename(id: i64, name: &str) {
         }
         match std::fs::rename(&old, &new) {
             Ok(()) => {
+                // A book made again (more chapters, new ones) keeps it.
+                if entry.saved.request.backend == Backend::Book {
+                    if let Some(stem) = new.file_stem() {
+                        entry.saved.request.filename = stem.to_string_lossy().into_owned();
+                    }
+                }
                 entry.saved.name = new.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(name);
                 entry.saved.path = Some(new.to_string_lossy().into_owned());
                 save(entry);
@@ -1250,18 +1392,92 @@ fn restart_with(id: i64, change: impl FnOnce(&mut Saved, Option<std::path::PathB
     }
 }
 
-/// "Choose files": a torrent's files or a yt-dlp playlist's items, as the
-/// preview listed them, ticked as the download has them now
-/// (ChooseFilesSheet).
+/// "Choose files": a torrent's files, a yt-dlp playlist's items or a book's
+/// chapters, as the preview listed them, ticked as the download has them
+/// now (ChooseFilesSheet).
 fn show_choices(id: i64) {
     let found = with_entries(|entries| entries.iter().find(|e| e.id == id).map(|e| e.saved.clone()));
+    // A book's chapters as they are now on the site: shown as soon as
+    // they're read, over the ones kept (a book saved before its chapters
+    // were kept waits for them).
+    if let Some(saved) = found.as_ref().filter(|s| s.request.backend == Backend::Book) {
+        let kept = !saved.request.choices.is_empty();
+        if !kept {
+            crate::platform::show_toast("Reading the chapter list…");
+        }
+        let url = saved.request.url.clone();
+        downloader::runtime().spawn(async move {
+            let result = crate::novels::book(&url).await;
+            let _ = slint::invoke_from_event_loop(move || match result {
+                Ok(book) => {
+                    with_entries(|entries| {
+                        if let Some(entry) = entries.iter_mut().find(|e| e.id == id) {
+                            entry.saved.request.choices = book_choices(&book);
+                            if let Some(saved) = entry.saved.book.as_mut() {
+                                saved.title = book.title.clone();
+                            }
+                            save(entry);
+                        }
+                    });
+                    // Still open on it (closed, it's read again next time).
+                    let open = APP.with(|app| app.borrow().as_ref().and_then(|w| w.upgrade())).is_some_and(|ui| {
+                        let sheet = ui.global::<ChooseFiles>();
+                        let open = sheet.get_open() && sheet.get_id() == id as i32;
+                        if open {
+                            sheet.set_site_title(book.title.as_str().into());
+                            if sheet.get_book_title().is_empty() {
+                                sheet.set_book_title(book.title.as_str().into());
+                            }
+                        }
+                        open
+                    });
+                    if !kept || open {
+                        list_choices(id, kept);
+                    }
+                }
+                Err(e) if kept => log::warn!("couldn't refresh the chapters of download {id}: {e}"),
+                Err(e) => crate::platform::show_toast(&format!("Couldn't read the chapters: {e}")),
+            });
+        });
+        if !kept {
+            return;
+        }
+    }
+    list_choices(id, false);
+}
+
+/// Opens Choose files on a download's choices; `keep_ticks`: the sheet is
+/// open on it already, and its ticks stay as the user left them.
+fn list_choices(id: i64, keep_ticks: bool) {
+    let found = with_entries(|entries| entries.iter().find(|e| e.id == id).map(|e| e.saved.clone()));
+    let ticks: std::collections::HashMap<i32, bool> = if keep_ticks {
+        APP.with(|app| app.borrow().as_ref().and_then(|w| w.upgrade()))
+            .map(|ui| ui.global::<ChooseFiles>().get_files().iter().map(|f| (f.index, f.selected)).collect())
+            .unwrap_or_default()
+    } else {
+        Default::default()
+    };
     let Some(saved) = found.filter(|s| s.request.choices.len() > 1) else {
         return;
     };
-    let picked = saved.request.picked();
+    let mut picked = saved.request.picked();
+    // A book in parts is picked from as a whole: what any part has (or is
+    // getting) is ticked, and what a finished one has is saved.
+    let mut in_parts = Vec::new();
+    if book_in_parts(&saved) {
+        with_entries(|entries| {
+            for i in book_members(entries, id) {
+                let chapters = part_chapters(&entries[i].saved);
+                if entries[i].saved.state == State::Completed {
+                    in_parts.extend(chapters.iter().copied());
+                }
+                picked.extend(chapters);
+            }
+        });
+    }
     // What's saved already: a finished one's picks, and what an earlier
     // run had saved.
-    let done = |i: &usize| saved.had.contains(i) || (saved.state == State::Completed && picked.contains(i));
+    let done = |i: &usize| saved.had.contains(i) || in_parts.contains(i) || (saved.state == State::Completed && picked.contains(i));
     let rows: Vec<ChoiceFile> = saved
         .request
         .choices
@@ -1269,13 +1485,20 @@ fn show_choices(id: i64) {
         .map(|c| ChoiceFile {
             index: c.index as i32,
             path: c.path.clone().into(),
+            // A torrent's file under its folder's header: its name inside it.
+            name: c.path.strip_prefix(&format!("{}/", c.group)).filter(|_| !c.group.is_empty()).unwrap_or_default().into(),
             size: c.size.clone().into(),
             file_type: crate::links::file_type_for(&c.path, None),
-            selected: picked.contains(&c.index) || saved.had.contains(&c.index),
+            selected: !c.locked
+                && ticks.get(&(c.index as i32)).copied().unwrap_or(picked.contains(&c.index) || saved.had.contains(&c.index)),
             saved: done(&c.index),
+            group: c.group.clone().into(),
+            group_state: 0,
+            locked: c.locked,
         })
         .collect();
-    let selected = rows.iter().filter(|r| r.selected).count();
+    let groups = rows.iter().enumerate().filter(|(i, r)| !r.group.is_empty() && (*i == 0 || rows[i - 1].group != r.group)).count();
+    let model = ModelRc::new(VecModel::from(rows));
     APP.with(|app| {
         let Some(ui) = app.borrow().as_ref().and_then(|w| w.upgrade()) else {
             return;
@@ -1284,10 +1507,266 @@ fn show_choices(id: i64) {
         let sheet = ui.global::<ChooseFiles>();
         sheet.set_id(id as i32);
         sheet.set_title(saved.name.clone().into());
-        sheet.set_files(ModelRc::new(VecModel::from(rows)));
-        sheet.set_selected(selected as i32);
+        set_choice_counts(&sheet, &model);
+        sheet.set_files(model);
+        sheet.set_groups(groups as i32);
+        sheet.set_book(saved.request.backend == Backend::Book);
+        if !keep_ticks {
+            // A book's title: its own, else the site's (known once read).
+            let site_title = saved.book.as_ref().map(|b| b.title.clone()).unwrap_or_default();
+            let own = serde_json::from_str::<crate::novels::NovelOptions>(&saved.request.format).map(|o| o.title).unwrap_or_default();
+            sheet.set_site_title(site_title.as_str().into());
+            sheet.set_book_title(if own.is_empty() { site_title } else { own }.into());
+            sheet.set_title_open(false);
+            sheet.set_chapters_open(false);
+            sheet.set_parts(serde_json::from_str::<crate::novels::NovelOptions>(&saved.request.format).map_or(true, |o| o.parts));
+        }
         sheet.set_open(true);
     });
+}
+
+/// A book whose new chapters come as parts of their own.
+fn book_in_parts(saved: &Saved) -> bool {
+    saved.request.backend == Backend::Book
+        && serde_json::from_str::<crate::novels::NovelOptions>(&saved.request.format).is_ok_and(|o| o.parts)
+}
+
+/// The downloads of `id`'s book (its first file and its parts, finished or
+/// not), as indexes into `entries`; just `id`'s own before it's saved.
+fn book_members(entries: &[Entry], id: i64) -> Vec<usize> {
+    let Some(entry) = entries.iter().find(|e| e.id == id) else {
+        return Vec::new();
+    };
+    let same = |e: &Entry| match (&entry.saved.book, &e.saved.book) {
+        (Some(a), Some(b)) => a.site == b.site && a.id == b.id,
+        _ => e.id == id,
+    };
+    entries.iter().enumerate().filter(|(_, e)| e.id == id || same(e)).map(|(i, _)| i).collect()
+}
+
+/// The chapters a book's download has (or is getting): those picked one by
+/// one, else its range, up to the last it saved; locked ones left out.
+fn part_chapters(saved: &Saved) -> Vec<usize> {
+    let Ok(options) = serde_json::from_str::<crate::novels::NovelOptions>(&saved.request.format) else {
+        return Vec::new();
+    };
+    let locked = |n: &usize| saved.request.choices.iter().any(|c| c.index == *n && c.locked);
+    if !options.chapters.is_empty() {
+        return options.chapters.into_iter().filter(|n| !locked(n)).collect();
+    }
+    let end = match (options.to, &saved.book) {
+        (0, Some(book)) if saved.state == State::Completed => if book.last > 0 { book.last } else { book.chapters },
+        (0, _) => saved.request.choices.len(),
+        (to, _) => to,
+    };
+    (options.from.max(1)..=end).filter(|n| !locked(n)).collect()
+}
+
+/// Makes a book download's chapters a list (its range as it stands), so a
+/// part added after it doesn't make it take those too.
+fn freeze_chapters(saved: &mut Saved) {
+    let chapters = part_chapters(saved);
+    set_chapters(&mut saved.request, chapters);
+}
+
+/// A book download's chapters, exactly these.
+fn set_chapters(request: &mut DownloadRequest, chapters: Vec<usize>) {
+    if let Ok(mut options) = serde_json::from_str::<crate::novels::NovelOptions>(&request.format) {
+        options.from = 1;
+        options.to = 0;
+        options.chapters = chapters;
+        request.format = serde_json::to_string(&options).unwrap_or(request.format.clone());
+    }
+}
+
+/// A new part of a book: `chapters`, as part `part`, in a file named after
+/// the first part's (`stem`), like the book's other downloads.
+fn part_request(book: &DownloadRequest, chapters: Vec<usize>, part: usize, stem: &str) -> DownloadRequest {
+    let mut request = book.clone();
+    request.id = 0;
+    let (first, last) = (chapters.iter().min().copied().unwrap_or(0), chapters.iter().max().copied().unwrap_or(0));
+    if let Ok(options) = serde_json::from_str::<crate::novels::NovelOptions>(&book.format) {
+        request.format = serde_json::to_string(&crate::novels::NovelOptions { from: 1, to: 0, chapters, part, ..options }).unwrap_or_default();
+    }
+    let range = if first == last { format!("ch {first}") } else { format!("ch {first}–{last}") };
+    request.filename = format!("{stem} (part {part}, {range})");
+    book_folder(&mut request);
+    request
+}
+
+/// The name of a book's first file (without .epub), which its parts are
+/// named after.
+fn first_part_stem(entries: &[Entry], members: &[usize]) -> String {
+    let first = members
+        .iter()
+        .map(|&i| &entries[i])
+        .find(|e| serde_json::from_str::<crate::novels::NovelOptions>(&e.saved.request.format).is_ok_and(|o| o.part == 0))
+        .or_else(|| members.first().map(|&i| &entries[i]));
+    first.map(|e| e.saved.name.trim_end_matches(".epub").to_string()).unwrap_or_default()
+}
+
+/// Choose chapters on a book in parts (`id`: any of them): a part that lost
+/// chapters is made again without them, chapters no part has are saved as
+/// a new part, and the rest stay as they are (`retitled`: all made again,
+/// under the book's new title).
+fn choose_parts(id: i64, ticked: &[usize], retitled: bool) {
+    let ticked: std::collections::BTreeSet<usize> = ticked.iter().copied().collect();
+    let plan = with_entries(|entries| {
+        let members = book_members(entries, id);
+        let stem = first_part_stem(entries, &members);
+        let mut covered = std::collections::BTreeSet::new();
+        let mut remake = Vec::new();
+        let mut emptied = false;
+        for &i in &members {
+            let entry = &mut entries[i];
+            let have = part_chapters(&entry.saved);
+            covered.extend(have.iter().copied());
+            let keep: Vec<usize> = have.iter().copied().filter(|n| ticked.contains(n)).collect();
+            if keep.is_empty() && !have.is_empty() {
+                emptied = true;
+                continue;
+            }
+            if keep.len() == have.len() && !retitled {
+                continue;
+            }
+            set_chapters(&mut entry.saved.request, keep);
+            book_folder(&mut entry.saved.request);
+            if let Some(handle) = entry.handle.take() {
+                downloader::cancel(&handle);
+                entry.retired.push(handle);
+            }
+            save(entry);
+            remake.push(entry.saved.request.clone());
+        }
+        let opened = entries.iter().find(|e| e.id == id)?;
+        let locked = |n: &usize| opened.saved.request.choices.iter().any(|c| c.index == *n && c.locked);
+        let new: Vec<usize> = ticked.iter().copied().filter(|n| !covered.contains(n) && !locked(n)).collect();
+        let part = (!new.is_empty()).then(|| part_request(&opened.saved.request, new, members.len() + 1, &stem));
+        if part.is_some() {
+            // The others keep the chapters they have now.
+            for &i in &members {
+                freeze_chapters(&mut entries[i].saved);
+                save(&entries[i]);
+            }
+        }
+        Some((remake, part, emptied))
+    });
+    let Some((remake, part, emptied)) = plan else {
+        return;
+    };
+    if emptied {
+        crate::platform::show_toast("A part keeps at least one chapter: delete it from the list to drop it");
+    } else if remake.is_empty() && part.is_none() {
+        crate::platform::show_toast("Those are saved already");
+    }
+    for request in remake.iter().chain(part.as_ref()) {
+        if let Err(e) = crate::platform::start_download(request) {
+            crate::platform::show_toast(&e);
+        }
+    }
+}
+
+/// A book made again goes where books go now: in Books with "Category
+/// folders" on (it may have been saved before they were), else straight
+/// in its folder. Its old file goes once the new one's saved.
+fn book_folder(request: &mut DownloadRequest) {
+    request.settings.subfolder = if crate::preferences::link_option_defaults().category { "Books".to_string() } else { String::new() };
+}
+
+/// Gives a book `title` (the site's, `site_title`, is none of its own) for
+/// when it's made again, all its parts if it's in parts. Its files follow
+/// when named after the title. Whether anything changed.
+fn retitle_book(id: i64, title: &str, site_title: &str) -> bool {
+    with_entries(|entries| {
+        // A book in parts: all of them (they're one series, by its title).
+        let members = match entries.iter().find(|e| e.id == id) {
+            Some(e) if book_in_parts(&e.saved) => book_members(entries, id),
+            Some(_) => entries.iter().position(|e| e.id == id).into_iter().collect(),
+            None => Vec::new(),
+        };
+        let own = if title == site_title { String::new() } else { title.to_string() };
+        let mut changed = false;
+        for i in members {
+            let entry = &mut entries[i];
+            let request = &mut entry.saved.request;
+            let Ok(mut options) = serde_json::from_str::<crate::novels::NovelOptions>(&request.format) else {
+                continue;
+            };
+            if own == options.title {
+                continue;
+            }
+            let before = if options.title.is_empty() { site_title.to_string() } else { options.title.clone() };
+            let after = if own.is_empty() { site_title } else { &own };
+            // "<title> - <author>" (the preview's name before titles): the new
+            // title in it.
+            if !before.is_empty() && !after.is_empty() {
+                if let Some(rest) = request.filename.strip_prefix(before.as_str()) {
+                    request.filename = format!("{after}{rest}");
+                }
+            }
+            options.title = own.clone();
+            request.format = serde_json::to_string(&options).unwrap_or_default();
+            save(entry);
+            changed = true;
+        }
+        changed
+    })
+}
+
+/// Sets each Choose files row's group ticks (0 none, 1 some, 2 all), and
+/// returns how many rows are ticked and how many can be (not locked).
+fn choice_groups(files: &ModelRc<ChoiceFile>) -> (usize, usize) {
+    let mut counts: std::collections::HashMap<slint::SharedString, (usize, usize)> = std::collections::HashMap::new();
+    for file in files.iter().filter(|f| !f.locked) {
+        let entry = counts.entry(file.group.clone()).or_default();
+        entry.0 += 1;
+        entry.1 += file.selected as usize;
+    }
+    for row in 0..files.row_count() {
+        let Some(mut file) = files.row_data(row) else { continue };
+        let state = match counts.get(&file.group) {
+            Some((_, 0)) | None => 0,
+            Some((all, ticked)) if ticked == all => 2,
+            Some(_) => 1,
+        };
+        if file.group_state != state {
+            file.group_state = state;
+            files.set_row_data(row, file);
+        }
+    }
+    counts.values().fold((0, 0), |(ticked, all), (a, t)| (ticked + t, all + a))
+}
+
+/// Changes Choose files' ticks (`change` sees each row), then its counts.
+fn change_choices(change: impl Fn(&mut ChoiceFile)) {
+    let Some(ui) = APP.with(|app| app.borrow().as_ref().and_then(|w| w.upgrade())) else {
+        return;
+    };
+    let sheet = ui.global::<ChooseFiles>();
+    let files = sheet.get_files();
+    for row in 0..files.row_count() {
+        if let Some(mut file) = files.row_data(row) {
+            let before = file.selected;
+            change(&mut file);
+            // A locked chapter stays unticked.
+            file.selected &= !file.locked;
+            if file.selected != before {
+                files.set_row_data(row, file);
+            }
+        }
+    }
+    set_choice_counts(&sheet, &files);
+}
+
+/// Choose files' counts: ticked rows, rows that can be, and the first and
+/// last ticked (-1 for none).
+fn set_choice_counts(sheet: &ChooseFiles, files: &ModelRc<ChoiceFile>) {
+    let (selected, selectable) = choice_groups(files);
+    let ticked: Vec<i32> = files.iter().enumerate().filter(|(_, f)| f.selected).map(|(row, _)| row as i32).collect();
+    sheet.set_selected(selected as i32);
+    sheet.set_selectable(selectable as i32);
+    sheet.set_first(ticked.first().copied().unwrap_or(-1));
+    sheet.set_last(ticked.last().copied().unwrap_or(-1));
 }
 
 /// The download fetches the `ticked` choices from now on. Unfinished, it
@@ -1295,10 +1774,26 @@ fn show_choices(id: i64) {
 /// again for just the new ones, into the same folder; the ones it saved
 /// stay, ticked or not.
 fn choose_files(id: i64, ticked: &[usize]) {
+    if with_entries(|entries| entries.iter().find(|e| e.id == id).is_some_and(|e| book_in_parts(&e.saved))) {
+        return choose_parts(id, ticked, false);
+    }
     let mut moves = Vec::new();
     let restart = with_entries(|entries| {
         let entry = entries.iter_mut().find(|e| e.id == id)?;
         let finished = entry.saved.state == State::Completed;
+        // A book is one file: it's made again with the ticked chapters (the
+        // ones fetched before come from the cache), finished or not.
+        if entry.saved.request.backend == Backend::Book {
+            entry.saved.request.pick(ticked);
+            book_folder(&mut entry.saved.request);
+            let running = finished || matches!(entry.saved.state, State::Active | State::Queued);
+            if let Some(handle) = entry.handle.take() {
+                downloader::cancel(&handle);
+                entry.retired.push(handle);
+            }
+            save(entry);
+            return running.then(|| entry.saved.request.clone());
+        }
         let mut saved_before = entry.saved.had.clone();
         if finished {
             saved_before.extend(entry.saved.request.picked());
@@ -1381,6 +1876,28 @@ fn torrent_root(handle: &Handle, choices: &[downloader::Choice]) -> Option<std::
     })
 }
 
+/// A book's chapters as Choose files lists them, under their volumes.
+fn book_choices(book: &crate::novels::Book) -> Vec<downloader::Choice> {
+    let grouped = book.chapters.iter().any(|c| c.volume.is_some());
+    let mut volume = String::new();
+    book.chapters
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            if let Some(name) = &c.volume {
+                volume = name.clone();
+            }
+            downloader::Choice {
+                index: i + 1,
+                path: c.title.clone(),
+                size: String::new(),
+                group: if grouped { volume.clone() } else { String::new() },
+                locked: c.locked,
+            }
+        })
+        .collect()
+}
+
 /// Fetching more of a finished download's files: its staged copy goes into
 /// the folder it copied before, rather than one beside it.
 pub fn adding(id: i64) -> bool {
@@ -1403,6 +1920,38 @@ fn refresh_link(id: i64, url: &str) {
                 .unwrap_or_else(|| saved.name.clone());
         }
         Ok(())
+    });
+}
+
+/// A fresh link for a file caught in Eddy's browser: its page opens there
+/// again, and the download clicked there carries on from where it got to.
+fn browser_link(id: i64) {
+    let page = with_entries(|entries| entries.iter().find(|e| e.id == id).and_then(|e| e.saved.request.browser.as_ref()).map(|b| b.page.clone()));
+    let Some(page) = page.filter(|p| !p.is_empty()) else {
+        return;
+    };
+    downloader::runtime().spawn(async move {
+        let result = crate::browser::catch(&page).await;
+        let _ = slint::invoke_from_event_loop(move || match result {
+            Ok(caught) => {
+                restart_with(id, |saved, file| {
+                    saved.request.url = caught.url.clone();
+                    saved.request.browser = Some(caught.pass(&page));
+                    if !caught.user_agent.is_empty() {
+                        saved.request.settings.user_agent = caught.user_agent.clone();
+                    }
+                    if saved.request.filename.is_empty() {
+                        saved.request.filename = file
+                            .and_then(|f| f.file_name().map(|n| n.to_string_lossy().into_owned()))
+                            .unwrap_or_else(|| saved.name.clone());
+                    }
+                    Ok(())
+                });
+                pump();
+                refresh_now();
+            }
+            Err(e) => crate::platform::show_toast(&e),
+        });
     });
 }
 
@@ -1432,19 +1981,37 @@ pub fn install(ui: &DownloaderApp) {
         }
     });
     folder_files.on_choose_files(|id| show_choices(id as i64));
-    ui.global::<ChooseFiles>().on_select_all(|on| {
-        let Some(ui) = APP.with(|app| app.borrow().as_ref().and_then(|w| w.upgrade())) else {
+    let sheet = ui.global::<ChooseFiles>();
+    sheet.on_select_all(|on| change_choices(|file| file.selected = on));
+    sheet.on_select_group(|group, on| change_choices(|file| if file.group == group { file.selected = on }));
+    // This book's own choice of parts, kept at once.
+    sheet.on_parts_changed(|on| {
+        let Some(id) = APP.with(|app| app.borrow().as_ref().and_then(|w| w.upgrade())).map(|ui| ui.global::<ChooseFiles>().get_id() as i64) else {
             return;
         };
-        let sheet = ui.global::<ChooseFiles>();
-        let files = sheet.get_files();
-        for row in 0..files.row_count() {
-            if let Some(mut file) = files.row_data(row).filter(|f| f.selected != on) {
-                file.selected = on;
-                files.set_row_data(row, file);
+        with_entries(|entries| {
+            // The whole book: this download and its other parts.
+            let book = entries.iter().find(|e| e.id == id).and_then(|e| e.saved.book.clone());
+            let of_book = |e: &Entry| e.id == id || book.as_ref().is_some_and(|b| e.saved.book.as_ref().is_some_and(|s| s.site == b.site && s.id == b.id));
+            for entry in entries.iter_mut().filter(|e| of_book(e)) {
+                if let Ok(mut options) = serde_json::from_str::<crate::novels::NovelOptions>(&entry.saved.request.format) {
+                    options.parts = on;
+                    entry.saved.request.format = serde_json::to_string(&options).unwrap_or_default();
+                    save(entry);
+                }
             }
-        }
-        sheet.set_selected(if on { files.row_count() as i32 } else { 0 });
+        });
+    });
+    sheet.on_select_range(|first, last| {
+        let row = std::cell::Cell::new(0);
+        change_choices(|file| file.selected = (first..=last).contains(&row.replace(row.get() + 1)));
+    });
+    // `row` is the file's place in the list; rows are told apart by index.
+    sheet.on_toggle(|row| {
+        let Some(index) = APP.with(|app| app.borrow().as_ref().and_then(|w| w.upgrade())).and_then(|ui| ui.global::<ChooseFiles>().get_files().row_data(row as usize)).map(|f| f.index) else {
+            return;
+        };
+        change_choices(|file| if file.index == index { file.selected = !file.selected });
     });
     ui.global::<ChooseFiles>().on_apply(|id| {
         let Some(ui) = APP.with(|app| app.borrow().as_ref().and_then(|w| w.upgrade())) else {
@@ -1453,7 +2020,13 @@ pub fn install(ui: &DownloaderApp) {
         let sheet = ui.global::<ChooseFiles>();
         let ticked: Vec<usize> = sheet.get_files().iter().filter(|f| f.selected).map(|f| f.index as usize).collect();
         sheet.set_open(false);
-        choose_files(id as i64, &ticked);
+        let retitled = sheet.get_book() && retitle_book(id as i64, sheet.get_book_title().trim(), sheet.get_site_title().trim());
+        let in_parts = with_entries(|entries| entries.iter().find(|e| e.id == id as i64).is_some_and(|e| book_in_parts(&e.saved)));
+        if in_parts {
+            choose_parts(id as i64, &ticked, retitled);
+        } else {
+            choose_files(id as i64, &ticked);
+        }
         pump();
         refresh_now();
     });
@@ -1480,6 +2053,7 @@ pub fn install(ui: &DownloaderApp) {
             ItemAction::ChangeFolder => change_folder(id),
             ItemAction::RefreshLink => refresh_link(id, &value),
             ItemAction::ChooseFiles => show_choices(id),
+            ItemAction::BrowserLink => browser_link(id),
         }
         // A paused, cancelled or deleted one makes room.
         pump();
@@ -1500,7 +2074,7 @@ pub fn install(ui: &DownloaderApp) {
             let mut picked = Vec::new();
             for state in states {
                 let mut group: Vec<&Row> =
-                    rows.iter().filter(|r| r.item.state == *state && matches_filter(&r.item, options.filter)).collect();
+                    rows.iter().filter(|r| r.item.state == *state && matches_filter(&r.item, &options.filters)).collect();
                 group.sort_by(|a, b| {
                     let order = match options.sort {
                         SortKey::Name => a.item.filename.to_lowercase().cmp(&b.item.filename.to_lowercase()),
@@ -1547,10 +2121,14 @@ pub fn install(ui: &DownloaderApp) {
     let timer = slint::Timer::default();
     timer.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(1), refresh);
     std::mem::forget(timer);
+    // Started from a "Downloaded" notification.
+    open_pending();
 }
 
 thread_local! {
     static REFRESH: std::cell::RefCell<Option<Box<dyn Fn()>>> = const { std::cell::RefCell::new(None) };
+    /// Books being checked for new chapters.
+    static CHECKING: std::cell::RefCell<std::collections::HashSet<i64>> = std::cell::RefCell::new(std::collections::HashSet::new());
     /// The app, for the folder sheet `open` fills in.
     static APP: std::cell::RefCell<Option<slint::Weak<DownloaderApp>>> = const { std::cell::RefCell::new(None) };
 }
@@ -1580,6 +2158,12 @@ pub fn act(ids: &[i32], action: SelectionAction, delete_files: bool) {
         share(ids);
         return;
     }
+    if action == SelectionAction::Info {
+        if let [id] = ids {
+            show_info(*id as i64);
+        }
+        return;
+    }
     for &id in ids {
         let id = id as i64;
         match action {
@@ -1587,11 +2171,114 @@ pub fn act(ids: &[i32], action: SelectionAction, delete_files: bool) {
             SelectionAction::Resume => resume(id),
             SelectionAction::Cancel => cancel(id),
             SelectionAction::Delete => delete(id, delete_files),
-            SelectionAction::Share => {}
+            SelectionAction::Share | SelectionAction::Info => {}
         }
     }
     pump();
     refresh_now();
+}
+
+/// One download's details (Info, with one selected): what it is, where
+/// from and to, and when it was added, started and ended.
+fn show_info(id: i64) {
+    let Some(saved) = with_entries(|entries| entries.iter().find(|e| e.id == id).map(|e| e.saved.clone())) else {
+        return;
+    };
+    let row = |label: &str, value: String, copyable: bool| crate::InfoRow { label: label.into(), value: value.into(), copyable };
+    let request = &saved.request;
+    let mut rows = Vec::new();
+    let status = match saved.state {
+        State::Active => "Downloading",
+        State::Queued => "Queued",
+        State::Paused => "Paused",
+        State::Failed => "Failed",
+        State::Cancelled => "Cancelled",
+        State::Completed => "Downloaded",
+    };
+    let status = if saved.message.is_empty() { status.to_string() } else { format!("{status}: {}", saved.message) };
+    rows.push(row("Status", status, false));
+    let book = request.backend == Backend::Book && saved.state != State::Completed;
+    let size = match (saved.total, book) {
+        (0, _) => String::new(),
+        (n, true) => format!("{} of {n} chapters", saved.done),
+        (n, false) if saved.state == State::Completed => crate::links::format_size(n),
+        (n, false) => format!("{} of {}", crate::links::format_size(saved.done), crate::links::format_size(n)),
+    };
+    if !size.is_empty() {
+        rows.push(row("Size", size, false));
+    }
+    let how = match request.backend {
+        Backend::Torrent => "Torrent",
+        Backend::Media => "yt-dlp",
+        Backend::Book => "Book",
+        Backend::Drive => "Google Drive",
+        Backend::Mega => "MEGA",
+        Backend::Direct if request.browser.is_some() => "Direct, from Eddy's browser",
+        Backend::Direct | Backend::Auto => "Direct",
+    };
+    rows.push(row("Downloaded with", how.to_string(), false));
+    rows.push(row("Saved in", saved.path.clone().unwrap_or_else(|| saved.folder.clone()), true));
+    rows.push(row("Link", request.url.clone(), true));
+    if let Some(browser) = request.browser.as_ref().filter(|b| !b.page.is_empty()) {
+        rows.push(row("Page", browser.page.clone(), true));
+    }
+    rows.push(row("Added", long_date(saved.added), false));
+    if saved.started > 0 {
+        rows.push(row("Started", long_date(saved.started), false));
+    }
+    if saved.ended > 0 && !matches!(saved.state, State::Active | State::Queued) {
+        let label = match saved.state {
+            State::Completed => "Finished",
+            State::Failed => "Failed",
+            State::Cancelled => "Cancelled",
+            _ => "Stopped",
+        };
+        rows.push(row(label, long_date(saved.ended), false));
+        if saved.state == State::Completed && saved.started > 0 && saved.ended >= saved.started {
+            rows.push(row("Took", duration(saved.ended - saved.started), false));
+        }
+    }
+    let settings = &request.settings;
+    let speed = if settings.max_speed > 0 { format!("{}/s", crate::links::format_size(settings.max_speed)) } else { "No limit".to_string() };
+    let connections = if settings.connections > 0 { settings.connections } else { 16 };
+    if !matches!(request.backend, Backend::Book | Backend::Media) {
+        rows.push(row("Speed limit · connections", format!("{speed} · {connections}"), false));
+    }
+    APP.with(|app| {
+        let Some(ui) = app.borrow().as_ref().and_then(|w| w.upgrade()) else {
+            return;
+        };
+        let info = ui.global::<crate::DownloadInfo>();
+        info.set_title(saved.name.as_str().into());
+        info.set_rows(ModelRc::new(VecModel::from(rows)));
+        info.set_open(true);
+    });
+}
+
+/// "Oct 26, 2026, 14:05" in the phone's time zone.
+fn long_date(secs: u64) -> String {
+    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let local = secs as i64 + utc_offset(secs as i64);
+    let (y, m, d) = civil(local.div_euclid(86_400));
+    let minutes = local.rem_euclid(86_400) / 60;
+    format!("{} {d}, {y}, {:02}:{:02}", MONTHS[m as usize - 1], minutes / 60, minutes % 60)
+}
+
+/// The time zone's offset from UTC at `secs`, in seconds.
+#[cfg(unix)]
+fn utc_offset(secs: i64) -> i64 {
+    let time = secs as libc::time_t;
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    // SAFETY: both pointers are to live locals; localtime_r writes only `tm`.
+    if unsafe { libc::localtime_r(&time, &mut tm) }.is_null() {
+        return 0;
+    }
+    tm.tm_gmtoff as i64
+}
+
+#[cfg(not(unix))]
+fn utc_offset(_secs: i64) -> i64 {
+    0
 }
 
 /// Makes `model` hold `items`, changing rows in place where it can (so
@@ -1631,17 +2318,14 @@ fn save_list_options(tab: i32, options: &TabListOptions) {
         SortKey::Progress => 3,
         _ => 0,
     };
-    let filter = match options.filter {
-        FileFilter::Video => 1,
-        FileFilter::Audio => 2,
-        FileFilter::Image => 3,
-        FileFilter::Document => 4,
-        FileFilter::Archive => 5,
-        FileFilter::Folder => 6,
-        FileFilter::Other => 7,
-        _ => 0,
-    };
-    let value = format!("{sort},{},{filter}", options.ascending as u8);
+    // The types shown, as bits (1 << the old single filter's number), and
+    // a 4th part saying so: three parts were one filter.
+    let f = &options.filters;
+    let mask = [f.video, f.audio, f.image, f.document, f.archive, f.folder, f.other]
+        .iter()
+        .enumerate()
+        .fold(0u8, |mask, (i, on)| if *on { mask | 1 << (i + 1) } else { mask });
+    let value = format!("{sort},{},{mask},2", options.ascending as u8);
     if let Err(e) = crate::platform::save_pref(&list_options_key(tab), &value) {
         log::warn!("couldn't save the list options: {e}");
     }
@@ -1650,9 +2334,13 @@ fn save_list_options(tab: i32, options: &TabListOptions) {
 fn load_list_options(tab: i32) -> Option<TabListOptions> {
     let value = crate::platform::get_pref(&list_options_key(tab), "").ok()?;
     let parts: Vec<u8> = value.split(',').map(|p| p.trim().parse().ok()).collect::<Option<_>>()?;
-    let [sort, ascending, filter] = parts.as_slice() else {
-        return None;
+    // Four parts: a set of types; three (before): one type, or all.
+    let (sort, ascending, mask) = match parts.as_slice() {
+        [sort, ascending, mask, _] => (sort, ascending, *mask),
+        [sort, ascending, filter] => (sort, ascending, if *filter == 0 { 0 } else { 1u8.checked_shl(u32::from(*filter)).unwrap_or(0) }),
+        _ => return None,
     };
+    let on = |n: u8| mask & (1 << n) != 0;
     Some(TabListOptions {
         sort: match sort {
             1 => SortKey::Name,
@@ -1661,33 +2349,25 @@ fn load_list_options(tab: i32) -> Option<TabListOptions> {
             _ => SortKey::DateAdded,
         },
         ascending: *ascending == 1,
-        filter: match filter {
-            1 => FileFilter::Video,
-            2 => FileFilter::Audio,
-            3 => FileFilter::Image,
-            4 => FileFilter::Document,
-            5 => FileFilter::Archive,
-            6 => FileFilter::Folder,
-            7 => FileFilter::Other,
-            _ => FileFilter::All,
-        },
+        filters: FileFilters { video: on(1), audio: on(2), image: on(3), document: on(4), archive: on(5), folder: on(6), other: on(7) },
     })
 }
 
 /// Whether `item` is one the filter keeps.
-fn matches_filter(item: &DownloadItem, filter: FileFilter) -> bool {
-    match filter {
-        FileFilter::Video => item.file_type == FileType::Video,
-        FileFilter::Audio => item.file_type == FileType::Audio,
-        FileFilter::Image => item.file_type == FileType::Image,
-        FileFilter::Document => item.file_type == FileType::Document,
-        FileFilter::Archive => matches!(item.file_type, FileType::Archive | FileType::DiskImage),
+/// Whether a download is one of the types shown (any of them; none set
+/// shows everything).
+fn matches_filter(item: &DownloadItem, f: &FileFilters) -> bool {
+    let any = f.video || f.audio || f.image || f.document || f.archive || f.folder || f.other;
+    !any
+        || (f.video && item.file_type == FileType::Video)
+        || (f.audio && item.file_type == FileType::Audio)
+        || (f.image && item.file_type == FileType::Image)
+        || (f.document && item.file_type == FileType::Document)
+        || (f.archive && matches!(item.file_type, FileType::Archive | FileType::DiskImage))
         // A folder also shows under what's in it (a playlist under Video).
-        FileFilter::Folder => item.is_folder,
+        || (f.folder && item.is_folder)
         // Not a folder, and none of the types above.
-        FileFilter::Other => !item.is_folder && matches!(item.file_type, FileType::Other | FileType::Program),
-        _ => true,
-    }
+        || (f.other && !item.is_folder && matches!(item.file_type, FileType::Other | FileType::Program))
 }
 
 /// Every download as the lists show it, with live progress.
@@ -1714,7 +2394,11 @@ fn items() -> Vec<Row> {
                                 _ => State::Active,
                             };
                         }
-                        entry.saved.done = done;
+                        // Nothing counted yet (a book still reading its
+                        // page): what it had stays, not 0.
+                        if done > 0 || total > 0 {
+                            entry.saved.done = done;
+                        }
                         if total > 0 {
                             entry.saved.total = total;
                         }
@@ -1795,7 +2479,10 @@ fn view(entry: &Entry, state: State) -> DownloadItem {
         folder: saved.folder.clone().into(),
         part: entry.part.as_ref().filter(|_| running).map(|(p, _)| p.clone()).unwrap_or_default().into(),
         is_folder: if state == State::Completed { saved.is_folder } else { saved.several },
-        can_choose: saved.request.choices.len() > 1,
+        // A book's chapters can be read when it's opened, if they weren't kept.
+        can_choose: saved.request.choices.len() > 1 || saved.request.backend == Backend::Book,
+        checking: CHECKING.with(|c| c.borrow().contains(&entry.id)),
+        browser_page: saved.request.browser.as_ref().map(|b| b.page.clone()).unwrap_or_default().into(),
         options: options_of(&saved.request.settings),
     }
 }

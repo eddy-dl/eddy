@@ -1,3 +1,4 @@
+import { WrappedText } from "WrappedText.slint";
 import { ModernSwitch } from "Buttons.slint";
 import { ThemeSettings } from "../themes/theme.slint";
 import { SettingsCard, SettingsLayout } from "../settings/SettingsCard.slint";
@@ -42,18 +43,16 @@ export component SwitchRow inherits SettingsCard {
             spacing: 2px;
             horizontal-stretch: 1;
 
-            Text {
+            WrappedText {
                 text: root.title;
                 font-size: root.compact ? 15px : 18px;
                 font-weight: root.compact ? 500 : 600;
                 color: root.text_color;
-                wrap: word-wrap;
             }
-            if root.subtitle != "": Text {
+            if root.subtitle != "": WrappedText {
                 text: root.subtitle;
                 font-size: root.compact ? 12px : 13px;
                 color: root.text_color.transparentize(40%);
-                wrap: word-wrap;
             }
         }
 

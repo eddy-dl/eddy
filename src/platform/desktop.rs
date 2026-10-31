@@ -130,6 +130,22 @@ pub fn request_all_files_access() {}
 /// Desktop downloads are plain files (no documents).
 pub fn delete_document(_uri: &str) {}
 
+/// No browser check on desktop: a site behind Cloudflare's needs the
+/// user's cookies (cookies.txt).
+pub fn open_site_check(_url: &str, _result: &str) -> bool {
+    false
+}
+
+/// No browser to catch a page's download in on desktop (yet).
+pub fn open_browser(_page: &str, _result: &str) -> bool {
+    false
+}
+
+/// No background browser on desktop either.
+pub fn fetch_page(_url: &str, _result: &str) -> bool {
+    false
+}
+
 /// Opens a web page in the browser.
 pub fn open_url(url: &str) {
     if let Err(e) = webbrowser::open(url) {

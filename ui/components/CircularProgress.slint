@@ -1,4 +1,5 @@
 import { ThemeSettings } from "../themes/theme.slint";
+import { PathNumber } from "../globals/PathNumber.slint";
 
 // MD3's indeterminate circular progress indicator: an arc in the accent
 // with round ends, turning while it grows to most of a circle and shrinks
@@ -42,6 +43,7 @@ export component CircularProgress {
         stroke-width: root.thickness;
         stroke-line-cap: round;
         fill: transparent;
-        commands: "M " + root.x1 + " " + root.y1 + " A " + root.radius + " " + root.radius + " 0 " + (root.sweep > 180 ? "1" : "0") + " 1 " + root.x2 + " " + root.y2;
+        commands: "M " + PathNumber.of(root.x1) + " " + PathNumber.of(root.y1) + " A " + PathNumber.of(root.radius) + " " + PathNumber.of(root.radius)
+            + " 0 " + (root.sweep > 180 ? "1" : "0") + " 1 " + PathNumber.of(root.x2) + " " + PathNumber.of(root.y2);
     }
 }

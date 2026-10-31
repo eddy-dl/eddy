@@ -1,3 +1,4 @@
+import { WrappedText } from "../../components/WrappedText.slint";
 import { Note } from "../../components/Note.slint";
 import { TextArea } from "../../components/TextArea.slint";
 import { ActionButton } from "../../components/Buttons.slint";
@@ -38,7 +39,7 @@ export component CookiesSettings inherits Rectangle {
         spacing: 12px;
 
         // What's saved, or why the last try was refused.
-        Text {
+        WrappedText {
             text: AppSettings.cookies_error == 1 ? @tr("Couldn't read that file")
                 : AppSettings.cookies_error == 2 ? @tr("No cookies in that: paste a cookies.txt or a cookie extension's JSON export")
                 : AppSettings.cookies_error == 3 ? @tr("Couldn't save the cookies")
@@ -48,7 +49,6 @@ export component CookiesSettings inherits Rectangle {
             color: AppSettings.cookies_error != 0 ? #e5534b
                 : AppSettings.cookies_count > 0 ? ThemeSettings.primary_accent
                 : root.text_color.transparentize(40%);
-            wrap: word-wrap;
         }
 
         editor := TextArea {

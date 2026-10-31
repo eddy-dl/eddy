@@ -2,7 +2,7 @@ import { ThemeSettings } from "../themes/theme.slint";
 import { ActionButton, ModernSwitch } from "Buttons.slint";
 import { HoldTouchArea, HintBubble } from "HoldHint.slint";
 
-export enum SelectionAction { Pause, Resume, Cancel, Delete, Share }
+export enum SelectionAction { Pause, Resume, Cancel, Delete, Share, Info }
 
 // MD3 standard icon button: a 24 Material Symbols (rounded) icon in
 // on-surface-variant, a 40 circle
@@ -61,6 +61,8 @@ export component SelectionActionBar inherits HorizontalLayout {
     in property <int> running; // active or queued
     in property <int> paused;
     in property <int> ended; // failed or cancelled
+    // How many are selected: one has its details (Info).
+    in property <int> count;
 
     callback action(SelectionAction);
 
@@ -71,6 +73,11 @@ export component SelectionActionBar inherits HorizontalLayout {
     horizontal-stretch: 0;
     alignment: end;
 
+    if root.count == 1: ActionIcon {
+        label: @tr("Info");
+        icon: @image-url("../icons/rounded/info.svg");
+        clicked => { root.action(SelectionAction.Info); }
+    }
     if root.tab == 0 && root.running > 0: ActionIcon {
         label: @tr("Pause");
         icon: @image-url("../icons/rounded/pause.svg");

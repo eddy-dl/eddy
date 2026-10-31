@@ -13,7 +13,7 @@ import { StandardListView } from "std-widgets.slint";
 import { AnimatedPopup } from "../../components/AnimatedPopup.slint";
 import { RadioRow } from "../../components/RadioRow.slint";
 import { SwitchRow } from "../../components/SwitchRow.slint";
-import { SettingsCard, SettingsLayout } from "../SettingsCard.slint";
+import { SectionHeader, SettingsCard, SettingsLayout } from "../SettingsCard.slint";
 
 // Helper component for Vertical Accent Selection Rows
 component AccentRow inherits Rectangle {
@@ -152,30 +152,6 @@ component SystemAccentRow inherits Rectangle {
             }
         }
     ]
-}
-
-// Small accent label that groups the rows below it. Indented to line up
-// with the row titles, with extra room above to separate the groups.
-component SectionHeader inherits VerticalLayout {
-    in property <string> text;
-    // The page's first: nothing above it to keep apart from.
-    in property <bool> first: false;
-
-    padding-left: SettingsLayout.inset;
-    padding-top: root.first ? 0px : 24px;
-    // Cards sit apart from their header.
-    padding-bottom: SettingsLayout.cards ? 8px : 0px;
-
-    Text {
-        text: root.text;
-        font-size: 13px;
-        font-weight: 700;
-        color: ThemeSettings.primary_accent;
-        animate color {
-            duration: 300ms;
-            easing: ease-in-out;
-        }
-    }
 }
 
 export component AppearanceSettings inherits Rectangle {

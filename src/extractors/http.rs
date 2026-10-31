@@ -66,6 +66,11 @@ impl CookieJar {
         self.0.get(name).map(String::as_str)
     }
 
+    /// The cookies' names (for logs: never their values).
+    pub fn names(&self) -> Vec<&str> {
+        self.0.keys().map(String::as_str).collect()
+    }
+
     /// Adds `other`'s cookies, replacing ones of the same name.
     pub fn merge(&mut self, other: &CookieJar) {
         for (name, value) in &other.0 {

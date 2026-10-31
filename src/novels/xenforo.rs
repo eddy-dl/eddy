@@ -1,5 +1,7 @@
-//! Sufficient Velocity (forums.sufficientvelocity.com), a XenForo forum where
-//! stories are threads and their chapters are threadmarked posts. The
+//! Sufficient Velocity (forums.sufficientvelocity.com) and SpaceBattles
+//! (forums.spacebattles.com), XenForo forums with the same threadmarks
+//! add-on, where stories are threads and their chapters are threadmarked
+//! posts. The
 //! threadmarks page lists them (`.structItem--threadmark`, 200 a page when
 //! asked); the thread's reader mode shows them in order, ten a page, so a
 //! chapter is its post (`article[data-content="post-<id>"]`'s
@@ -12,25 +14,30 @@ use scraper::{Html, Selector};
 use std::sync::{LazyLock, Mutex};
 
 static THREAD_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"^https?://forums\.sufficientvelocity\.com/threads/(?:[^/]*\.)?(\d+)").unwrap()
+    regex::Regex::new(r"^https?://forums\.(sufficientvelocity|spacebattles)\.com/threads/(?:[^/]*\.)?(\d+)").unwrap()
 });
 
 const PER_PAGE: usize = 200;
 /// Reader mode's posts per page.
 const READER_PAGE: usize = 10;
 
-/// A story thread (or a page or post of one).
-pub fn is_book_url(url: &str) -> bool {
-    THREAD_RE.is_match(url.trim())
+/// The forum a story thread (or a page or post of one) is on.
+pub fn site_for(url: &str) -> Option<Site> {
+    match &THREAD_RE.captures(url.trim())?[1] {
+        "spacebattles" => Some(Site::SpaceBattles),
+        _ => Some(Site::SufficientVelocity),
+    }
 }
 
-fn thread_url(id: &str) -> String {
-    format!("https://forums.sufficientvelocity.com/threads/{id}")
+fn thread_url(site: Site, id: &str) -> String {
+    let forum = if site == Site::SpaceBattles { "spacebattles" } else { "sufficientvelocity" };
+    format!("https://forums.{forum}.com/threads/{id}")
 }
 
 pub async fn book(url: &str) -> Result<Book, String> {
-    let id = THREAD_RE.captures(url.trim()).map(|c| c[1].to_string()).ok_or("Not a Sufficient Velocity thread link")?;
-    let base = thread_url(&id);
+    let site = site_for(url).ok_or("Not a forum thread link")?;
+    let id = THREAD_RE.captures(url.trim()).map(|c| c[2].to_string()).ok_or("Not a forum thread link")?;
+    let base = thread_url(site, &id);
     // Threadmarks, a page at a time until one isn't full.
     let mut pages = Vec::new();
     for page in 1.. {
@@ -41,11 +48,11 @@ pub async fn book(url: &str) -> Result<Book, String> {
             break;
         }
     }
-    parse_book(&id, &pages)
+    parse_book(site, &id, &pages)
 }
 
 /// The story from its threadmarks pages (for tests).
-pub fn parse_book(id: &str, pages: &[String]) -> Result<Book, String> {
+pub fn parse_book(site: Site, id: &str, pages: &[String]) -> Result<Book, String> {
     let first = Html::parse_document(pages.first().ok_or("No threadmarks")?);
     let select = |css: &str| Selector::parse(css).unwrap();
     let title = first
@@ -65,7 +72,7 @@ pub fn parse_book(id: &str, pages: &[String]) -> Result<Book, String> {
             .filter(|s| !s.is_empty())
     };
 
-    let base = thread_url(id);
+    let base = thread_url(site, id);
     let mut chapters = Vec::new();
     let mut author = None;
     for page in pages {
@@ -94,7 +101,7 @@ pub fn parse_book(id: &str, pages: &[String]) -> Result<Book, String> {
         return Err("This thread has no threadmarked chapters".to_string());
     }
     Ok(Book {
-        site: Site::SufficientVelocity,
+        site,
         id: id.to_string(),
         url: base,
         title,
@@ -145,9 +152,12 @@ mod tests {
 
     #[test]
     fn links() {
-        assert!(is_book_url("https://forums.sufficientvelocity.com/threads/brocktons-celestial-forge-worm-jumpchain.70036/"));
-        assert!(is_book_url("https://forums.sufficientvelocity.com/threads/brocktons-celestial-forge-worm-jumpchain.70036/threadmarks"));
-        assert!(!is_book_url("https://forums.sufficientvelocity.com/forums/user-fiction.2/"));
+        let sv = Some(Site::SufficientVelocity);
+        assert_eq!(site_for("https://forums.sufficientvelocity.com/threads/brocktons-celestial-forge-worm-jumpchain.70036/"), sv);
+        assert_eq!(site_for("https://forums.sufficientvelocity.com/threads/brocktons-celestial-forge-worm-jumpchain.70036/threadmarks"), sv);
+        assert_eq!(site_for("https://forums.spacebattles.com/threads/worm-ward-quest.1004466/page-3"), Some(Site::SpaceBattles));
+        assert_eq!(site_for("https://forums.sufficientvelocity.com/forums/user-fiction.2/"), None);
+        assert_eq!(site_for("https://forums.spacebattles.com/forums/creative-writing.18/"), None);
     }
 
     #[test]
@@ -159,12 +169,15 @@ mod tests {
             r#"<h1 class="p-title-value"><span class="label">Prefix</span> A Story</h1><meta property="og:description" content="About it">{}"#,
             (1..=12).map(row).collect::<String>()
         );
-        let book = parse_book("70036", &[page]).unwrap();
+        let book = parse_book(Site::SufficientVelocity, "70036", &[page.clone()]).unwrap();
         assert_eq!(book.title, "A Story");
         assert_eq!(book.author.as_deref(), Some("Writer"));
         assert_eq!(book.chapters.len(), 12);
         assert_eq!(book.chapters[0].url, "https://forums.sufficientvelocity.com/threads/70036/reader/page-1#post-1");
         assert_eq!(book.chapters[11].url, "https://forums.sufficientvelocity.com/threads/70036/reader/page-2#post-12");
+        let book = parse_book(Site::SpaceBattles, "70036", &[page]).unwrap();
+        assert_eq!(book.site, Site::SpaceBattles);
+        assert_eq!(book.chapters[0].url, "https://forums.spacebattles.com/threads/70036/reader/page-1#post-1");
         let reader = r#"<article data-content="post-7"><div class="message-body"><div class="bbWrapper">Seven</div></div></article>"#;
         assert_eq!(parse_chapter(reader, "7").unwrap().body, "Seven");
     }

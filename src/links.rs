@@ -30,6 +30,9 @@ thread_local! {
     static DRIVE: RefCell<HashMap<i32, Vec<extractors::gdrive::Entry>>> = RefCell::new(HashMap::new());
     // MEGA folders' files (with their keys), by link id, in the preview's order.
     static MEGA: RefCell<HashMap<i32, Vec<extractors::mega::Entry>>> = RefCell::new(HashMap::new());
+    // Files caught in the browser for a pending link (by its id): the file's
+    // link, what came with it, and the browser's user agent.
+    static CAUGHT: RefCell<HashMap<i32, (String, crate::downloader::BrowserPass, String)>> = RefCell::new(HashMap::new());
     // Run when the last pending link is dealt with (the share popup closes).
     static ON_EMPTY: RefCell<Option<Box<dyn Fn()>>> = const { RefCell::new(None) };
 }
@@ -69,6 +72,27 @@ where
         start_link(id, backend, format.to_string(), filename.to_string(), &options);
     });
 
+    // A page whose file comes from its download button: opened in Eddy's
+    // browser, and the download clicked there starts (named `filename`, or
+    // as the site names it).
+    links.on_open_browser(|id, filename, options| {
+        let Some(page) = PENDING.with(|m| m.iter().find(|l| l.id == id).map(|l| l.url.to_string())) else {
+            return;
+        };
+        crate::downloader::runtime().spawn(async move {
+            let result = crate::browser::catch(&page).await;
+            let _ = slint::invoke_from_event_loop(move || match result {
+                Ok(caught) => {
+                    log::info!("caught {} in the browser on {page}", caught.url);
+                    let name = if filename.trim().is_empty() { caught.filename.clone() } else { filename.to_string() };
+                    CAUGHT.with(|c| c.borrow_mut().insert(id, (caught.url.clone(), caught.pass(&page), caught.user_agent.clone())));
+                    start_link(id, Backend::Direct, String::new(), name, &options);
+                }
+                Err(e) => crate::platform::show_toast(&e),
+            });
+        });
+    });
+
     links.on_pick_folder(|id| {
         crate::platform::pick_download_folder(move |raw, display| {
             let (raw, display) = (raw.clone(), display.clone());
@@ -87,14 +111,29 @@ where
         });
     });
 
+    // A book's locked chapters stay unpicked.
     links.on_toggle_file(|id, index| {
         update_files(id, |file| {
-            if file.index == index {
+            if file.index == index && file.kind != 4 {
                 file.selected = !file.selected;
             }
         })
     });
-    links.on_select_all_files(|id, selected| update_files(id, |file| file.selected = selected));
+    links.on_select_all_files(|id, selected| update_files(id, |file| file.selected = selected && file.kind != 4));
+    links.on_select_range(|id, first, last| {
+        let row = std::cell::Cell::new(0);
+        update_files(id, |file| {
+            let at = row.replace(row.get() + 1);
+            file.selected = (first..=last).contains(&at) && file.kind != 4;
+        })
+    });
+    links.on_select_group(|id, group, selected| {
+        update_files(id, |file| {
+            if file.group == group {
+                file.selected = selected && file.kind != 4;
+            }
+        })
+    });
     // A video item as audio or not (images and audio stay as they are).
     links.on_toggle_audio(|id, index| {
         update_files(id, |file| {
@@ -331,6 +370,8 @@ fn push_torrent(url: &str, meta: &TorrentMeta, name: &str) -> i32 {
             backends: backends_model(&[LinkBackend::Torrent]),
             formats: ModelRc::new(VecModel::default()),
             files_selected: files.len() as i32,
+            files_first: 0,
+            files_last: files.len() as i32 - 1,
             files: files_model(&files, &[]),
             folder: usual_folder_display().into(),
             folder_uri: SharedString::new(),
@@ -408,7 +449,23 @@ fn start_link(id: i32, backend: Backend, format: String, filename: String, optio
     // options.
     let format = match backend {
         Backend::Media => serde_json::to_string(&media_request(id, &link, &format)).unwrap_or_default(),
-        Backend::Book => serde_json::to_string(&book_options(&format)).unwrap_or_default(),
+        Backend::Book => {
+            let mut options = book_options(&format);
+            // The site's title is no title of its own.
+            if options.title.trim() == link.book_title.trim() {
+                options.title.clear();
+            }
+            // Some chapters picked: those; all of them: the whole range
+            // (so an update takes the new ones too).
+            if link.files.iter().any(|f| f.kind != 4 && !f.selected) {
+                options.chapters = link.files.iter().filter(|f| f.selected).map(|f| f.index as usize).collect();
+                if options.chapters.is_empty() {
+                    crate::platform::show_toast("Pick at least one chapter to save");
+                    return;
+                }
+            }
+            serde_json::to_string(&options).unwrap_or_default()
+        }
         // A Drive folder's picked files.
         Backend::Drive => match DRIVE.with(|d| d.borrow().get(&id).cloned()) {
             Some(entries) => {
@@ -447,27 +504,40 @@ fn start_link(id: i32, backend: Backend, format: String, filename: String, optio
     };
     // A torrent's files and a yt-dlp playlist's items, to pick again later.
     let ytdlp = MEDIA.with(|m| m.borrow().get(&id).is_some_and(|m| m.service == extractors::Service::YtDlp));
-    let choices = if link.files.row_count() > 1 && (backend == Backend::Torrent || (backend == Backend::Media && ytdlp)) {
+    let choices = if link.files.row_count() > 1 && (matches!(backend, Backend::Torrent | Backend::Book) || (backend == Backend::Media && ytdlp)) {
         link.files
             .iter()
-            .map(|f| crate::downloader::Choice { index: f.index as usize, path: f.path.to_string(), size: f.size.to_string() })
+            .map(|f| crate::downloader::Choice {
+                index: f.index as usize,
+                path: f.path.to_string(),
+                size: f.size.to_string(),
+                group: f.group.to_string(),
+                locked: f.kind == 4,
+            })
             .collect()
     } else {
         Vec::new()
     };
+    // Caught in the browser: that file, as the browser asked for it.
+    let caught = CAUGHT.with(|c| c.borrow_mut().remove(&id));
+    let mut settings = download_settings(options, &link, audio);
+    if let Some((_, _, user_agent)) = caught.as_ref().filter(|c| !c.2.is_empty()) {
+        settings.user_agent = user_agent.clone();
+    }
     let request = DownloadRequest {
-        url: link.url.to_string(),
+        url: caught.as_ref().map_or_else(|| link.url.to_string(), |c| c.0.clone()),
         backend,
         format,
         filename,
         select_files,
         folder: link.folder_uri.to_string(),
-        settings: download_settings(options, &link, audio),
+        settings,
         // A book saved before is updated in place of a second copy.
         id: if backend == Backend::Book { link.book_saved_id as i64 } else { 0 },
         resume: false,
         unpicked,
         choices,
+        browser: caught.map(|c| c.1),
     };
     match crate::platform::start_download(&request) {
         Ok(()) => {
@@ -489,17 +559,26 @@ fn download_settings(options: &crate::LinkOptions, link: &PendingLink, audio: bo
             2 => options.ua_custom.trim().to_string(),
             _ => String::new(),
         },
-        subfolder: match options.category {
-            false => String::new(),
-            true if link.backends.row_data(0) == Some(LinkBackend::Book) => "Books".to_string(),
-            true if audio => category_folder(FileType::Audio).to_string(),
-            // A Drive or MEGA folder's files aren't a torrent's.
-            true if link.file_type == FileType::Folder && matches!(link.backends.row_data(0), Some(LinkBackend::Drive | LinkBackend::Mega)) => {
-                category_folder(FileType::Other).to_string()
-            }
-            true => category_folder(link.file_type).to_string(),
-        },
+        subfolder: if options.category { link_category(link, audio).to_string() } else { String::new() },
         replace_existing: crate::preferences::replace_existing(),
+    }
+}
+
+/// The category folder a link's download goes in (with "Category folders"
+/// on); `audio`: saved as its audio.
+fn link_category(link: &PendingLink, audio: bool) -> &'static str {
+    match link.backends.row_data(0) {
+        Some(LinkBackend::Book) => "Books",
+        _ if audio => category_folder(FileType::Audio),
+        // yt-dlp's: what it found (the link itself is just a page).
+        Some(LinkBackend::Media) => match link.media_kind {
+            2 => category_folder(FileType::Audio),
+            3 => category_folder(FileType::Image),
+            _ => category_folder(FileType::Video),
+        },
+        // A Drive or MEGA folder's files aren't a torrent's.
+        Some(LinkBackend::Drive | LinkBackend::Mega) if link.file_type == FileType::Folder => category_folder(FileType::Other),
+        _ => category_folder(link.file_type),
     }
 }
 
@@ -531,7 +610,8 @@ fn update_files(id: i32, change: impl Fn(&mut TorrentFile)) {
             change(&mut file);
             link.files.set_row_data(row, file);
         }
-        link.files_selected = link.files.iter().filter(|f| f.selected).count() as i32;
+        set_group_states(&link.files);
+        count_selected(&mut link);
         link.files_audio = link.files.iter().filter(|f| f.selected && f.as_audio).count() as i32;
         // Media items: each one's size at its quality, and the total.
         let sized = MEDIA.with(|media| {
@@ -731,6 +811,8 @@ fn initial_link(id: i32, url: &str) -> PendingLink {
         formats: ModelRc::new(VecModel::default()),
         files: ModelRc::new(VecModel::default()),
         files_selected: 0,
+        files_first: -1,
+        files_last: -1,
         folder: usual_folder_display().into(),
         folder_uri: SharedString::new(),
         service: SharedString::new(),
@@ -784,6 +866,11 @@ struct BookMeta {
     chapters: usize,
     locked: usize,
     cover: Option<PathBuf>,
+    /// Each chapter's title, the volume it starts (if any), and whether
+    /// it's locked.
+    rows: Vec<(String, Option<String>, bool)>,
+    /// Its title on the site.
+    title: String,
 }
 
 /// A media link's extras: who found it, what it is, and what's needed to
@@ -854,8 +941,8 @@ fn apply_probe(id: i32, result: Result<Probe, String>) {
                         })
                         .collect::<Vec<_>>(),
                 ));
-                link.files_selected = probe.files.len() as i32;
                 link.files = files_model(&probe.files, &probe.items);
+                count_selected(&mut link);
                 link.files_audio = 0;
                 if let Some(entries) = probe.drive {
                     DRIVE.with(|d| d.borrow_mut().insert(id, entries));
@@ -891,10 +978,15 @@ fn apply_probe(id: i32, result: Result<Probe, String>) {
                     link.service = book.site.label().into();
                     link.book_chapters = book.chapters as i32;
                     link.book_locked = book.locked as i32;
+                    link.book_title = book.title.as_str().into();
+                    // Its chapters, picked like a torrent's files.
+                    link.files = chapters_model(&book.rows);
+                    count_selected(&mut link);
                     link.book_notes = defaults.author_notes;
                     link.book_images = defaults.images;
                     link.book_note_images = defaults.author_note_images;
                     link.book_small_images = defaults.small_images;
+                    link.book_parts = defaults.parts;
                     if let Some(thumb) = book.cover.as_deref().and_then(|p| slint::Image::load_from_path(p).ok()) {
                         link.thumbnail = thumb;
                     }
@@ -905,6 +997,8 @@ fn apply_probe(id: i32, result: Result<Probe, String>) {
                         link.filename = name.into();
                     }
                 }
+                // Once it's known what it is (yt-dlp's kind included).
+                link.category = link_category(&link, false).into();
             }
             Err(error) => {
                 log::warn!("couldn't check {}: {error}", link.url);
@@ -994,7 +1088,9 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
         let locked = book.chapters.iter().filter(|c| c.locked).count();
         // The largest cover: tapping the banner shows all of it.
         let cover = match book.covers.first() {
-            Some(cover) => fetch_thumbnail(cover).await,
+            // As the book's pages are fetched: a site behind a bot check
+            // wants the check's pass with it.
+            Some(cover) => crate::novels::fetch::bytes(cover, None).await.ok().and_then(|(data, _)| save_thumbnail(cover, &data)),
             None => None,
         };
         return Ok(Probe {
@@ -1006,7 +1102,15 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
             files: Vec::new(),
             items: Vec::new(),
             media: None,
-            book: Some(BookMeta { site: book.site, id: book.id.clone(), chapters: book.chapters.len(), locked, cover }),
+            book: Some(BookMeta {
+                site: book.site,
+                id: book.id.clone(),
+                chapters: book.chapters.len(),
+                locked,
+                cover,
+                rows: book.chapters.iter().map(|c| (c.title.clone(), c.volume.clone(), c.locked)).collect(),
+                title: book.title.clone(),
+            }),
             drive: None,
             mega: None,
         });
@@ -1319,15 +1423,23 @@ fn torrent_files(meta: &TorrentMeta) -> Vec<(usize, String, u64)> {
 /// The preview's list of a download's files; `items` (if any) says what
 /// each media item is and holds its thumbnail.
 fn files_model(files: &[(usize, String, u64)], items: &[ItemMeta]) -> ModelRc<TorrentFile> {
-    ModelRc::new(VecModel::from(
+    // A torrent's (or a folder's) files in subfolders: each under its
+    // folder's header. Not when they're all in the same one.
+    let folder = |path: &str| path.rsplit_once('/').map(|(dir, _)| dir.to_string()).unwrap_or_default();
+    let grouped = items.is_empty() && files.windows(2).any(|w| folder(&w[0].1) != folder(&w[1].1));
+    let model = ModelRc::new(VecModel::from(
         files
             .iter()
             .enumerate()
             .map(|(i, (index, path, length))| {
                 let item = items.get(i);
+                let group = if grouped { folder(path) } else { String::new() };
                 TorrentFile {
                     index: *index as i32,
                     path: path.into(),
+                    name: if group.is_empty() { SharedString::new() } else { path[group.len() + 1..].into() },
+                    group: group.into(),
+                    group_state: 0,
                     size: if *length > 0 { format_size(*length).into() } else { SharedString::new() },
                     selected: true,
                     kind: item.map(|m| m.kind).unwrap_or(0),
@@ -1342,7 +1454,69 @@ fn files_model(files: &[(usize, String, u64)], items: &[ItemMeta]) -> ModelRc<To
                 }
             })
             .collect::<Vec<_>>(),
-    ))
+    ));
+    set_group_states(&model);
+    model
+}
+
+/// A book's chapters as the preview lists them, under their volumes (when
+/// it has any). Locked chapters are listed but can't be picked.
+fn chapters_model(chapters: &[(String, Option<String>, bool)]) -> ModelRc<TorrentFile> {
+    let grouped = chapters.iter().any(|(_, volume, _)| volume.is_some());
+    let mut volume = String::new();
+    let model = ModelRc::new(VecModel::from(
+        chapters
+            .iter()
+            .enumerate()
+            .map(|(i, (title, starts, locked))| {
+                if let Some(name) = starts {
+                    volume = name.clone();
+                }
+                TorrentFile {
+                    index: i as i32 + 1,
+                    path: title.into(),
+                    group: if grouped { volume.as_str().into() } else { SharedString::new() },
+                    selected: !locked,
+                    kind: if *locked { 4 } else { 0 },
+                    ..Default::default()
+                }
+            })
+            .collect::<Vec<_>>(),
+    ));
+    set_group_states(&model);
+    model
+}
+
+/// Each row's group ticks (0 none, 1 some, 2 all), from the rows that can be
+/// picked (a locked chapter can't).
+/// How many of a link's files are selected, and the rows of the first and
+/// last of them.
+fn count_selected(link: &mut PendingLink) {
+    let rows: Vec<i32> = link.files.iter().enumerate().filter(|(_, f)| f.selected).map(|(row, _)| row as i32).collect();
+    link.files_selected = rows.len() as i32;
+    link.files_first = rows.first().copied().unwrap_or(-1);
+    link.files_last = rows.last().copied().unwrap_or(-1);
+}
+
+fn set_group_states(files: &ModelRc<TorrentFile>) {
+    let mut counts: HashMap<SharedString, (usize, usize)> = HashMap::new();
+    for file in files.iter().filter(|f| !f.group.is_empty() && f.kind != 4) {
+        let entry = counts.entry(file.group.clone()).or_default();
+        entry.0 += 1;
+        entry.1 += file.selected as usize;
+    }
+    for row in 0..files.row_count() {
+        let Some(mut file) = files.row_data(row) else { continue };
+        let state = match counts.get(&file.group) {
+            Some((_, 0)) | None => 0,
+            Some((all, ticked)) if ticked == all => 2,
+            Some(_) => 1,
+        };
+        if file.group_state != state {
+            file.group_state = state;
+            files.set_row_data(row, file);
+        }
+    }
 }
 
 /// How long a direct link's aria2 check may take before giving up (magnets
@@ -1659,12 +1833,17 @@ async fn item_metas(items: &[extractors::MediaItem]) -> Vec<ItemMeta> {
 /// Saves a thumbnail in the app's cache folder for the preview; None if it
 /// couldn't be fetched (or isn't a JPEG / PNG, which is what the UI shows).
 async fn fetch_thumbnail(url: &str) -> Option<PathBuf> {
-    use std::hash::{Hash, Hasher};
     if url.is_empty() {
         return None;
     }
     let response = extractors::http::client().get(url).send().await.ok()?.error_for_status().ok()?;
     let data = response.bytes().await.ok()?;
+    save_thumbnail(url, &data)
+}
+
+/// Keeps a thumbnail's bytes (PNG or JPEG) in the app's thumbs folder.
+fn save_thumbnail(url: &str, data: &[u8]) -> Option<PathBuf> {
+    use std::hash::{Hash, Hasher};
     let ext = if data.starts_with(&[0x89, b'P', b'N', b'G']) {
         "png"
     } else if data.starts_with(&[0xFF, 0xD8]) {
@@ -1677,16 +1856,20 @@ async fn fetch_thumbnail(url: &str) -> Option<PathBuf> {
     let dir = PathBuf::from(crate::platform::get_app_data_dir()).join("thumbs");
     std::fs::create_dir_all(&dir).ok()?;
     let path = dir.join(format!("{:016x}.{ext}", hasher.finish()));
-    std::fs::write(&path, &data).ok()?;
+    std::fs::write(&path, data).ok()?;
     Some(path)
 }
 
 /// The preview's book options, "book|<from>|<to>|<notes>|<images>|<note
-/// images>|<small images>" (numbers, 1/0 switches), as NovelOptions.
+/// images>|<small images>|<parts>|<title>" (numbers, 1/0 switches), as
+/// NovelOptions; anything else is the Books defaults.
 fn book_options(format: &str) -> crate::novels::NovelOptions {
     let mut options = crate::preferences::novel_defaults();
     let parts: Vec<&str> = format.split('|').collect();
-    if let ["book", from, to, notes, images, note_images, small] = parts.as_slice() {
+    if let ["book", from, to, notes, images, note_images, small, as_parts, title @ ..] = parts.as_slice() {
+        options.parts = *as_parts == "1";
+        // The title last, as it may have a "|" of its own.
+        options.title = title.join("|").trim().to_string();
         options.from = from.parse().unwrap_or(1);
         options.to = to.parse().unwrap_or(0);
         options.author_notes = *notes == "1";

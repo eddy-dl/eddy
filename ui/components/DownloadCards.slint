@@ -1,6 +1,6 @@
 import { ThemeSettings } from "../themes/theme.slint";
 import { FileType, FileTypeIcon } from "FileTypeIcon.slint";
-import { HoldTouchArea } from "HoldHint.slint";
+import { HoldTouchArea, HintBubble } from "HoldHint.slint";
 import { Shine } from "Shine.slint";
 import { LinkBackend, LinkOptions } from "../globals/Links.slint";
 
@@ -34,6 +34,10 @@ export struct DownloadItem {
     is_folder: bool,
     // Its files can be picked again (a torrent's, a yt-dlp playlist's).
     can_choose: bool,
+    // A book being checked for new chapters (its button waits).
+    checking: bool,
+    // The page it was caught on in Eddy's browser ("" for none).
+    browser_page: string,
     options: LinkOptions, // its speed limit, connections, user agent, folder
 }
 
@@ -44,7 +48,8 @@ global CardText {
         if item.size != "" {
             return @tr("{} of {}", item.downloaded, item.size);
         }
-        item.state == DownloadState.Active && item.progress == 0 && item.downloaded == "0 B" ? @tr("Starting…") : item.downloaded
+        // ("0" for a book, counted in chapters)
+        item.state == DownloadState.Active && item.progress == 0 && (item.downloaded == "0 B" || item.downloaded == "0") ? @tr("Starting…") : item.downloaded
     }
 }
 
@@ -302,8 +307,9 @@ export component CompletedCard inherits Rectangle {
     in property <bool> selecting: false;
     callback clicked();
     callback long_pressed();
-    // A saved book's "Check for new chapters".
+    // A saved book's "Check for new chapters", and "Choose chapters".
     callback update_book();
+    callback choose_chapters();
 
     private property <bool> book: root.item.backend == LinkBackend.Book && !root.selecting;
 
@@ -312,7 +318,7 @@ export component CompletedCard inherits Rectangle {
     CardFrame {
         file_type: root.item.is_folder ? FileType.Folder : root.item.file_type;
         selected: root.selected;
-        trailing: root.book ? 40px : 0px;
+        trailing: root.book ? 88px : 0px;
         clicked => { root.clicked(); }
         long_pressed => { root.long_pressed(); }
 
@@ -325,23 +331,57 @@ export component CompletedCard inherits Rectangle {
         }
     }
 
-    // Over the card's right end, a 48 touch target.
+    // Over the card's right end: two icon buttons, 48 touch targets.
     if root.book: Rectangle {
-        x: parent.width - self.width - 4px;
+        x: parent.width - 2 * self.width - 4px;
         width: 48px;
         height: 48px;
         border-radius: 24px;
-        background: update_ta.pressed ? ThemeSettings.text_color.transparentize(90%) : transparent;
+        background: choose_ta.pressed && !choose_ta.holding ? ThemeSettings.text_color.transparentize(90%) : transparent;
         Image {
-            source: @image-url("../icons/rounded/refresh.svg");
+            source: @image-url("../icons/rounded/checklist.svg");
             width: 24px;
             height: 24px;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             colorize: ThemeSettings.text_color.transparentize(25%);
         }
-        update_ta := TouchArea {
-            clicked => { root.update_book(); }
+        choose_ta := HoldTouchArea {
+            tapped => { root.choose_chapters(); }
+        }
+        // Holding it names it, at its left: the finger hides what's below,
+        // and the list cuts off what's above the first card.
+        HintBubble {
+            text: @tr("Choose chapters");
+            shown: choose_ta.holding;
+            x: -self.width - 4px;
+            y: (parent.height - self.height) / 2;
+        }
+    }
+    if root.book: Rectangle {
+        x: parent.width - self.width - 4px;
+        width: 48px;
+        height: 48px;
+        border-radius: 24px;
+        background: update_ta.pressed && !update_ta.holding ? ThemeSettings.text_color.transparentize(90%) : transparent;
+        Image {
+            source: @image-url("../icons/rounded/refresh.svg");
+            width: 24px;
+            height: 24px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            // MD3 disabled: on-surface at 38%, while it checks.
+            colorize: ThemeSettings.text_color.transparentize(root.item.checking ? 62% : 25%);
+        }
+        update_ta := HoldTouchArea {
+            enabled: !root.item.checking;
+            tapped => { root.update_book(); }
+        }
+        HintBubble {
+            text: @tr("Check for new chapters");
+            shown: update_ta.holding;
+            x: -self.width - 4px;
+            y: (parent.height - self.height) / 2;
         }
     }
 }

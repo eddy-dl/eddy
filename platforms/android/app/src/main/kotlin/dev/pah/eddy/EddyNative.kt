@@ -58,6 +58,13 @@ object EddyNative {
     // the list can open it there.
     @JvmStatic external fun delivered(id: Long, uri: String)
 
+    // The file a finished download saved (a path or a document URI), for its
+    // notification to open; null for a folder.
+    @JvmStatic external fun downloadFile(id: Long): String?
+
+    // Opens a finished download (from its notification), as its card does.
+    @JvmStatic external fun openDownload(id: Long)
+
     // Saves shared text, or a shared file's links, as pending. Returns how
     // many links were added.
     @JvmStatic external fun addShared(text: String?, path: String?, name: String?): Int

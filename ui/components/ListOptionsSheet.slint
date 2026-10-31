@@ -26,19 +26,24 @@ export component ListOptionsSheet inherits Rectangle {
         ListOptions.options_changed(root.tab);
     }
     function set_sort(key: SortKey) {
-        root.apply({ sort: key, ascending: root.current.ascending, filter: root.current.filter });
+        root.apply({ sort: key, ascending: root.current.ascending, filters: root.current.filters });
     }
     function set_ascending(ascending: bool) {
-        root.apply({ sort: root.current.sort, ascending: ascending, filter: root.current.filter });
+        root.apply({ sort: root.current.sort, ascending: ascending, filters: root.current.filters });
     }
     // Newest first, everything shown: what a tab starts with.
     private property <bool> is_default: root.current.sort == SortKey.DateAdded && !root.current.ascending
-        && root.current.filter == FileFilter.All;
+        && ListOptions.shows(root.current.filters, FileFilter.All);
     function reset() {
-        root.apply({ sort: SortKey.DateAdded, ascending: false, filter: FileFilter.All });
+        root.apply({ sort: SortKey.DateAdded, ascending: false, filters: {} });
     }
+    // Several types can be shown at once; All shows everything again.
     function set_filter(filter: FileFilter) {
-        root.apply({ sort: root.current.sort, ascending: root.current.ascending, filter: filter });
+        root.apply({
+            sort: root.current.sort,
+            ascending: root.current.ascending,
+            filters: filter == FileFilter.All ? {} : ListOptions.toggled(root.current.filters, filter),
+        });
     }
 
     height: Math.min(layout.preferred-height, root.available_height);
@@ -156,22 +161,22 @@ export component ListOptionsSheet inherits Rectangle {
                 spacing: 8px;
                 Chip {
                     text: @tr("All");
-                    selected: root.current.filter == FileFilter.All;
+                    selected: ListOptions.shows(root.current.filters, FileFilter.All);
                     clicked => { root.set_filter(FileFilter.All); }
                 }
                 Chip {
                     text: @tr("Video");
-                    selected: root.current.filter == FileFilter.Video;
+                    selected: ListOptions.shows(root.current.filters, FileFilter.Video);
                     clicked => { root.set_filter(FileFilter.Video); }
                 }
                 Chip {
                     text: @tr("Audio");
-                    selected: root.current.filter == FileFilter.Audio;
+                    selected: ListOptions.shows(root.current.filters, FileFilter.Audio);
                     clicked => { root.set_filter(FileFilter.Audio); }
                 }
                 Chip {
                     text: @tr("Folders");
-                    selected: root.current.filter == FileFilter.Folder;
+                    selected: ListOptions.shows(root.current.filters, FileFilter.Folder);
                     clicked => { root.set_filter(FileFilter.Folder); }
                 }
             }
@@ -180,22 +185,22 @@ export component ListOptionsSheet inherits Rectangle {
                 spacing: 8px;
                 Chip {
                     text: @tr("Images");
-                    selected: root.current.filter == FileFilter.Image;
+                    selected: ListOptions.shows(root.current.filters, FileFilter.Image);
                     clicked => { root.set_filter(FileFilter.Image); }
                 }
                 Chip {
                     text: @tr("Documents");
-                    selected: root.current.filter == FileFilter.Document;
+                    selected: ListOptions.shows(root.current.filters, FileFilter.Document);
                     clicked => { root.set_filter(FileFilter.Document); }
                 }
                 Chip {
                     text: @tr("Archives");
-                    selected: root.current.filter == FileFilter.Archive;
+                    selected: ListOptions.shows(root.current.filters, FileFilter.Archive);
                     clicked => { root.set_filter(FileFilter.Archive); }
                 }
                 Chip {
                     text: @tr("Other");
-                    selected: root.current.filter == FileFilter.Other;
+                    selected: ListOptions.shows(root.current.filters, FileFilter.Other);
                     clicked => { root.set_filter(FileFilter.Other); }
                 }
             }

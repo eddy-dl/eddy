@@ -1,3 +1,4 @@
+import { WrappedText } from "../../components/WrappedText.slint";
 import { ModernSwitch } from "../../components/Buttons.slint";
 import { AppSettings } from "../../globals/AppSettings.slint";
 import { ThemeSettings } from "../../themes/theme.slint";
@@ -111,13 +112,12 @@ export component DownloadSettings inherits Rectangle {
                             color: root.text_color;
                         }
 
-                        Text {
+                        WrappedText {
                             text: AppSettings.all_files_access
                                 ? @tr("Downloads go straight into any folder you pick.")
                                 : @tr("Lets downloads go straight into any folder. Without it, folders outside Download and Documents get the files copied in once they finish.");
                             font-size: 13px;
                             color: root.text_color.transparentize(40%);
-                            wrap: word-wrap;
                         }
                     }
 
@@ -182,7 +182,7 @@ export component DownloadSettings inherits Rectangle {
                             font-weight: 600;
                             color: root.text_color;
                         }
-                        Text {
+                        WrappedText {
                             text: AppSettings.cookies_error == 1 ? @tr("Couldn't read that file")
                                 : AppSettings.cookies_error == 2 ? @tr("No cookies in that: paste a cookies.txt or a cookie extension's JSON export")
                                 : AppSettings.cookies_error == 3 ? @tr("Couldn't save the cookies")
@@ -192,7 +192,6 @@ export component DownloadSettings inherits Rectangle {
                             color: AppSettings.cookies_error != 0 ? #e5534b
                                 : AppSettings.cookies_count > 0 ? ThemeSettings.primary_accent.transparentize(30%)
                                 : root.text_color.transparentize(40%);
-                            wrap: word-wrap;
                         }
                     }
 
@@ -252,11 +251,10 @@ export component DownloadSettings inherits Rectangle {
                             font-weight: 600;
                             color: root.text_color;
                         }
-                        Text {
+                        WrappedText {
                             text: @tr("Default download settings");
                             font-size: 13px;
                             color: root.text_color.transparentize(40%);
-                            wrap: word-wrap;
                         }
                     }
 
@@ -313,11 +311,10 @@ export component DownloadSettings inherits Rectangle {
                             font-weight: 600;
                             color: root.text_color;
                         }
-                        Text {
+                        WrappedText {
                             text: @tr("Web novel download options");
                             font-size: 13px;
                             color: root.text_color.transparentize(40%);
-                            wrap: word-wrap;
                         }
                     }
 
@@ -374,11 +371,10 @@ export component DownloadSettings inherits Rectangle {
                             font-weight: 600;
                             color: root.text_color;
                         }
-                        Text {
+                        WrappedText {
                             text: AppSettings.is_mobile ? @tr("Manage yt-dlp packages") : @tr("Manage media tools");
                             font-size: 13px;
                             color: root.text_color.transparentize(40%);
-                            wrap: word-wrap;
                         }
                     }
 

@@ -45,6 +45,18 @@ pub fn start_download(_request: &crate::downloader::DownloadRequest) -> Result<(
 
 pub fn open_file(_path: &str) {}
 
+pub fn open_site_check(_url: &str, _result: &str) -> bool {
+    false
+}
+
+pub fn open_browser(_page: &str, _result: &str) -> bool {
+    false
+}
+
+pub fn fetch_page(_url: &str, _result: &str) -> bool {
+    false
+}
+
 pub fn open_url(_url: &str) {}
 
 pub fn delete_document(_uri: &str) {}
