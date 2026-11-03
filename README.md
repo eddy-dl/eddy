@@ -12,7 +12,10 @@ Paste or share a link: Eddy works out what it is, shows a preview, and downloads
   [aria2_rust](https://github.com/balovess/aria2_rust).
 - **Torrents and magnet links**, picking which files to keep.
 - **Videos and music** through yt-dlp, with Eddy's own extractors for TikTok (the best quality,
-  others to pick from), Instagram and Pinterest.
+  others to pick from), Instagram and Pinterest. On Android, yt-dlp comes from
+  [YTDLnis](https://github.com/deniscerri/ytdlnis)'s helper apps
+  ([ytdlnis-packages](https://github.com/deniscerri/ytdlnis-packages)), which Eddy can fetch
+  for you to install.
 - **Google Drive** and **MEGA** files and folders (MEGA's decrypted in place).
 - **Web novels as EPUB books**: Royal Road, AO3, Wattpad, Sufficient Velocity, SpaceBattles,
   FanFiction.net, FictionPress and Wuxiaworld. Pick chapters, keep author notes and images or
