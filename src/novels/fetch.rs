@@ -238,15 +238,15 @@ pub async fn text(url: &str) -> Result<String, String> {
         let response = match response {
             Ok(r) => r,
             Err(e) if attempt < ATTEMPTS => {
-                log::warn!("novel fetch {url} failed ({e}), retrying");
+                log::warn!("novel fetch {url} failed ({}), retrying", reason(e));
                 tokio::time::sleep(wait).await;
                 wait *= 2;
                 continue;
             }
-            Err(e) => return Err(e.to_string()),
+            Err(e) => return Err(reason(e)),
         };
         let status = response.status();
-        let body = response.text().await.map_err(|e| e.to_string())?;
+        let body = response.text().await.map_err(reason)?;
         if let Some(kind) = challenge(status.as_u16(), &body) {
             // Anubis's pass is a cookie, which Eddy's own requests can
             // carry: passed in a browser once, then tried again.
@@ -372,10 +372,10 @@ pub async fn post(url: &str, content_type: &str, extra: &[(&str, &str)], body: V
         };
         match response {
             Ok(r) if (r.status().as_u16() == 429 || r.status().is_server_error()) && attempt < ATTEMPTS => {}
-            Ok(r) if r.status().is_success() => return r.bytes().await.map(|b| b.to_vec()).map_err(|e| e.to_string()),
+            Ok(r) if r.status().is_success() => return r.bytes().await.map(|b| b.to_vec()).map_err(reason),
             Ok(r) => return Err(format!("The site answered {}", r.status())),
-            Err(e) if attempt < ATTEMPTS => log::warn!("novel API {url} failed ({e}), retrying"),
-            Err(e) => return Err(e.to_string()),
+            Err(e) if attempt < ATTEMPTS => log::warn!("novel API {url} failed ({}), retrying", reason(e)),
+            Err(e) => return Err(reason(e)),
         }
         tokio::time::sleep(wait).await;
         wait *= 2;
@@ -407,13 +407,27 @@ pub async fn bytes(url: &str, referer: Option<&str>) -> Result<(Vec<u8>, String)
     if let Some(referer) = referer {
         request = request.header("Referer", referer);
     }
-    let response = request.send().await.and_then(|r| r.error_for_status()).map_err(|e| e.to_string())?;
+    let response = request.send().await.and_then(|r| r.error_for_status()).map_err(reason)?;
     let content_type = response
         .headers()
         .get("content-type")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_string();
-    let bytes = response.bytes().await.map_err(|e| e.to_string())?;
+    let bytes = response.bytes().await.map_err(reason)?;
     Ok((bytes.to_vec(), content_type))
+}
+
+/// A request error with what lies under it ("error sending request for
+/// url (…): client error (Connect): tcp connect error: Connection timed
+/// out"), as reqwest's own message stops at the first line.
+fn reason(error: reqwest::Error) -> String {
+    let mut text = error.to_string();
+    let mut source = std::error::Error::source(&error);
+    while let Some(cause) = source {
+        text.push_str(": ");
+        text.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    text
 }
