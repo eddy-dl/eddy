@@ -722,6 +722,24 @@ public class SlintAndroidJavaHelper {
         }
     }
 
+    // eddy patch: where the system's navigation gestures start (back from the
+    // sides, home from the bottom), so a touch there that moves like one isn't
+    // taken as a tap. Empty before Android 10, which has no gesture navigation.
+    public Rect get_gesture_area() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            WindowInsets insets = mActivity.getWindowManager().getCurrentWindowMetrics().getWindowInsets();
+            Insets g = insets.getInsets(WindowInsets.Type.systemGestures());
+            return new Rect(g.left, g.top, g.right, g.bottom);
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            WindowInsets insets = mActivity.getWindow().getDecorView().getRootWindowInsets();
+            if (insets != null) {
+                Insets g = insets.getSystemGestureInsets();
+                return new Rect(g.left, g.top, g.right, g.bottom);
+            }
+        }
+        return new Rect(0, 0, 0, 0);
+    }
+
     public void show_action_menu() {
         mActivity.runOnUiThread(new Runnable() {
             @Override
