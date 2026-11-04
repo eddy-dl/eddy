@@ -58,6 +58,10 @@ bind_java_type! {
             name = "get_safe_area",
             sig = () -> AndroidRect,
         },
+        fn get_gesture_area {
+            name = "get_gesture_area",
+            sig = () -> AndroidRect,
+        },
         fn get_view_rect {
             name = "get_view_rect",
             sig = () -> AndroidRect,
@@ -530,6 +534,18 @@ impl JavaHelper {
     pub fn get_safe_area(&self) -> Result<PhysicalEdges, jni::errors::Error> {
         self.with_jni_env(|env, helper| {
             let rect = helper.get_safe_area(env)?;
+            let left = rect.left(env)?;
+            let top = rect.top(env)?;
+            let right = rect.right(env)?;
+            let bottom = rect.bottom(env)?;
+            Ok(PhysicalEdges::new(top, bottom, left, right))
+        })
+    }
+
+    /// eddy patch: the system gesture insets (where back and home swipes start).
+    pub fn get_gesture_area(&self) -> Result<PhysicalEdges, jni::errors::Error> {
+        self.with_jni_env(|env, helper| {
+            let rect = helper.get_gesture_area(env)?;
             let left = rect.left(env)?;
             let top = rect.top(env)?;
             let right = rect.right(env)?;
