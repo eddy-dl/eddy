@@ -186,6 +186,7 @@ fn run_share_popup() {
     preferences::apply_font(&ui.global::<ThemeSettings>());
     preferences::load_theme(&ui);
     preferences::apply_download_defaults(&ui.global::<AppSettings>());
+    ui.invoke_reload_options();
     folders::install(&ui);
     ui.set_mode(mode);
     links::install(&ui);

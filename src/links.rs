@@ -578,7 +578,17 @@ fn link_category(link: &PendingLink, audio: bool) -> &'static str {
         },
         // A Drive or MEGA folder's files aren't a torrent's.
         Some(LinkBackend::Drive | LinkBackend::Mega) if link.file_type == FileType::Folder => category_folder(FileType::Other),
-        _ => category_folder(link.file_type),
+        _ => file_category(link.file_type, &link.filename),
+    }
+}
+
+/// `category_folder`, with e-books (a type of their own only here) in Books.
+pub fn file_category(file_type: FileType, name: &str) -> &'static str {
+    let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+    match ext.as_str() {
+        _ if file_type == FileType::Folder => category_folder(file_type),
+        "epub" | "mobi" | "azw" | "azw3" | "kfx" | "fb2" | "djvu" | "cbz" | "cbr" => "Books",
+        _ => category_folder(file_type),
     }
 }
 
@@ -751,6 +761,12 @@ pub fn extract_links_with(text: &str, spaces: bool) -> Vec<String> {
         if !unique.contains(&link) {
             unique.push(link);
         }
+    }
+    // A highlight shared from Chrome comes with a link back to its page
+    // (…#:~:text=…): with a link in the highlight, that one is what's wanted.
+    let highlight = |link: &String| link.contains("#:~:text=");
+    if unique.iter().any(|l| !highlight(l)) {
+        unique.retain(|l| !highlight(l));
     }
     unique
 }
@@ -1969,7 +1985,7 @@ pub fn file_type_for(name: &str, content_type: Option<&str>) -> FileType {
         "mp4" | "mkv" | "webm" | "avi" | "mov" | "m4v" | "flv" | "wmv" | "ts" | "3gp" => FileType::Video,
         "mp3" | "flac" | "m4a" | "aac" | "ogg" | "opus" | "wav" | "wma" | "alac" => FileType::Audio,
         "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "svg" | "heic" | "avif" | "tiff" => FileType::Image,
-        "pdf" | "doc" | "docx" | "odt" | "txt" | "rtf" | "epub" | "xls" | "xlsx" | "ppt" | "pptx" | "md" => FileType::Document,
+        "pdf" | "doc" | "docx" | "odt" | "txt" | "rtf" | "epub" | "mobi" | "azw" | "azw3" | "kfx" | "fb2" | "djvu" | "xls" | "xlsx" | "ppt" | "pptx" | "md" => FileType::Document,
         "zip" | "rar" | "7z" | "tar" | "gz" | "xz" | "bz2" | "zst" | "tgz" => FileType::Archive,
         "iso" | "img" | "dmg" => FileType::DiskImage,
         "exe" | "msi" | "apk" | "deb" | "rpm" | "appimage" | "pkg" | "sh" => FileType::Program,
@@ -2050,6 +2066,17 @@ mod tests {
         // With spaces a link runs to the line's end: one per line.
         let text = format!("get it here: {new}\nold one: {old}\n{folder}.\nfolder: {old_folder}!");
         assert_eq!(extract_links_with(&text, true), want);
+    }
+
+    #[test]
+    fn highlight_page_link_dropped() {
+        let file = "https://x.org/d/My%20Book.epub";
+        let page = "https://annas-archive.pk/slow_download/2549/0/0#:~:text=https%3A//x.org,Book.epub";
+        let text = format!("\"{file}\"\n{page}");
+        assert_eq!(extract_links_with(&text, false), vec![file]);
+        assert_eq!(extract_links_with(&text, true), vec![file]);
+        // Just the page shared: it stays.
+        assert_eq!(extract_links_with(page, false), vec![page]);
     }
 
     #[test]
