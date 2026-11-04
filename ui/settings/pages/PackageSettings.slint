@@ -124,6 +124,10 @@ export component PackageSettings inherits Rectangle {
         }
     }
 
+    // yt-dlp already there with a newer one out (state 3, the row's "Update"):
+    // the sheet just says it's updating it.
+    private property <bool> updates_ytdlp: root.confirming.key == "ytdlp" && root.confirming.state == 3;
+
     confirm_popup := PopupWindow {
         // Spans the whole window (popup coordinates are relative to this page).
         x: -root.absolute-position.x;
@@ -148,15 +152,17 @@ export component PackageSettings inherits Rectangle {
                 spacing: 12px;
 
                 WrappedText {
-                    text: @tr("Download {}?", root.confirming_name);
+                    text: root.updates_ytdlp ? @tr("Update yt-dlp?") : @tr("Download {}?", root.confirming_name);
                     font-size: 18px;
                     font-weight: 700;
                     color: root.text_color;
                 }
                 WrappedText {
-                    text: AppSettings.is_mobile && root.confirming.key == "ytdlp"
-                        ? @tr("Eddy downloads it ({}) from GitHub and uses it instead of the one in the Python package.", root.confirming.size)
-                        : AppSettings.is_mobile
+                    text: root.updates_ytdlp
+                        ? @tr("Eddy gets the newest yt-dlp ({}).", root.confirming.size)
+                        // The others are apps of their own on Android; yt-dlp is
+                        // Eddy's to fetch everywhere.
+                        : AppSettings.is_mobile && root.confirming.key != "ytdlp"
                         ? @tr("Eddy downloads its installer ({}) from YTDLnis's packages on GitHub. Android then asks you whether to install it.", root.confirming.size)
                         : @tr("Eddy downloads it ({}) from GitHub and keeps it in its own folder.", root.confirming.size);
                     font-size: 14px;
@@ -172,7 +178,7 @@ export component PackageSettings inherits Rectangle {
                         clicked => { root.dismiss_popup(); }
                     }
                     ActionButton {
-                        text: @tr("Download");
+                        text: root.updates_ytdlp ? @tr("Update") : @tr("Download");
                         primary: true;
                         horizontal-stretch: 1;
                         height: 48px;

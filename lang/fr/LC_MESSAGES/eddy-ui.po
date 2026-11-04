@@ -576,9 +576,6 @@ msgstr "Nouveau dossier"
 msgid "Use this folder"
 msgstr "Utiliser ce dossier"
 
-msgid "Eddy downloads it ({}) from GitHub and uses it instead of the one in the Python package."
-msgstr "Eddy le télécharge ({}) depuis GitHub et l'utilise à la place de celui du paquet Python."
-
 msgid "Runs yt-dlp"
 msgstr "Fait tourner yt-dlp"
 
@@ -875,3 +872,9 @@ msgstr "Partager"
 
 msgid "Debug"
 msgstr "Débogage"
+
+msgid "Update yt-dlp?"
+msgstr "Mettre à jour yt-dlp ?"
+
+msgid "Eddy gets the newest yt-dlp ({})."
+msgstr "Eddy récupère la dernière version de yt-dlp ({})."
