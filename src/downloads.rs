@@ -1102,7 +1102,7 @@ fn change_options(id: i64, options: &crate::LinkOptions) {
             subfolder: match options.category {
                 false => String::new(),
                 true if book => "Books".to_string(),
-                true => crate::links::category_folder(file_type(entry.saved.file_type)).to_string(),
+                true => crate::links::file_category(file_type(entry.saved.file_type), &entry.saved.name).to_string(),
             },
             replace_existing: entry.saved.request.settings.replace_existing,
         };
