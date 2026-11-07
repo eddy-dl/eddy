@@ -130,10 +130,10 @@ pub fn request_all_files_access() {}
 /// Desktop downloads are plain files (no documents).
 pub fn delete_document(_uri: &str) {}
 
-/// No browser check on desktop: a site behind Cloudflare's needs the
-/// user's cookies (cookies.txt).
-pub fn open_site_check(_url: &str, _result: &str) -> bool {
-    false
+/// A site's bot check, passed by the user in the webview helper's window;
+/// its user agent and cookies are written to `result` (see novels::fetch).
+pub fn open_site_check(url: &str, result: &str) -> bool {
+    send_to_webview("check", url, result)
 }
 
 /// No browser to catch a page's download in on desktop (yet).
@@ -141,9 +141,128 @@ pub fn open_browser(_page: &str, _result: &str) -> bool {
     false
 }
 
-/// No background browser on desktop either.
-pub fn fetch_page(_url: &str, _result: &str) -> bool {
-    false
+/// A page read in the webview helper, unseen, for a site that turns Eddy's
+/// own requests away; written to `result` as Android's PageFetcher does.
+pub fn fetch_page(url: &str, result: &str) -> bool {
+    send_to_webview("fetch", url, result)
+}
+
+/// The webview helper (eddy-webview, next to Eddy): a browser for sites
+/// behind bot checks, as Android's WebView is. A program of its own, so
+/// Eddy itself never needs WebKitGTK (Linux) or WebView2 (Windows): it's
+/// started the first time a site needs it, takes one page a line on its
+/// stdin, and quits once it's been idle a while or Eddy goes.
+struct Webview {
+    child: std::process::Child,
+    stdin: std::process::ChildStdin,
+}
+
+static WEBVIEW: std::sync::Mutex<Option<Webview>> = std::sync::Mutex::new(None);
+/// Whether the user's been told the helper couldn't start (once a session).
+static WEBVIEW_MISSING_SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The helper: EDDY_WEBVIEW, else next to Eddy (as built, or as released:
+/// "eddy-webview-linux-x86_64"…), else on the PATH.
+fn webview_path() -> PathBuf {
+    let name = if cfg!(windows) { "eddy-webview.exe" } else { "eddy-webview" };
+    if let Some(path) = std::env::var_os("EDDY_WEBVIEW") {
+        return path.into();
+    }
+    let dir = std::env::current_exe().ok().and_then(|exe| exe.parent().map(PathBuf::from));
+    let beside = dir.as_ref().map(|dir| dir.join(name)).filter(|path| path.exists()).or_else(|| {
+        let mut released: Vec<PathBuf> = std::fs::read_dir(dir.as_ref()?)
+            .ok()?
+            .filter_map(|entry| entry.ok().map(|e| e.path()))
+            .filter(|path| path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("eddy-webview-")))
+            .collect();
+        released.sort();
+        released.pop()
+    });
+    beside.unwrap_or_else(|| PathBuf::from(name))
+}
+
+/// Starts the helper and waits for its "ready" (its browser is up); a
+/// missing WebKitGTK or WebView2 ends it before that, saying why.
+fn start_webview() -> Result<Webview, String> {
+    use std::io::{BufRead, Read};
+    use std::process::Stdio;
+    let data = PathBuf::from(get_app_data_dir()).join("webview");
+    let mut child = std::process::Command::new(webview_path())
+        .arg(&data)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => "eddy-webview isn't installed next to Eddy".to_string(),
+            _ => format!("eddy-webview didn't start: {e}"),
+        })?;
+    let (Some(stdin), Some(stdout), Some(mut stderr)) = (child.stdin.take(), child.stdout.take(), child.stderr.take()) else {
+        let _ = child.kill();
+        return Err("eddy-webview didn't start".to_string());
+    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    // Graphics drivers may say things on the way (Mesa's EGL warnings).
+    std::thread::spawn(move || {
+        let ready = std::io::BufReader::new(stdout).lines().map_while(Result::ok).any(|line| line.trim() == "ready");
+        let _ = tx.send(ready);
+    });
+    match rx.recv_timeout(std::time::Duration::from_secs(20)) {
+        Ok(true) => {}
+        _ => {
+            let _ = child.kill();
+            let mut why = String::new();
+            let _ = stderr.read_to_string(&mut why);
+            let _ = child.wait();
+            let why = why.lines().map(str::trim).filter(|l| !l.is_empty()).last().unwrap_or("it quit straight away").to_string();
+            return Err(format!("eddy-webview didn't start: {why}"));
+        }
+    }
+    // What it says on the way goes to the logs.
+    std::thread::spawn(move || {
+        for line in std::io::BufReader::new(stderr).lines().map_while(Result::ok) {
+            log::warn!(target: "browser", "{line}");
+        }
+    });
+    Ok(Webview { child, stdin })
+}
+
+fn send_to_webview(kind: &str, url: &str, result: &str) -> bool {
+    use std::io::Write;
+    let mut webview = WEBVIEW.lock().unwrap_or_else(|e| e.into_inner());
+    // Quit since (idle): started again.
+    if webview.as_mut().is_some_and(|w| !matches!(w.child.try_wait(), Ok(None))) {
+        *webview = None;
+    }
+    if webview.is_none() {
+        match start_webview() {
+            Ok(started) => *webview = Some(started),
+            Err(e) => {
+                log::warn!("{e}");
+                if !WEBVIEW_MISSING_SAID.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                    // macOS has its webview built in: only the helper can be missing.
+                    show_toast(if cfg!(windows) {
+                        "Sites with bot checks need Microsoft Edge WebView2"
+                    } else if cfg!(target_os = "macos") {
+                        "Sites with bot checks need eddy-webview next to Eddy"
+                    } else {
+                        "Sites with bot checks need WebKitGTK (libwebkit2gtk-4.1)"
+                    });
+                }
+                return false;
+            }
+        }
+    }
+    let Some(running) = webview.as_mut() else {
+        return false;
+    };
+    let sent = writeln!(running.stdin, "{kind}\t{url}\t{result}").and_then(|_| running.stdin.flush());
+    if let Err(e) = sent {
+        log::warn!("eddy-webview went away: {e}");
+        *webview = None;
+        return false;
+    }
+    true
 }
 
 /// Opens a web page in the browser.
