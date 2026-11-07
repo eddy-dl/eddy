@@ -102,6 +102,15 @@ export component DownloadingSettings inherits Rectangle {
                 toggled => { AppSettings.preferences_changed(); }
             }
 
+            if AppSettings.is_mobile: SwitchRow {
+                flush: true;
+                title: @tr("Quit when done");
+                subtitle: @tr("Eddy closes once its downloads are finished, if it's in the background");
+                text_color: root.text_color;
+                checked <=> AppSettings.quit_when_done;
+                toggled => { AppSettings.preferences_changed(); }
+            }
+
             DownloadOptionsEditor {
                 text_color: root.text_color;
                 speed_kbps <=> AppSettings.dl_speed_kbps;

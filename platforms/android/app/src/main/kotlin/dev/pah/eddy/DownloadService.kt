@@ -53,6 +53,8 @@ class DownloadService : Service() {
 
         // The main app's activity is open (same process as the service).
         @Volatile var mainAppOpen = false
+        // And on screen (started, not stopped).
+        @Volatile var mainAppVisible = false
         // That activity, so Exit can close it.
         @Volatile var mainActivity: java.lang.ref.WeakReference<Activity>? = null
 
@@ -107,12 +109,25 @@ class DownloadService : Service() {
     private var nextResultId = NOTIFICATION_ID + 1
     // Finished downloads still being copied into their picked folders.
     @Volatile private var copying = 0
+    // Something downloaded since the service started or Eddy was last on
+    // screen: "Quit when done" waits for that.
+    private var hadWork = false
 
     private val check = object : Runnable {
         override fun run() {
             postResults()
             val (active, name, permille, kind) = status()
-            if (active == 0 && copying == 0 && !mainAppOpen && !popupOpen) {
+            if (active > 0 || copying > 0) hadWork = true
+            if (mainAppVisible || popupOpen) hadWork = false
+            if (active == 0 && copying == 0 && hadWork && mainAppOpen && quitWhenDone()) {
+                // The same two checks in a row as below.
+                idleChecks += 1
+                if (idleChecks >= 2) {
+                    Log.i(TAG, "downloads done in the background, quitting")
+                    exit()
+                    return
+                }
+            } else if (active == 0 && copying == 0 && !mainAppOpen && !popupOpen) {
                 // Twice in a row, so a download that's just being added
                 // doesn't stop the service.
                 idleChecks += 1
@@ -270,6 +285,10 @@ class DownloadService : Service() {
             null
         }
     }
+
+    // Settings → Downloading → Quit when done (saved by Rust as "true"/"false").
+    private fun quitWhenDone(): Boolean =
+        getSharedPreferences("app_prefs", Context.MODE_PRIVATE).getString("quit_when_done", "false") == "true"
 
     // Exit: every download paused (each carries on from there next time),
     // the app's window closed and out of recents, the service stopped, then
