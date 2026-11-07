@@ -65,6 +65,9 @@ object EddyNative {
     // Opens a finished download (from its notification), as its card does.
     @JvmStatic external fun openDownload(id: Long)
 
+    // A failed download's notification's Retry: queues it again.
+    @JvmStatic external fun retryDownload(id: Long)
+
     // Saves shared text, or a shared file's links, as pending. Returns how
     // many links were added.
     @JvmStatic external fun addShared(text: String?, path: String?, name: String?): Int

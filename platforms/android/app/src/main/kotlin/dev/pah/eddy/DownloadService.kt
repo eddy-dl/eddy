@@ -38,6 +38,9 @@ class DownloadService : Service() {
         private const val ACTION_CANCEL = "dev.pah.eddy.CANCEL_ALL"
         // Its Exit button: everything paused, Eddy closed.
         private const val ACTION_EXIT = "dev.pah.eddy.EXIT"
+        // A "Download failed" notification's Retry, with "id" (the
+        // download's record) and "notification" (to take it away).
+        private const val ACTION_RETRY = "dev.pah.eddy.RETRY"
         // From Rust (any process): a site's Cloudflare check to pass in a
         // WebView (CloudflareActivity), with "url" and "result" extras.
         private const val ACTION_CHECK_SITE = "dev.pah.eddy.CHECK_SITE"
@@ -152,6 +155,10 @@ class DownloadService : Service() {
             ACTION_EXIT -> {
                 exit()
                 return START_NOT_STICKY
+            }
+            ACTION_RETRY -> {
+                notificationManager().cancel(intent.getIntExtra("notification", 0))
+                EddyNative.retryDownload(intent.getLongExtra("id", 0L))
             }
             ACTION_CHECK_SITE -> CloudflareActivity.show(
                 this,
@@ -290,6 +297,16 @@ class DownloadService : Service() {
         PendingIntent.FLAG_IMMUTABLE,
     )
 
+    // Retry on download `id`'s "Download failed" notification (`notification`).
+    private fun retryIntent(id: Long, notification: Int): PendingIntent = PendingIntent.getService(
+        this, notification,
+        Intent(this, DownloadService::class.java)
+            .setAction(ACTION_RETRY)
+            .putExtra("id", id)
+            .putExtra("notification", notification),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+
     private fun progressNotification(active: Int, name: String, permille: Int, kind: Int): android.app.Notification {
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
@@ -350,20 +367,22 @@ class DownloadService : Service() {
                     delivered.uri?.let { EddyNative.delivered(id, it.toString()) }
                     handler.post {
                         copying -= 1
-                        postResult(delivered.error == null, name, delivered.error ?: "", id, kind)
+                        // Downloaded, only the copy failed: nothing to retry.
+                        postResult(delivered.error == null, name, delivered.error ?: "", id, kind, retry = false)
                     }
                 }.start()
                 continue
             }
-            postResult(ok, name, message, id, kind)
+            postResult(ok, name, message, id, kind, retry = !ok && id != 0L)
         }
     }
 
     // Downloaded: a tap opens it (as its card in the list does); failed, the
-    // app.
-    private fun postResult(ok: Boolean, name: String, message: String, id: Long, kind: Int) {
+    // app, with Retry when `retry`.
+    private fun postResult(ok: Boolean, name: String, message: String, id: Long, kind: Int, retry: Boolean) {
         Haptics.play(this, if (ok) Haptics.DOWNLOADED else Haptics.FAILED)
-        val notification = NotificationCompat.Builder(this, RESULTS_CHANNEL_ID)
+        val notificationId = nextResultId++
+        val builder = NotificationCompat.Builder(this, RESULTS_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setLargeIcon(TypeIcon.bitmap(this, kind))
             .setContentTitle(getString(if (ok) R.string.downloaded_name else R.string.download_failed_name, name))
@@ -371,7 +390,9 @@ class DownloadService : Service() {
             .setStyle(if (ok) null else NotificationCompat.BigTextStyle().bigText(message))
             .setContentIntent(if (ok && id != 0L) openFileIntent(id) ?: openDownloadIntent(id) else openAppIntent())
             .setAutoCancel(true)
-            .build()
-        notificationManager().notify(nextResultId++, notification)
+        if (retry) {
+            builder.addAction(R.drawable.ic_notification, getString(R.string.retry), retryIntent(id, notificationId))
+        }
+        notificationManager().notify(notificationId, builder.build())
     }
 }

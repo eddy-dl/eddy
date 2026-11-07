@@ -699,6 +699,16 @@ pub extern "system" fn Java_dev_pah_eddy_EddyNative_controlDownloads<'caller>(
     crate::downloads::control_all(action == 1);
 }
 
+/// A "Download failed" notification's Retry.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pah_eddy_EddyNative_retryDownload<'caller>(
+    _unowned_env: EnvUnowned<'caller>,
+    _class: JClass<'caller>,
+    id: jni::sys::jlong,
+) {
+    crate::downloads::retry(id);
+}
+
 /// The app's or the share popup's screen is going for good: link checks
 /// running for it are stopped (downloads carry on in the service).
 #[unsafe(no_mangle)]

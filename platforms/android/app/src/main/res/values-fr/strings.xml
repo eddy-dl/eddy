@@ -24,6 +24,7 @@
     <string name="pause_all">Tout mettre en pause</string>
     <string name="cancel">Annuler</string>
     <string name="exit">Quitter</string>
+    <string name="retry">Réessayer</string>
     <string name="cancel_all">Tout annuler</string>
     <string name="downloaded_name">%s téléchargé</string>
     <string name="download_failed_name">Échec du téléchargement : %s</string>

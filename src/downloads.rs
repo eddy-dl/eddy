@@ -2162,6 +2162,19 @@ pub fn control_all(cancel_them: bool) {
     }
 }
 
+/// A "Download failed" notification's Retry: the download is queued again
+/// and started here (in the download service; the app may not be open).
+pub fn retry(id: i64) {
+    with_entries(|entries| {
+        if let Some(entry) = entries.iter_mut().find(|e| e.id == id && matches!(e.saved.state, State::Failed | State::Cancelled)) {
+            entry.saved.state = State::Queued;
+            entry.saved.message.clear();
+            save(entry);
+        }
+    });
+    pump();
+}
+
 /// Acts on the selected downloads (the selection bar).
 pub fn act(ids: &[i32], action: SelectionAction, delete_files: bool) {
     if action == SelectionAction::Share {

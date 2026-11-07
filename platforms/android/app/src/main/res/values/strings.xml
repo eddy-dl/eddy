@@ -23,6 +23,7 @@
     <string name="pause_all">Pause all</string>
     <string name="cancel">Cancel</string>
     <string name="exit">Exit</string>
+    <string name="retry">Retry</string>
     <string name="cancel_all">Cancel all</string>
     <string name="downloaded_name">Downloaded %s</string>
     <string name="download_failed_name">Download failed: %s</string>
