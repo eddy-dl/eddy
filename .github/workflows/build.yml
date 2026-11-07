@@ -201,6 +201,93 @@ jobs:
             target/release/eddy-webview-linux-arm64
           retention-days: 1
 
+  build-macos:
+    name: Build (macOS ${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-latest
+          - arch: x86_64
+            runner: macos-15-intel
+    env:
+      SLINT_STYLE: fluent
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            webview/target
+          key: macos-${{ matrix.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: macos-${{ matrix.arch }}-cargo-
+
+      - name: Build (release)
+        run: |
+          cargo build --release
+          cargo build --release --manifest-path webview/Cargo.toml
+
+      # Eddy.app: Eddy with its webview helper beside it (macOS's own WebKit,
+      # nothing to install), zipped.
+      - name: Bundle
+        run: |
+          VERSION=$(grep -m 1 '^version = ' Cargo.toml | awk -F '"' '{print $2}')
+          APP=Eddy.app
+          mkdir -p $APP/Contents/MacOS $APP/Contents/Resources
+          cp target/release/eddy webview/target/release/eddy-webview $APP/Contents/MacOS/
+          # The icon, from the Windows one (sips reads .ico); none if that fails.
+          mkdir -p icon.iconset
+          for size in 16 32 64 128 256 512; do
+            sips -s format png -z $size $size ui/icons/logo.ico --out icon.iconset/icon_${size}x${size}.png > /dev/null || true
+          done
+          for size in 16 32 128 256; do
+            double=$((size * 2))
+            if [ -f icon.iconset/icon_${double}x${double}.png ]; then
+              cp icon.iconset/icon_${double}x${double}.png icon.iconset/icon_${size}x${size}@2x.png
+            fi
+          done
+          rm -f icon.iconset/icon_64x64.png
+          iconutil -c icns icon.iconset -o $APP/Contents/Resources/eddy.icns || echo "no icon"
+          cat > $APP/Contents/Info.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key><string>Eddy</string>
+            <key>CFBundleDisplayName</key><string>Eddy</string>
+            <key>CFBundleIdentifier</key><string>dev.pah.eddy</string>
+            <key>CFBundleExecutable</key><string>eddy</string>
+            <key>CFBundleIconFile</key><string>eddy</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleVersion</key><string>$VERSION</string>
+            <key>CFBundleShortVersionString</key><string>$VERSION</string>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict>
+          </plist>
+          EOF
+          # Not signed with a developer ID: an ad-hoc signature, which Apple
+          # Silicon needs to run it at all.
+          codesign --force --deep --sign - $APP
+          ditto -c -k --keepParent $APP eddy-macos-${{ matrix.arch }}.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: eddy-macos-${{ matrix.arch }}
+          path: eddy-macos-${{ matrix.arch }}.zip
+          retention-days: 1
+
   build-android:
     name: Build (Android)
     runs-on: ubuntu-latest
