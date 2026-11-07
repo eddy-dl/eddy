@@ -259,8 +259,13 @@ export component LinkPreviewSheet inherits Rectangle {
     private property <int> opt_ua_mode;
     private property <string> opt_ua_custom;
     private property <bool> opt_category;
-    // Also called once the popup has read its settings (see PreviewApp).
-    public function reset_options() {
+    // The sheet can be made before Rust has read the defaults into
+    // AppSettings (the app's sample links, the popup's preview): takes them
+    // again once they're in.
+    private property <string> defaults: AppSettings.dl_speed_kbps + "|" + AppSettings.dl_connections
+        + "|" + AppSettings.dl_ua_mode + "|" + AppSettings.dl_ua_custom + "|" + (AppSettings.dl_category_folders ? "1" : "0");
+    changed defaults => { root.reset_options(); }
+    function reset_options() {
         root.options_open = false;
         root.opt_speed_kbps = AppSettings.dl_speed_kbps;
         root.opt_connections = AppSettings.dl_connections;
