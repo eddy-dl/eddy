@@ -685,6 +685,16 @@ pub fn set_folder_name(id: i64, name: &str) {
     });
 }
 
+/// A download's name, once it's known (unless the user gave it one).
+pub fn set_name(id: i64, name: &str) {
+    with_entries(|entries| {
+        if let Some(entry) = entries.iter_mut().find(|e| e.id == id && !e.saved.named && e.saved.name != name) {
+            entry.saved.name = name.to_string();
+            save(entry);
+        }
+    });
+}
+
 /// A finished download's copy in its picked folder (Android: a document
 /// URI), which opening it uses.
 pub fn delivered(id: i64, uri: &str) {
