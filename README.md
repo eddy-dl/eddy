@@ -82,7 +82,7 @@ slint-viewer --style material ui/app.slint
 | `src/` | The app: links and previews (`links.rs`), the download list (`downloads.rs`), the downloaders (`downloader/`), extractors (`extractors/`), web novels (`novels/`), platform code (`platform/`) |
 | `ui/` | The Slint interface: `app.slint`, components, settings pages, icons |
 | `platforms/android/` | The Android app: Gradle, the download service, the browser check and Eddy's browser (Kotlin) |
-| `patches/` | Patched crates: aria2_rust, and Slint's Android backend |
+| `patches/` | Slint's Android backend, patched |
 | `lang/` | Translations (gettext `.po`) |
 | `tools/` | The icon and wordmark generators, and `sync_po.py` for the translations |
 | `docs/` | Design notes |
@@ -96,5 +96,5 @@ download, so look at them before sending them anywhere.
 ## License
 
 Eddy is free software, under the GNU General Public License, version 3 or (at your option) any
-later version: see [LICENSE](LICENSE). The patched crates in `patches/` keep their own licenses
-(aria2_rust is GPL-3.0-or-later too; Slint's Android backend keeps Slint's).
+later version: see [LICENSE](LICENSE). Slint's Android backend, patched in `patches/`, keeps
+Slint's licenses.

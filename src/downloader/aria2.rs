@@ -502,12 +502,28 @@ impl AriaEngineClient {
         children.iter().map(|g| g.to_hex_string()).collect()
     }
 
-    /// Safely commands the engine to unpause a specific GID
+    /// Safely commands the engine to unpause a specific GID. Sent once the
+    /// paused download's task has stopped: an Unpause before that leaves
+    /// aria2 reporting it as waiting while it downloads (balovess/aria2_rust
+    /// issue 90), and Eddy listed it as Queued.
     pub fn resume_download(&self, gid_hex: &str) -> Result<(), String> {
         let gid = GroupId::from_hex_string(gid_hex).ok_or("Invalid GID")?;
-        self.cmd_tx
-            .send(EngineCommand::Unpause { gid })
-            .map_err(|e| e.to_string())
+        let stopping = self.group_man.find_group(gid).filter(|group| group.recover().num_commands() > 0);
+        let Some(group) = stopping else {
+            return self.cmd_tx.send(EngineCommand::Unpause { gid }).map_err(|e| e.to_string());
+        };
+        let cmd_tx = self.cmd_tx.clone();
+        std::thread::spawn(move || {
+            // A task stops within moments of its pause; not waiting forever.
+            for _ in 0..200 {
+                if group.recover().num_commands() == 0 {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            let _ = cmd_tx.send(EngineCommand::Unpause { gid });
+        });
+        Ok(())
     }
 
     /// Stops a download for good (it shows up as "removed").
