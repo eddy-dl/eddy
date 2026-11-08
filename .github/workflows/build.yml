@@ -32,16 +32,16 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
+      # Dependencies only (Eddy's own crates are left out), restored from
+      # main's cache and saved only on main, so PRs don't fill the store.
       - name: Cache cargo
-        uses: actions/cache@v5
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-            webview/target
-          key: windows-x86_64-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: windows-x86_64-cargo-
+          shared-key: windows-x86_64
+          workspaces: |
+            .
+            webview
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build (release)
         run: |
@@ -74,16 +74,16 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
+      # Dependencies only (Eddy's own crates are left out), restored from
+      # main's cache and saved only on main, so PRs don't fill the store.
       - name: Cache cargo
-        uses: actions/cache@v5
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-            webview/target
-          key: windows-arm64-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: windows-arm64-cargo-
+          shared-key: windows-arm64
+          workspaces: |
+            .
+            webview
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build (release)
         run: |
@@ -122,16 +122,16 @@ jobs:
           # and WebKitGTK for eddy-webview (only the helper links it).
           sudo apt-get install -y libfontconfig1-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libgtk-3-dev libdbus-1-dev libwebkit2gtk-4.1-dev
 
+      # Dependencies only (Eddy's own crates are left out), restored from
+      # main's cache and saved only on main, so PRs don't fill the store.
       - name: Cache cargo
-        uses: actions/cache@v5
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-            webview/target
-          key: linux-x86_64-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: linux-x86_64-cargo-
+          shared-key: linux-x86_64
+          workspaces: |
+            .
+            webview
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build (release)
         run: |
@@ -173,16 +173,16 @@ jobs:
           # and WebKitGTK for eddy-webview (only the helper links it).
           sudo apt-get install -y libfontconfig1-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libgtk-3-dev libdbus-1-dev libwebkit2gtk-4.1-dev
 
+      # Dependencies only (Eddy's own crates are left out), restored from
+      # main's cache and saved only on main, so PRs don't fill the store.
       - name: Cache cargo
-        uses: actions/cache@v5
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-            webview/target
-          key: linux-arm64-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: linux-arm64-cargo-
+          shared-key: linux-arm64
+          workspaces: |
+            .
+            webview
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build (release)
         run: |
@@ -223,16 +223,16 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
+      # Dependencies only (Eddy's own crates are left out), restored from
+      # main's cache and saved only on main, so PRs don't fill the store.
       - name: Cache cargo
-        uses: actions/cache@v5
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-            webview/target
-          key: macos-${{ matrix.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: macos-${{ matrix.arch }}-cargo-
+          shared-key: macos-${{ matrix.arch }}
+          workspaces: |
+            .
+            webview
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build (release)
         run: |
@@ -312,18 +312,19 @@ jobs:
         with:
           targets: aarch64-linux-android, armv7-linux-androideabi
 
+      # Dependencies only (Eddy's own crates are left out), restored from
+      # main's cache and saved only on main, so PRs don't fill the store.
+      # Before cargo-ndk's install: it keeps ~/.cargo/bin too.
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: android
+          workspaces: |
+            .
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
-
-      - name: Cache cargo
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: android-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: android-cargo-
 
       - name: Install dependencies (Linux host)
         run: |
