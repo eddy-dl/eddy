@@ -37,7 +37,7 @@ fn main() -> Result<(), slint::PlatformError> {
 
     let ui_weak = ui.as_weak();
 
-    // Flat settings rows, not the phone's cards.
+    // Settings without the Android-only rows (the system font).
     ui.global::<SettingsLayout>().set_desktop(true);
 
     // Desktop defaults to the top navigation bar; a saved preference overrides it.
