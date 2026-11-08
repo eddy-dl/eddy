@@ -157,6 +157,11 @@
 //! }
 //! ```
 
+// Eddy: upstream's warnings (unused imports, variable and code, tokio's
+// deprecated AsyncFd::new), left as they are so the diff from upstream stays
+// our fixes only (see EDDY.md).
+#![allow(unused_imports, unused_variables, dead_code, deprecated)]
+
 // `async_trait` marks its boxed futures as `must_use`; Clippy 1.99 also sees
 // the wrapped `Result` and flags the generated trait methods as double-must-use.
 #![allow(clippy::double_must_use)]

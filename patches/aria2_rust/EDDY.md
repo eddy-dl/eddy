@@ -123,3 +123,10 @@ picked file into its (renamed) folder with the others untouched.
 
 Upstream issue: <https://github.com/balovess/aria2_rust/issues/78>. Drop this
 copy once a fix is released.
+
+## Warnings
+
+`aria2-core/src/lib.rs` allows upstream's warnings (unused imports, a
+variable and code, tokio's deprecated `AsyncFd::new`) rather than fixing
+them here, so this copy differs from upstream by the fixes above only, and
+Eddy's CI can treat warnings as errors.

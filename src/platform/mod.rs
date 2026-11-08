@@ -1,7 +1,5 @@
 use std::{fs, io, path::PathBuf};
 
-use serde::{Deserialize, Serialize};
-
 /// A vibration, if haptic feedback is on (Android). Each feels different;
 /// the numbers match Haptics.kt.
 #[derive(Clone, Copy, Debug)]
