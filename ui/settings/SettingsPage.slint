@@ -99,6 +99,11 @@ export component SettingsPage inherits Rectangle {
     private property <bool> left_header_tinted: root.is_landscape ? root.sidebar_scrolled : (root.no_active_tab ? root.sidebar_scrolled : root.page_scrolled);
     private property <bool> right_header_tinted: root.page_scrolled;
     private property <length> header_height: Math.max(8px, root.safe_area_top) + 40px;
+    // A page is at most this wide next to the sidebar (a wide desktop window
+    // would stretch its cards into long bars), lined up with the sidebar.
+    private property <length> page_max_width: 840px;
+    private property <length> page_padding_right: root.is_landscape
+        ? Math.max(0px, root.width - root.left_header_width - 12px - root.page_max_width) : 0px;
     private property <length> left_header_width: root.is_landscape ? Math.max(12px, root.safe_area_left) + 260px : root.width;
 
     // Header backgrounds (status bar area included) that take the surface
@@ -281,6 +286,7 @@ export component SettingsPage inherits Rectangle {
 
                     HorizontalLayout {
                         padding-left: root.is_landscape ? 12px : 0px;
+                        padding-right: root.page_padding_right;
                         width: 100%;
                         height: 100%;
 
@@ -317,6 +323,7 @@ export component SettingsPage inherits Rectangle {
 
                     HorizontalLayout {
                         padding-left: root.is_landscape ? 12px : 0px;
+                        padding-right: root.page_padding_right;
                         width: 100%;
                         height: 100%;
 
@@ -351,6 +358,7 @@ export component SettingsPage inherits Rectangle {
 
                     HorizontalLayout {
                         padding-left: root.is_landscape ? 12px : 0px;
+                        padding-right: root.page_padding_right;
                         width: 100%;
                         height: 100%;
 
@@ -385,6 +393,7 @@ export component SettingsPage inherits Rectangle {
 
                     HorizontalLayout {
                         padding-left: root.is_landscape ? 12px : 0px;
+                        padding-right: root.page_padding_right;
                         width: 100%;
                         height: 100%;
 
@@ -418,6 +427,7 @@ export component SettingsPage inherits Rectangle {
 
                     HorizontalLayout {
                         padding-left: root.is_landscape ? 12px : 0px;
+                        padding-right: root.page_padding_right;
                         width: 100%;
                         height: 100%;
 
@@ -448,6 +458,7 @@ export component SettingsPage inherits Rectangle {
 
                     HorizontalLayout {
                         padding-left: root.is_landscape ? 12px : 0px;
+                        padding-right: root.page_padding_right;
                         width: 100%;
                         height: 100%;
 
@@ -478,6 +489,7 @@ export component SettingsPage inherits Rectangle {
 
                     HorizontalLayout {
                         padding-left: root.is_landscape ? 12px : 0px;
+                        padding-right: root.page_padding_right;
                         width: 100%;
                         height: 100%;
 
@@ -510,6 +522,7 @@ export component SettingsPage inherits Rectangle {
 
                     HorizontalLayout {
                         padding-left: root.is_landscape ? 12px : 0px;
+                        padding-right: root.page_padding_right;
                         width: 100%;
                         height: 100%;
 
@@ -540,6 +553,7 @@ export component SettingsPage inherits Rectangle {
 
                     HorizontalLayout {
                         padding-left: root.is_landscape ? 12px : 0px;
+                        padding-right: root.page_padding_right;
                         width: 100%;
                         height: 100%;
 

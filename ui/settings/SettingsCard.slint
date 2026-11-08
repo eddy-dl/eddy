@@ -1,14 +1,15 @@
 import { ThemeSettings } from "../themes/theme.slint";
 import { Shine } from "../components/Shine.slint";
 
-// How settings rows are laid out. On a phone they're grouped
-// as Google Messages (MD3 Expressive) does: each row its own card, 2px
-// apart, big corners at a group's ends. Desktop keeps flat MD3 list items.
+// How settings rows are laid out: grouped as Google Messages (MD3
+// Expressive) does, each row its own card, 2px apart, big corners at a
+// group's ends. On desktop too (Windows' own settings are cards).
 export global SettingsLayout {
-    // Set by the desktop app. Not from AppSettings.is_mobile, which only
-    // Android's Rust sets: the viewer shows the phone's layout.
+    // Set by the desktop app (it hides Android-only rows). Not from
+    // AppSettings.is_mobile, which only Android's Rust sets: the viewer
+    // shows the phone's layout.
     in-out property <bool> desktop;
-    out property <bool> cards: !self.desktop;
+    out property <bool> cards: true;
     // Between rows, and the page's side padding (16 from the screen edge
     // with the page's own 12).
     out property <length> spacing: self.cards ? 2px : 0px;
