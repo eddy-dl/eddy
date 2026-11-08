@@ -18,8 +18,10 @@ name = "eddy"
 crate-type = ["cdylib", "rlib"]
 
 # Linux/Win/Mac build target
+# Named apart from the library (`eddy`, Android's libeddy.so): on Windows the
+# two would write the same eddy.pdb. Releases rename it anyway.
 [[bin]]
-name = "eddy"
+name = "eddy-desktop"
 path = "src/main.rs"
 
 [dependencies]

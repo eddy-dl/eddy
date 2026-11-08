@@ -61,7 +61,7 @@ Android 8 (API 26) or newer.
 On Windows and Linux, the desktop app is a plain Cargo build:
 
 ```sh
-SLINT_STYLE=fluent cargo build --release --bin eddy
+SLINT_STYLE=fluent cargo build --release --bin eddy-desktop
 ```
 
 To look at the interface without building the app, open it in `slint-viewer`:

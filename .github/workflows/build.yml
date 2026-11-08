@@ -44,16 +44,15 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # Just the program (--bin): a plain build also makes the library's
-      # cdylib, which the desktop doesn't use, and whose .pdb on Windows has
-      # the program's name (Cargo's output filename collision).
+      # cdylib, which the desktop doesn't use.
       - name: Build (release)
         run: |
-          cargo build --release --bin eddy --target x86_64-pc-windows-msvc
+          cargo build --release --bin eddy-desktop --target x86_64-pc-windows-msvc
           cargo build --release --target x86_64-pc-windows-msvc --manifest-path webview/Cargo.toml
 
       - name: Rename Binary
         run: |
-          Move-Item -Path "target\x86_64-pc-windows-msvc\release\eddy.exe" -Destination "target\x86_64-pc-windows-msvc\release\eddy-windows-x86_64.exe" -Force
+          Move-Item -Path "target\x86_64-pc-windows-msvc\release\eddy-desktop.exe" -Destination "target\x86_64-pc-windows-msvc\release\eddy-windows-x86_64.exe" -Force
           Move-Item -Path "webview\target\x86_64-pc-windows-msvc\release\eddy-webview.exe" -Destination "target\x86_64-pc-windows-msvc\release\eddy-webview-windows-x86_64.exe" -Force
 
 
@@ -90,12 +89,12 @@ jobs:
 
       - name: Build (release)
         run: |
-          cargo build --release --bin eddy
+          cargo build --release --bin eddy-desktop
           cargo build --release --manifest-path webview/Cargo.toml
 
       - name: Rename Binary
         run: |
-          Move-Item -Path "target\release\eddy.exe" -Destination "target\release\eddy-windows-arm64.exe" -Force
+          Move-Item -Path "target\release\eddy-desktop.exe" -Destination "target\release\eddy-windows-arm64.exe" -Force
           Move-Item -Path "webview\target\release\eddy-webview.exe" -Destination "target\release\eddy-webview-windows-arm64.exe" -Force
 
       - name: Upload artifact
@@ -138,7 +137,7 @@ jobs:
 
       - name: Build (release)
         run: |
-          cargo build --release --bin eddy
+          cargo build --release --bin eddy-desktop
           cargo build --release --manifest-path webview/Cargo.toml
 
       - name: Tests
@@ -146,7 +145,7 @@ jobs:
 
       - name: Rename Binary
         run: |
-          mv -f target/release/eddy target/release/eddy-linux-x86_64
+          mv -f target/release/eddy-desktop target/release/eddy-linux-x86_64
           mv -f webview/target/release/eddy-webview target/release/eddy-webview-linux-x86_64
 
       - name: Upload artifact
@@ -189,12 +188,12 @@ jobs:
 
       - name: Build (release)
         run: |
-          cargo build --release --bin eddy
+          cargo build --release --bin eddy-desktop
           cargo build --release --manifest-path webview/Cargo.toml
 
       - name: Rename Binary
         run: |
-          mv -f target/release/eddy target/release/eddy-linux-arm64
+          mv -f target/release/eddy-desktop target/release/eddy-linux-arm64
           mv -f webview/target/release/eddy-webview target/release/eddy-webview-linux-arm64
 
       - name: Upload artifact
@@ -239,7 +238,7 @@ jobs:
 
       - name: Build (release)
         run: |
-          cargo build --release --bin eddy
+          cargo build --release --bin eddy-desktop
           cargo build --release --manifest-path webview/Cargo.toml
 
       # Eddy.app: Eddy with its webview helper beside it (macOS's own WebKit,
@@ -249,7 +248,8 @@ jobs:
           VERSION=$(grep -m 1 '^version = ' Cargo.toml | awk -F '"' '{print $2}')
           APP=Eddy.app
           mkdir -p $APP/Contents/MacOS $APP/Contents/Resources
-          cp target/release/eddy webview/target/release/eddy-webview $APP/Contents/MacOS/
+          cp target/release/eddy-desktop $APP/Contents/MacOS/eddy
+          cp webview/target/release/eddy-webview $APP/Contents/MacOS/
           # The icon, from the Windows one (sips reads .ico); none if that fails.
           mkdir -p icon.iconset
           for size in 16 32 64 128 256 512; do
