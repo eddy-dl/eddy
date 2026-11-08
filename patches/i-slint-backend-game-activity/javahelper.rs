@@ -2,6 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
 
 // cSpell: ignore dalvik jboolean jfloat jint
+
+// eddy patch: jni's bind_java_type! expands to AtomicBool::fetch_update,
+// deprecated (renamed try_update) since Rust 1.99; not code to change here.
+#![allow(deprecated)]
+
 use super::*;
 use i_slint_common::unicode_utils::{
     byte_offset_to_utf16_offset, utf16_offset_to_byte_offset_clamped,

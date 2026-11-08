@@ -14,7 +14,9 @@ env:
   # making Qt something the app needs to start.
   SLINT_NO_QT: "1"
   CARGO_INCREMENTAL: 0
-  RUSTFLAGS: "-C debuginfo=0"
+  # Warnings are errors in Eddy's crates and its patched copies (registry
+  # crates are exempt): a new one fails the PR instead of piling up.
+  RUSTFLAGS: "-C debuginfo=0 -D warnings"
 
 jobs:
   build-windows-x86_64:
@@ -340,12 +342,18 @@ jobs:
         env:
           ANDROID_PLATFORM: android-36
           ANDROID_JAR: ${{ env.ANDROID_HOME }}/platforms/android-36/android.jar
+          # The Slint backend's build script uses it to build its Java helper
+          # (it says when it isn't set, and takes 35.0.0).
+          ANDROID_BUILD_TOOLS_VERSION: "35.0.0"
         run: cargo ndk -t arm64-v8a -P 26 build --lib --release
 
       - name: Build Rust library (armeabi-v7a release)
         env:
           ANDROID_PLATFORM: android-36
           ANDROID_JAR: ${{ env.ANDROID_HOME }}/platforms/android-36/android.jar
+          # The Slint backend's build script uses it to build its Java helper
+          # (it says when it isn't set, and takes 35.0.0).
+          ANDROID_BUILD_TOOLS_VERSION: "35.0.0"
           FORCE_SKIA_BUILD: 1 
         run: cargo ndk -t armeabi-v7a -P 26 build --lib --release
 
