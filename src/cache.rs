@@ -1,8 +1,8 @@
 //! Settings → Advanced → Clear download cache: the files Eddy keeps only to
 //! save work and can make again. Link preview thumbnails, yt-dlp's saved
-//! link info, leftovers of size checks, and on Android the app's cache
-//! folder (downloaded helper installers, picked files' copies, Deno's cache,
-//! temporary files). Saved .torrent files (pending links use them), files
+//! link info, TikTok's page data, leftovers of size checks, and on Android
+//! the app's cache folder (downloaded helper installers, picked files'
+//! copies, Deno's cache, temporary files). Saved .torrent files (pending links use them), files
 //! still being copied into a picked folder, and desktop's installed tools
 //! stay.
 
@@ -55,7 +55,7 @@ fn refresh(ui_weak: slint::Weak<DownloaderApp>) {
 /// Everything the cache is made of (whichever exist).
 fn paths() -> Vec<PathBuf> {
     let data = PathBuf::from(crate::platform::get_app_data_dir());
-    let mut paths = vec![data.join("thumbs"), data.join("ytdlp-info")];
+    let mut paths = vec![data.join("thumbs"), data.join("ytdlp-info"), data.join("tiktok")];
     // Size checks' folders, left behind if the app stopped mid-check.
     if let Ok(entries) = std::fs::read_dir(&data) {
         paths.extend(
