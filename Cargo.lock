@@ -384,7 +384,8 @@ dependencies = [
 
 [[package]]
 name = "aria2-core"
-version = "0.3.10"
+version = "0.3.12"
+source = "git+https://github.com/balovess/aria2_rust/?tag=v0.3.12#a0099ef57d2dcd9c20995d74c85046f5e2d4592d"
 dependencies = [
  "adler32",
  "aes-gcm 0.10.3",
@@ -438,7 +439,8 @@ dependencies = [
 
 [[package]]
 name = "aria2-protocol"
-version = "0.3.7"
+version = "0.3.9"
+source = "git+https://github.com/balovess/aria2_rust/?tag=v0.3.12#a0099ef57d2dcd9c20995d74c85046f5e2d4592d"
 dependencies = [
  "anyhow",
  "async-trait",
