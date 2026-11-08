@@ -124,6 +124,19 @@ picked file into its (renamed) folder with the others untouched.
 Upstream issue: <https://github.com/balovess/aria2_rust/issues/78>. Drop this
 copy once a fix is released.
 
+## Unpausing before the pause took effect
+
+Pause marks a group Paused at once, and its task stops a little later. An
+Unpause in between set it back to Waiting and cleared the pause, so the task
+carried on downloading while the group stayed Waiting. Nothing moves a
+group in the active map from Waiting to Active, so it never showed as
+running (Eddy listed it as Queued). `request/request_group/lifecycle_ops.rs`
+`resume()` now makes it Active when its task is still running; a task that
+does stop for the pause re-queues it as Waiting when it completes, as before.
+
+Test: `test_e2e_engine_unpause_before_task_stops_runs_as_active`
+(`tests/test_e2e_download.rs`); it failed (Waiting) before the fix.
+
 ## Warnings
 
 `aria2-core/src/lib.rs` allows upstream's warnings (unused imports, a
