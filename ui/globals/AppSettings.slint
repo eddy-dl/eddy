@@ -31,6 +31,9 @@ export global AppSettings {
     in-out property <bool> bottom_navigation_bar: true;
     // Icon-only tab bar under the header instead of the bottom bar.
     in-out property <bool> top_navigation_bar: false;
+    // The Downloading tab's icon moves while something downloads (off: it
+    // rests, and the window isn't redrawn for it).
+    in-out property <bool> animate_downloading_tab: true;
     in property <string> current_download_path: "";
     // Shown when no download folder has been picked.
     in property <string> default_download_path: "Download/Eddy";

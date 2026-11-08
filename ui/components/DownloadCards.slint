@@ -56,6 +56,9 @@ global CardText {
 component ProgressBar inherits Rectangle {
     in property <float> progress;
     in property <color> fill_color;
+    // Glides to each new value; off when the bar isn't on screen, so an
+    // update doesn't keep the window redrawing for nothing.
+    in property <bool> animated: true;
 
     height: 4px;
     border-radius: 2px;
@@ -67,7 +70,7 @@ component ProgressBar inherits Rectangle {
         height: parent.height;
         border-radius: parent.border-radius;
         background: root.fill_color;
-        animate width { duration: 300ms; easing: ease-out; }
+        animate width { duration: root.animated ? 300ms : 0ms; easing: ease-out; }
     }
 }
 
@@ -188,6 +191,8 @@ export component ListHeader inherits Text {
 export component DownloadingCard inherits Rectangle {
     in property <DownloadItem> item;
     in property <bool> selected;
+    // Its progress bar glides (only while the card is on screen).
+    in property <bool> animated: true;
     callback clicked();
     callback long_pressed();
 
@@ -231,6 +236,7 @@ export component DownloadingCard inherits Rectangle {
             progress: root.item.progress;
             // Material 3's progress indicators take the main colour.
             fill_color: ThemeSettings.primary_accent;
+            animated: root.animated;
         }
     }
 }
