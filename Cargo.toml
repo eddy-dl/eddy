@@ -5,8 +5,10 @@ edition = "2024"
 license = "GPL-3.0-or-later"
 
 [workspace]
-# aria2_rust, patched (see patches/aria2_rust), is a workspace of its own.
-exclude = ["patches/aria2_rust"]
+# aria2_rust, patched (see patches/aria2_rust), is a workspace of its own, as
+# is the desktop app's webview helper (webview/: a program of its own, so
+# Eddy doesn't need WebKitGTK or WebView2 to start).
+exclude = ["patches/aria2_rust", "webview"]
 
 # Android/IOS build target
 [lib]
