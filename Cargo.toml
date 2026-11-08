@@ -23,69 +23,56 @@ name = "eddy"
 path = "src/main.rs"
 
 [dependencies]
-aria2-core = { git = "https://github.com/balovess/aria2_rust/", package = "aria2-core", features = ["bittorrent", "metalink", "sftp"] }
-# Torrent file parsing (names and sizes for picked .torrent files).
-aria2-protocol = { git = "https://github.com/balovess/aria2_rust/", package = "aria2-protocol" }
 # MEGA: its files are AES-128-CTR encrypted, names AES-CBC, keys AES-ECB
 # (versions already in the tree). 0.9 uses ARMv8's AES instructions when the
 # CPU has them; 0.8 only with a --cfg flag, and ran 20x slower without.
 aes = "0.9"
-ctr = "0.10"
+aria2-core = { git = "https://github.com/balovess/aria2_rust/", package = "aria2-core", features = ["bittorrent", "metalink", "sftp"] }
+# Torrent file parsing (names and sizes for picked .torrent files).
+aria2-protocol = { git = "https://github.com/balovess/aria2_rust/", package = "aria2-protocol" }
 base64 = "0.21"
+ctr = "0.10"
 dirs = "5.0"
+# The UI, compiled from ui/*.slint (re-exported in src/lib.rs).
+eddy-ui = { path = "ui" }
+# Walking scraper's parsed tree (its node type).
+ego-tree = "0.10"
 linkify = "0.11"
 log = "0.4"
-# aria2-core reports through tracing; its warnings and errors go to
-# logs/aria2.log (see logs.rs).
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }
 percent-encoding = "2"
 rand = "0.8"
 regex = "1"
 # Link checks. Same reqwest build as aria2-core.
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
 rusqlite = { version = "0.40.1", features = ["bundled"] }
-sha2 = "0.10"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-slint = { version = "1.18.1" }
-# The UI, compiled from ui/*.slint (re-exported in src/lib.rs).
-eddy-ui = { path = "ui" }
-sys-locale = "0.3"
-tokio = { version = "1.30", features = ["rt-multi-thread", "macros", "time", "sync", "fs", "io-util"] }
-url = "2"
 # Novels: reading sites' HTML, and packing the EPUB (also unpacks the
 # desktop tools).
 scraper = "0.24"
-# Walking scraper's parsed tree (its node type).
-ego-tree = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+slint = { version = "1.18.1" }
+sys-locale = "0.3"
+tokio = { version = "1.30", features = ["rt-multi-thread", "macros", "time", "sync", "fs", "io-util"] }
+# aria2-core reports through tracing; its warnings and errors go to
+# logs/aria2.log (see logs.rs).
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }
+url = "2"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 # Unpacking yt-dlp, ffmpeg and Deno (Settings → Downloads); pure Rust.
 lzma-rs = "0.3"
-rfd = "0.14"
-tar = "0.4"
-system-theme = { version = "0.3", default-features = false }
-webbrowser = "1.0"
 # Finished / failed download notifications.
 notify-rust = "4"
 # The window handle, for Windows' taskbar progress.
 raw-window-handle = "0.6"
+rfd = "0.14"
 slint = { version = "1.18.1", features = ["raw-window-handle-06"] }
-
-# Taskbar progress: Windows' ITaskbarList3 (the version Slint already uses).
-# Process groups for the programs Eddy starts (children.rs).
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
-
-[target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell"] }
-
-# Taskbar progress: the Unity launcher entry signal (KDE, Dash to Dock),
-# over the D-Bus library Slint already uses.
-[target.'cfg(target_os = "linux")'.dependencies]
-zbus = "5"
+system-theme = { version = "0.3", default-features = false }
+tar = "0.4"
+webbrowser = "1.0"
 
 [target.'cfg(target_os = "android")'.dependencies]
 android-activity = { version = "0.6.1", features = ["game-activity"] }
@@ -97,6 +84,19 @@ ndk-context = "0.1"
 rustls-platform-verifier = "0.7"
 serde_json = "1.0"
 slint = { version = "1.18.1", features = ["backend-android-activity-06"] }
+
+# Taskbar progress: the Unity launcher entry signal (KDE, Dash to Dock),
+# over the D-Bus library Slint already uses.
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = "5"
+
+# Taskbar progress: Windows' ITaskbarList3 (the version Slint already uses).
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell"] }
+
+# Process groups for the programs Eddy starts (children.rs).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
 winres = "0.1"
