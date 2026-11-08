@@ -89,6 +89,8 @@ export global AppSettings {
     // Settings → Advanced: an overlay of Eddy's own memory and CPU use
     // (usage.rs fills `usage_text` once a second while it's on).
     in-out property <bool> show_usage: false;
+    // With it, the threads counted by name (the WebView's, Android's…).
+    in-out property <bool> usage_threads: false;
     // Settings → Advanced: the logs in the download folder, where other apps
     // (Termux) can read them, rather than in Eddy's own; and sharing them.
     in-out property <bool> logs_in_downloads: false;

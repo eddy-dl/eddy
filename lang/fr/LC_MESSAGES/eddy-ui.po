@@ -579,6 +579,15 @@ msgstr "Utiliser ce dossier"
 msgid "Runs yt-dlp"
 msgstr "Fait tourner yt-dlp"
 
+msgid "Runs yt-dlp and gallery-dl"
+msgstr "Fait tourner yt-dlp et gallery-dl"
+
+msgid "Downloads galleries: image boards, art and photo sites"
+msgstr "Télécharge des galeries : imageboards, sites d’art et de photo"
+
+msgid "Eddy downloads it and what it needs from PyPI and keeps them in its own folder. Python runs it."
+msgstr "Eddy le télécharge depuis PyPI, avec ce dont il a besoin, et les garde dans son propre dossier. Python le fait tourner."
+
 msgid "Downloads media from most sites"
 msgstr "Télécharge les médias de la plupart des sites"
 
@@ -861,6 +870,12 @@ msgstr "Afficher l’utilisation des ressources"
 msgid "Eddy's memory and CPU use, at the top of the screen."
 msgstr "La mémoire et le processeur utilisés par Eddy, en haut de l’écran."
 
+msgid "Thread names"
+msgstr "Noms des threads"
+
+msgid "Eddy's threads by name in the overlay, to see whose they are."
+msgstr "Les threads d’Eddy par nom dans l’incrustation, pour voir à qui ils sont."
+
 msgid "Save logs to Downloads"
 msgstr "Enregistrer les journaux dans Téléchargements"
 
@@ -879,8 +894,8 @@ msgstr "Partager"
 msgid "Debug"
 msgstr "Débogage"
 
-msgid "Update yt-dlp?"
-msgstr "Mettre à jour yt-dlp ?"
+msgid "Update {}?"
+msgstr "Mettre à jour {} ?"
 
-msgid "Eddy gets the newest yt-dlp ({})."
-msgstr "Eddy récupère la dernière version de yt-dlp ({})."
+msgid "Eddy gets the newest {} ({})."
+msgstr "Eddy récupère la dernière version de {} ({})."

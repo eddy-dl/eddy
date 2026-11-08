@@ -18,6 +18,7 @@ const NOVEL_NOTE_IMAGES_KEY: &str = "novel_author_note_images";
 const NOVEL_SMALL_IMAGES_KEY: &str = "novel_small_images";
 const NOVEL_PARTS_KEY: &str = "novel_parts";
 const SHOW_USAGE_KEY: &str = "show_usage";
+const USAGE_THREADS_KEY: &str = "usage_threads";
 // Settings → Downloads → Downloading: every download's defaults.
 const DL_SPEED_KEY: &str = "download_max_speed_kbps";
 const DL_CONNECTIONS_KEY: &str = "download_connections";
@@ -162,6 +163,7 @@ pub fn load_preferences(ui_weak: slint::Weak<DownloaderApp>) {
         app_settings.set_novel_parts(novel.parts);
         app_settings.set_logs_in_downloads(platform::get_pref(crate::logs::IN_DOWNLOADS_KEY, "false").ok().is_some_and(|v| v == "true"));
         app_settings.set_show_usage(platform::get_pref(SHOW_USAGE_KEY, "false").ok().is_some_and(|v| v == "true"));
+        app_settings.set_usage_threads(platform::get_pref(USAGE_THREADS_KEY, "false").ok().is_some_and(|v| v == "true"));
     }
 }
 
@@ -333,6 +335,7 @@ pub fn save_preferences(ui_weak: slint::Weak<DownloaderApp>) {
             (NOVEL_SMALL_IMAGES_KEY, app_settings.get_novel_small_images()),
             (NOVEL_PARTS_KEY, app_settings.get_novel_parts()),
             (SHOW_USAGE_KEY, app_settings.get_show_usage()),
+            (USAGE_THREADS_KEY, app_settings.get_usage_threads()),
             (crate::logs::IN_DOWNLOADS_KEY, app_settings.get_logs_in_downloads()),
         ] {
             if let Err(e) = platform::save_pref(key, &value.to_string()) {

@@ -1,8 +1,9 @@
-//! yt-dlp, FFmpeg and Deno on desktop (Settings → Downloads), adapted from
-//! urlsula's installdeps: when the user asks (and confirms), Eddy downloads
-//! them from GitHub into its own bin folder (yt-dlp with the community
-//! plugin, ffmpeg and ffprobe from BtbN's builds, Deno). Copies already on
-//! PATH count as installed; Eddy only updates its own.
+//! yt-dlp, FFmpeg, Deno and gallery-dl on desktop (Settings → Downloads),
+//! adapted from urlsula's installdeps: when the user asks (and confirms),
+//! Eddy downloads them from GitHub into its own bin folder (yt-dlp with the
+//! community plugin, ffmpeg and ffprobe from BtbN's builds, Deno,
+//! gallery-dl's own builds). Copies already on PATH count as installed;
+//! Eddy only updates its own.
 
 use crate::{AppSettings, DownloaderApp, HelperPackage};
 use slint::{ComponentHandle, ModelRc, VecModel};
@@ -14,7 +15,7 @@ use std::sync::Mutex;
 
 
 /// The tools, in the order Settings lists them.
-const TOOLS: [&str; 3] = ["ytdlp", "ffmpeg", "deno"];
+const TOOLS: [&str; 4] = ["ytdlp", "ffmpeg", "deno", "gallerydl"];
 
 /// A tool's newest build for this computer.
 #[derive(Clone, Debug)]
@@ -130,7 +131,7 @@ fn check() {
         if ask_github {
             let releases = fetch_releases().await;
             if let Err(e) = &releases {
-                log::warn!("couldn't check yt-dlp, ffmpeg and Deno releases: {e}");
+                log::warn!("couldn't check the tools' releases: {e}");
             }
             with_state(|s| s.releases = Some(releases));
             redraw();
@@ -150,7 +151,11 @@ fn installed_versions() -> HashMap<String, Installed> {
     let own_dir = crate::platform::tools_dir();
     let mut found = HashMap::new();
     for key in TOOLS {
-        let name = if key == "ytdlp" { "yt-dlp" } else { key };
+        let name = match key {
+            "ytdlp" => "yt-dlp",
+            "gallerydl" => "gallery-dl",
+            _ => key,
+        };
         let Some(path) = crate::platform::find_tool(name) else {
             continue;
         };
@@ -160,14 +165,28 @@ fn installed_versions() -> HashMap<String, Installed> {
             "ytdlp" => first_line(&path, "--version"),
             // "deno 2.9.1 (stable, release, …)"
             "deno" => first_line(&path, "--version").and_then(|l| l.split_whitespace().nth(1).map(String::from)),
-            // Eddy's copy: the build date it was installed from. A system
-            // copy: "ffmpeg version 6.1.1 …".
-            _ if own => std::fs::read_to_string(own_dir.join(".ffmpeg-version")).ok().map(|v| v.trim().to_string()),
+            // Eddy's copy: the build date it was installed from (gallery-dl's
+            // builds too). A system copy: "ffmpeg version 6.1.1 …",
+            // gallery-dl's "1.32.19".
+            _ if own => std::fs::read_to_string(own_dir.join(format!(".{key}-version"))).ok().map(|v| v.trim().to_string()),
+            "gallerydl" => first_line(&path, "--version"),
             _ => first_line(&path, "-version").and_then(|l| l.split_whitespace().nth(2).map(String::from)),
         };
         found.insert(key.to_string(), Installed { version: version.unwrap_or_default(), own });
     }
     found
+}
+
+/// gallery-dl's build for this computer (gdl-org/builds: Linux x86_64,
+/// macOS, Windows; Windows on ARM runs the x86_64 one).
+fn gallerydl_asset() -> Option<&'static str> {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => Some("gallery-dl_linux"),
+        ("macos", _) => Some("gallery-dl_macos"),
+        ("windows", "x86_64" | "aarch64") => Some("gallery-dl_windows.exe"),
+        ("windows", "x86") => Some("gallery-dl_windows_x86.exe"),
+        _ => None,
+    }
 }
 
 /// The release file names for this computer: (yt-dlp, ffmpeg, Deno).
@@ -246,6 +265,14 @@ async fn fetch_releases() -> Result<HashMap<String, Release>, String> {
         if let Some((url, size, _)) = asset(&release, &name) {
             let version = release["tag_name"].as_str().unwrap_or_default().trim_start_matches('v').to_string();
             found.insert("deno".to_string(), Release { version, url, size });
+        }
+    }
+    if let Some(name) = gallerydl_asset() {
+        // Built from gallery-dl daily, tagged with the date.
+        let release = github_release("https://api.github.com/repos/gdl-org/builds/releases/latest").await?;
+        if let Some((url, size, _)) = asset(&release, name) {
+            let version = release["tag_name"].as_str().unwrap_or_default().to_string();
+            found.insert("gallerydl".to_string(), Release { version, url, size });
         }
     }
     Ok(found)
@@ -334,6 +361,10 @@ async fn install_tool(key: &str, release: &Release) -> Result<(), String> {
                 }
                 let _ = std::fs::remove_file(&archive);
                 std::fs::write(dir.join(".ffmpeg-version"), &release.version).map_err(|e| e.to_string())
+            }
+            "gallerydl" => {
+                place(&archive, &dir.join(format!("gallery-dl{exe}")))?;
+                std::fs::write(dir.join(".gallerydl-version"), &release.version).map_err(|e| e.to_string())
             }
             _ => {
                 extract_zip(&archive, &dir, &[format!("deno{exe}")], false)?;

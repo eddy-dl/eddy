@@ -506,8 +506,8 @@ pub fn ended_at(id: i64, handle: Option<&Handle>, name: &str, ok: bool, message:
                 entry.saved.request.pick(&picked);
             }
             entry.saved.files = files;
-            // A torrent's (or a Drive or MEGA link's) one file, now that it's known.
-            if matches!(entry.saved.request.backend, Backend::Torrent | Backend::Drive | Backend::Mega) && !entry.saved.is_folder {
+            // A torrent's (or a Drive, MEGA or gallery link's) one file, now that it's known.
+            if matches!(entry.saved.request.backend, Backend::Torrent | Backend::Drive | Backend::Mega | Backend::Gallery) && !entry.saved.is_folder {
                 if let Some(name) = path.as_ref().and_then(|p| p.file_name()) {
                     entry.saved.file_type = file_type_index(crate::links::file_type_for(&name.to_string_lossy(), None));
                 }
@@ -570,6 +570,9 @@ fn several_files(request: &DownloadRequest) -> bool {
             }
             _ => false,
         },
+        // A gallery's files, unless it's one (not known yet: a folder).
+        Backend::Gallery => serde_json::from_str::<crate::gallerydl::GalleryRequest>(&request.format)
+            .map_or(true, |g| if g.items.is_empty() { g.count != 1 } else { g.items.len() > 1 }),
         _ => false,
     }
 }
@@ -2236,6 +2239,7 @@ fn show_info(id: i64) {
         Backend::Book => "Book",
         Backend::Drive => "Google Drive",
         Backend::Mega => "MEGA",
+        Backend::Gallery => "gallery-dl",
         Backend::Direct if request.browser.is_some() => "Direct, from Eddy's browser",
         Backend::Direct | Backend::Auto => "Direct",
     };
@@ -2497,6 +2501,7 @@ fn view(entry: &Entry, state: State) -> DownloadItem {
             Backend::Book => LinkBackend::Book,
             Backend::Drive => LinkBackend::Drive,
             Backend::Mega => LinkBackend::Mega,
+            Backend::Gallery => LinkBackend::Gallery,
             Backend::Direct | Backend::Auto => LinkBackend::Direct,
         },
         folder: saved.folder.clone().into(),
@@ -2573,7 +2578,7 @@ fn guess_type(request: &DownloadRequest) -> FileType {
                 FileType::Video
             }
         }
-        Backend::Direct | Backend::Auto | Backend::Drive | Backend::Mega => {
+        Backend::Direct | Backend::Auto | Backend::Drive | Backend::Mega | Backend::Gallery => {
             let name = if request.filename.is_empty() { downloader::label_for(request) } else { request.filename.clone() };
             crate::links::file_type_for(&name, None)
         }

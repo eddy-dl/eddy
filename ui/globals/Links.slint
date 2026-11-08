@@ -8,6 +8,7 @@ export enum LinkBackend {
     Book, // a web novel from a reading site, saved as an EPUB
     Drive, // a Google Drive file, or a folder's files, through aria2
     Mega, // a MEGA file, or a folder's files: fetched through aria2, then decrypted
+    Gallery, // a gallery's files (images, mostly), through gallery-dl
 }
 
 export enum ProbeState { Probing, Ready, Failed }

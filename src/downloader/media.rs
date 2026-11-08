@@ -318,6 +318,100 @@ fn start_ytdlp(
     Ok(job)
 }
 
+/// Downloads a gallery with gallery-dl (`request.format` holds the
+/// GalleryRequest): several files go in a folder of their own, each counted
+/// as gallery-dl says it's saved.
+pub(super) fn start_gallery(request: &DownloadRequest, dir: &str, name: Option<String>, deliver: Option<Deliver>) -> Result<u64, String> {
+    use std::io::BufRead;
+    let gallery: crate::gallerydl::GalleryRequest = serde_json::from_str(&request.format).unwrap_or_default();
+    if crate::gallerydl::command().is_none() {
+        return Err("gallery-dl isn't available".to_string());
+    }
+    let count = if gallery.items.is_empty() { gallery.count } else { gallery.items.len() };
+    let label = super::label_for(request);
+    // One file goes straight in; more (or not known yet) in their folder.
+    let folder = if count == 1 {
+        PathBuf::from(dir)
+    } else {
+        let folder = Path::new(dir).join(safe_name(name.as_deref().unwrap_or(&label)));
+        let in_use = |d: &Path| std::fs::read_dir(d).is_ok_and(|mut e| e.next().is_some());
+        let folder = if !request.resume && !request.settings.replace_existing && in_use(&folder) { super::free_path(&folder) } else { folder };
+        if let Some(folder_name) = folder.file_name().filter(|n| Some(n.to_string_lossy().as_ref()) != name.as_deref()) {
+            crate::downloads::set_folder_name(request.id, &folder_name.to_string_lossy());
+        }
+        folder
+    };
+    let args = crate::gallerydl::download_args(&request.url, &gallery, &folder.to_string_lossy());
+    let (record, (job, cancelled)) = (request.id, begin(&label));
+    let child: Arc<Mutex<Option<std::process::Child>>> = Arc::new(Mutex::new(None));
+    with_jobs(|jobs| {
+        if let Some((_, control)) = jobs.get_mut(&job) {
+            control.child = Some(Arc::clone(&child));
+        }
+    });
+    std::thread::spawn(move || {
+        let spawned = crate::gallerydl::command().ok_or_else(|| std::io::Error::other("gallery-dl isn't available")).and_then(|mut c| {
+            crate::children::own_group(&mut c)
+                .args(&args)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+        });
+        let mut running = match spawned {
+            Ok(running) => running,
+            Err(e) => {
+                end(job);
+                finished(record, label, false, format!("Couldn't run gallery-dl: {e}"), None, None);
+                return;
+            }
+        };
+        let stdout = running.stdout.take();
+        *child.lock().unwrap_or_else(|e| e.into_inner()) = Some(running);
+        let mut files = Vec::new();
+        if let Some(stdout) = stdout {
+            for line in std::io::BufReader::new(stdout).lines().map_while(Result::ok) {
+                // Some sites list a file twice (saved, then "# " as there
+                // already): counted once.
+                if let Some(path) = crate::gallerydl::saved_path(&line).filter(|p| !files.contains(p)) {
+                    wrote(job, &path);
+                    let shown = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    files.push(path);
+                    next_part(job, count.max(files.len()), &shown);
+                    progress(job, 1, 1);
+                }
+            }
+        }
+        let taken = child.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let output = taken.map(|c| c.wait_with_output());
+        end(job);
+        if cancelled.load(Ordering::SeqCst) {
+            return; // paused or cancelled
+        }
+        // gallery-dl's exit status says something failed, even when most
+        // files came: a failure only when nothing did.
+        let failure = match output {
+            Some(Ok(output)) if !output.status.success() && files.is_empty() => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                log_stderr(&label, &stderr);
+                let last = stderr.lines().rev().map(str::trim).find(|l| !l.is_empty()).unwrap_or("gallery-dl failed");
+                Some(last.rsplit("] ").next().unwrap_or(last).to_string())
+            }
+            Some(Ok(_)) if files.is_empty() => Some("gallery-dl found nothing to download".to_string()),
+            Some(Err(e)) => Some(e.to_string()),
+            _ => None,
+        };
+        match failure {
+            None => {
+                let first = files.first().cloned();
+                let shown = if files.len() == 1 { saved_name(&files, label) } else { folder.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(label) };
+                finished(record, shown, true, String::new(), deliver, first)
+            }
+            Some(message) => finished(record, label, false, message, None, None),
+        }
+    });
+    Ok(job)
+}
+
 /// The end of what a failed yt-dlp run printed, into logs/ytdlp.log.
 pub fn log_stderr(what: &str, stderr: &str) {
     let lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();

@@ -32,8 +32,59 @@ const VIDEO_URL_BASE: &str = "https://www.tiktok.com/@_/video/";
 
 /// Page data per video id for 5 minutes, so a download right after the
 /// preview doesn't scrape the page again: (item JSON, page URL, cookies).
+/// Kept on disk too (`cache_file`): on Android the share popup checks the
+/// link in its own process, and the download runs in the app's.
 static CACHE: LazyLock<Mutex<HashMap<String, (Value, String, CookieJar, Instant)>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+const CACHE_FOR: Duration = Duration::from_secs(300);
+
+fn cache_dir() -> std::path::PathBuf {
+    std::path::PathBuf::from(crate::platform::get_app_data_dir()).join("tiktok")
+}
+
+fn cache_file(id: &str) -> std::path::PathBuf {
+    cache_dir().join(format!("{}.json", id.chars().filter(char::is_ascii_alphanumeric).collect::<String>()))
+}
+
+/// A video's page data saved by any of Eddy's processes in the last few
+/// minutes.
+fn read_cached(id: &str) -> Option<(Value, String, CookieJar)> {
+    let path = cache_file(id);
+    let age = std::fs::metadata(&path).ok()?.modified().ok()?.elapsed().ok()?;
+    if age >= CACHE_FOR {
+        return None;
+    }
+    let saved: Value = serde_json::from_str(&std::fs::read_to_string(&path).ok()?).ok()?;
+    let mut jar = CookieJar::default();
+    for (name, value) in saved["cookies"].as_object()? {
+        jar.set(name, value.as_str().unwrap_or_default());
+    }
+    Some((saved["item"].clone(), saved["url"].as_str()?.to_string(), jar))
+}
+
+/// Saves a video's page data for the other process, and drops what's
+/// too old to use.
+fn write_cached(id: &str, item: &Value, url: &str, jar: &CookieJar) {
+    let dir = cache_dir();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            if entry.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age >= CACHE_FOR) {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+    let cookies: serde_json::Map<String, Value> =
+        jar.names().into_iter().map(|name| (name.to_string(), Value::from(jar.get(name).unwrap_or_default()))).collect();
+    let saved = serde_json::json!({ "item": item, "url": url, "cookies": cookies });
+    // Written whole, then moved into place: the other process never reads half of it.
+    let (path, part) = (cache_file(id), cache_file(&format!("{id}part")));
+    let written = std::fs::create_dir_all(&dir)
+        .and_then(|_| std::fs::write(&part, saved.to_string()))
+        .and_then(|_| std::fs::rename(&part, &path));
+    if let Err(e) = written {
+        log::warn!("couldn't keep TikTok's page data: {e}");
+    }
+}
 
 pub fn can_handle(url: &str) -> bool {
     SHORT_RE.is_match(url) || FULL_RE.is_match(url)
@@ -102,9 +153,12 @@ fn traverse(value: &Value, keys: &[&str]) -> Option<Value> {
 /// The page's item JSON, its final URL and the session cookies.
 async fn fetch_metadata(id: &str, page: &str) -> Result<(Value, String, CookieJar), String> {
     if let Some((item, url, jar, at)) = CACHE.lock().unwrap().get(id) {
-        if at.elapsed() < Duration::from_secs(300) {
+        if at.elapsed() < CACHE_FOR {
             return Ok((item.clone(), url.clone(), jar.clone()));
         }
+    }
+    if let Some(cached) = read_cached(id) {
+        return Ok(cached);
     }
 
     let mut jar = CookieJar::from_netscape_file(&http::cookie_file(), "tiktok.com");
@@ -153,10 +207,12 @@ async fn fetch_metadata(id: &str, page: &str) -> Result<(Value, String, CookieJa
     let scope = traverse(&data, &["__DEFAULT_SCOPE__"]).ok_or("TikTok's page data has changed")?;
     let item = traverse(&scope, &["itemStruct"]).ok_or("TikTok's page data has no video")?;
 
-    CACHE
-        .lock()
-        .unwrap()
-        .insert(id.to_string(), (item.clone(), page_url.clone(), jar.clone(), Instant::now()));
+    let mut cache = CACHE.lock().unwrap();
+    // Expired ones go, so the map doesn't keep every video of a long session.
+    cache.retain(|_, (.., at)| at.elapsed() < CACHE_FOR);
+    cache.insert(id.to_string(), (item.clone(), page_url.clone(), jar.clone(), Instant::now()));
+    drop(cache);
+    write_cached(id, &item, &page_url, &jar);
     Ok((item, page_url, jar))
 }
 
@@ -406,7 +462,7 @@ async fn tikmate_info(url: &str) -> Result<MediaInfo, String> {
         items.push(slideshow_item(items.len(), size, thumbnail, post.caption.clone()));
     }
     let id = FULL_RE.captures(url).map(|c| c[5].to_string()).unwrap_or_else(|| "tiktok".to_string());
-    Ok(MediaInfo { service: Service::TikTok, id, title: None, items, info_json: None })
+    Ok(MediaInfo { service: Service::TikTok, id, title: None, items, info_json: None, playlist: false })
 }
 
 /// The post from TikTok's own page.
@@ -445,7 +501,7 @@ async fn native_info(url: &str) -> Result<MediaInfo, String> {
             duration,
         });
     }
-    Ok(MediaInfo { service: Service::TikTok, id, title: None, items, info_json: None })
+    Ok(MediaInfo { service: Service::TikTok, id, title: None, items, info_json: None, playlist: false })
 }
 
 /// Fresh links for the items asked for, the same way get_info found them:

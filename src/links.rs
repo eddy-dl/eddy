@@ -30,6 +30,8 @@ thread_local! {
     static DRIVE: RefCell<HashMap<i32, Vec<extractors::gdrive::Entry>>> = RefCell::new(HashMap::new());
     // MEGA folders' files (with their keys), by link id, in the preview's order.
     static MEGA: RefCell<HashMap<i32, Vec<extractors::mega::Entry>>> = RefCell::new(HashMap::new());
+    // How many files gallery-dl found, by link id.
+    static GALLERY: RefCell<HashMap<i32, usize>> = RefCell::new(HashMap::new());
     // Files caught in the browser for a pending link (by its id): the file's
     // link, what came with it, and the browser's user agent.
     static CAUGHT: RefCell<HashMap<i32, (String, crate::downloader::BrowserPass, String)>> = RefCell::new(HashMap::new());
@@ -67,6 +69,7 @@ where
             LinkBackend::Book => Backend::Book,
             LinkBackend::Drive => Backend::Drive,
             LinkBackend::Mega => Backend::Mega,
+            LinkBackend::Gallery => Backend::Gallery,
             _ => Backend::Direct,
         };
         start_link(id, backend, format.to_string(), filename.to_string(), &options);
@@ -182,6 +185,7 @@ where
             let book = link.backends.row_data(0) == Some(LinkBackend::Book);
             let drive = link.backends.row_data(0) == Some(LinkBackend::Drive);
             let mega = link.backends.row_data(0) == Some(LinkBackend::Mega);
+            let gallery = link.backends.row_data(0) == Some(LinkBackend::Gallery);
             let backend = match choice {
                 _ if torrent => Backend::Torrent,
                 // Books stay books, with the Books defaults.
@@ -190,6 +194,8 @@ where
                 // downloads all its files.
                 _ if drive => Backend::Drive,
                 _ if mega => Backend::Mega,
+                // Only gallery-dl found something: everything it found.
+                _ if gallery => Backend::Gallery,
                 QuickBackend::Direct => Backend::Direct,
                 QuickBackend::Media => Backend::Media,
                 _ => Backend::Auto,
@@ -494,6 +500,22 @@ fn start_link(id: i32, backend: Backend, format: String, filename: String, optio
             }
             None => String::new(),
         },
+        // A gallery's picked files, when the list is gallery-dl's (next to
+        // yt-dlp it's yt-dlp's, and gallery-dl saves everything).
+        Backend::Gallery => {
+            let count = GALLERY.with(|g| g.borrow().get(&id).copied()).unwrap_or(0);
+            let own_list = link.backends.row_data(0) == Some(LinkBackend::Gallery) && link.files.row_count() > 1;
+            let items: Vec<usize> = if own_list && link.files.iter().any(|f| !f.selected) {
+                link.files.iter().filter(|f| f.selected).map(|f| f.index as usize).collect()
+            } else {
+                Vec::new()
+            };
+            if own_list && items.is_empty() && link.files.iter().all(|f| !f.selected) {
+                crate::platform::show_toast("Pick at least one file to download");
+                return;
+            }
+            serde_json::to_string(&crate::gallerydl::GalleryRequest { items, count }).unwrap_or_default()
+        }
         _ => format,
     };
     // The torrent's other files, kept out of its folder.
@@ -578,6 +600,8 @@ fn link_category(link: &PendingLink, audio: bool) -> &'static str {
         },
         // A Drive or MEGA folder's files aren't a torrent's.
         Some(LinkBackend::Drive | LinkBackend::Mega) if link.file_type == FileType::Folder => category_folder(FileType::Other),
+        // A page of galleries (a user's): pictures, mostly.
+        Some(LinkBackend::Gallery) if link.file_type == FileType::Folder => category_folder(FileType::Image),
         _ => file_category(link.file_type, &link.filename),
     }
 }
@@ -661,6 +685,7 @@ fn take_pending(id: i32) -> Option<PendingLink> {
     MEDIA.with(|m| m.borrow_mut().remove(&id));
     DRIVE.with(|d| d.borrow_mut().remove(&id));
     MEGA.with(|d| d.borrow_mut().remove(&id));
+    GALLERY.with(|g| g.borrow_mut().remove(&id));
     if PENDING.with(|m| m.row_count() == 0) {
         // Nothing left to show a check's result to.
         crate::children::stop_checks();
@@ -872,6 +897,8 @@ struct Probe {
     drive: Option<Vec<extractors::gdrive::Entry>>,
     /// A MEGA folder's files, next to `files` (their handles and keys).
     mega: Option<Vec<extractors::mega::Entry>>,
+    /// How many files gallery-dl found, when it offers to download them.
+    gallery: Option<usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -910,6 +937,9 @@ struct MediaMeta {
     /// A yt-dlp playlist, and how many entries it had.
     playlist: bool,
     entries: usize,
+    /// The items that came through, by their place in the playlist (with
+    /// gaps where yt-dlp couldn't read one).
+    available: Vec<usize>,
     /// Its items (several), and the preview's choice for them: a video
     /// quality and an audio bitrate ("128"), which items follow unless
     /// they've been given their own.
@@ -965,6 +995,9 @@ fn apply_probe(id: i32, result: Result<Probe, String>) {
                 }
                 if let Some(entries) = probe.mega {
                     MEGA.with(|d| d.borrow_mut().insert(id, entries));
+                }
+                if let Some(count) = probe.gallery {
+                    GALLERY.with(|g| g.borrow_mut().insert(id, count));
                 }
                 if let Some(media) = probe.media {
                     link.service = media.service.label().into();
@@ -1039,6 +1072,7 @@ pub async fn pick_backend(url: &str) -> (Backend, String) {
                 Some(LinkBackend::Book) => Backend::Book,
                 Some(LinkBackend::Drive) => Backend::Drive,
                 Some(LinkBackend::Mega) => Backend::Mega,
+                Some(LinkBackend::Gallery) => Backend::Gallery,
                 _ => Backend::Direct,
             };
             // Best quality; music stays audio.
@@ -1049,6 +1083,7 @@ pub async fn pick_backend(url: &str) -> (Backend, String) {
                     service: Some(media.service),
                     playlist: media.playlist,
                     entries: media.entries,
+                    items: whole_playlist(media),
                     square_covers: media.square_covers.clone(),
                     info_json: media.info_json.clone(),
                     image: media.kind == MediaKind::Image,
@@ -1095,6 +1130,7 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
             book: None,
             drive: None,
             mega: None,
+            gallery: None,
         });
     }
 
@@ -1129,6 +1165,7 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
             }),
             drive: None,
             mega: None,
+            gallery: None,
         });
     }
 
@@ -1144,10 +1181,15 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
         return drive_probe(link).await;
     }
 
-    // TikTok, Instagram, Pinterest: their own extractors (yt-dlp if those fail).
+    // TikTok, Instagram, Pinterest: their own extractors (yt-dlp if those
+    // fail), with gallery-dl's alongside if it finds something.
     if extractors::native_service(url).is_some() {
-        let info = extractors::probe(url).await?;
-        return Ok(media_probe(info).await);
+        let (info, gallery) = tokio::join!(extractors::probe(url), gallery_check(url));
+        return match (info, gallery) {
+            (Ok(info), gallery) => Ok(with_gallery(media_probe(info).await, gallery)),
+            (Err(_), Some(gallery)) => Ok(gallery_probe(gallery)),
+            (Err(e), None) => Err(e),
+        };
     }
 
     let scheme = url.split("://").next().unwrap_or("").to_ascii_lowercase();
@@ -1166,6 +1208,7 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
                 book: None,
                 drive: None,
                 mega: None,
+                gallery: None,
             });
         }
         return Err(format!("Unsupported link type ({scheme})"));
@@ -1180,20 +1223,28 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
     // A web page (or a server that turns us away, as some media sites do with
     // plain requests): see whether yt-dlp can get something out of it.
     let is_page = matches!(&head, Ok(info) if info.status < 400 && info.is_page());
+    // gallery-dl looks at the same time, for a gallery's files.
     if page_or_error {
-        if crate::platform::ytdlp_available() {
-            match extractors::ytdlp::get_info(url).await {
-                Ok(info) if !info.items.is_empty() => return Ok(media_probe(info).await),
-                Ok(_) => {}
-                // Just a page, no media: it can still be saved as it is.
-                Err(e) if e.contains("Unsupported URL") => {}
-                // A media page yt-dlp couldn't read: say why, rather than
-                // offer the page itself.
-                Err(e) if is_page => return Err(format!("yt-dlp: {e}")),
-                Err(e) => log::warn!(target: "ytdlp", "{url}: {e}"),
+        let ytdlp = async {
+            if crate::platform::ytdlp_available() { Some(extractors::ytdlp::get_info(url).await) } else { None }
+        };
+        let (ytdlp, gallery) = tokio::join!(ytdlp, gallery_check(url));
+        match ytdlp {
+            Some(Ok(info)) if !info.items.is_empty() => return Ok(with_gallery(media_probe(info).await, gallery)),
+            Some(Ok(_)) => {}
+            // Just a page, no media: it can still be saved as it is.
+            Some(Err(e)) if e.contains("Unsupported URL") => {}
+            // A media page yt-dlp couldn't read: say why, rather than offer
+            // the page itself (unless gallery-dl could).
+            Some(Err(e)) if is_page && gallery.is_none() => return Err(format!("yt-dlp: {e}")),
+            Some(Err(e)) => log::warn!(target: "ytdlp", "{url}: {e}"),
+            None if is_page && gallery.is_none() && !crate::gallerydl::available() => {
+                return Err("A web page: Eddy needs the yt-dlp packages (Settings → Downloads) to get its media".to_string());
             }
-        } else if is_page {
-            return Err("A web page: Eddy needs the yt-dlp packages (Settings → Downloads) to get its media".to_string());
+            None => {}
+        }
+        if let Some(gallery) = gallery {
+            return Ok(gallery_probe(gallery));
         }
     }
 
@@ -1229,6 +1280,7 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
                 book: None,
                 drive: None,
                 mega: None,
+                gallery: None,
             });
         }
     }
@@ -1264,6 +1316,7 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
         book: None,
         drive: None,
         mega: None,
+        gallery: None,
     })
 }
 
@@ -1301,6 +1354,7 @@ async fn probe_torrent_link(url: &str, filename: &str) -> Result<Probe, String> 
         book: None,
         drive: None,
         mega: None,
+        gallery: None,
     })
 }
 
@@ -1320,6 +1374,7 @@ async fn drive_probe(link: extractors::gdrive::Link) -> Result<Probe, String> {
         book: None,
         drive: None,
         mega: None,
+        gallery: None,
     };
     match link {
         Link::File(id) => {
@@ -1355,6 +1410,7 @@ async fn drive_probe(link: extractors::gdrive::Link) -> Result<Probe, String> {
                 files,
                 drive: Some(folder.entries),
                 mega: None,
+                gallery: None,
                 ..empty
             })
         }
@@ -1375,6 +1431,7 @@ async fn mega_probe(link: extractors::mega::Link) -> Result<Probe, String> {
         book: None,
         drive: None,
         mega: None,
+        gallery: None,
     };
     let (handle, key, node) = match link {
         Link::File { handle, key } => {
@@ -1398,6 +1455,7 @@ async fn mega_probe(link: extractors::mega::Link) -> Result<Probe, String> {
             size: format_size(entry.size),
             filename: entry.path.clone(),
             mega: Some(folder.entries),
+            gallery: None,
             ..empty
         });
     }
@@ -1408,6 +1466,7 @@ async fn mega_probe(link: extractors::mega::Link) -> Result<Probe, String> {
         size: format_size(folder.entries.iter().map(|e| e.size).sum()),
         files,
         mega: Some(folder.entries),
+        gallery: None,
         ..empty
     })
 }
@@ -1725,11 +1784,12 @@ async fn media_probe(info: MediaInfo) -> Probe {
     // Each item's thumbnail, a few at once (a long playlist's first ones).
     let items = if several { item_metas(&info.items).await } else { Vec::new() };
     // Several items go in a folder: the playlist's title, else the post's
-    // caption.
+    // caption. A playlist's one readable item too (it's downloaded into the
+    // playlist's folder).
     let filename = info
         .title
         .as_deref()
-        .filter(|_| several)
+        .filter(|_| several || info.playlist)
         .or(first.caption.as_deref())
         .map(clean_name)
         .filter(|c| !c.is_empty())
@@ -1753,8 +1813,10 @@ async fn media_probe(info: MediaInfo) -> Probe {
         media: Some(MediaMeta {
             service: info.service,
             kind: first.kind,
-            playlist: several && info.service == Service::YtDlp,
+            // Even one item of a playlist is fetched as an item of it.
+            playlist: info.playlist && info.service == Service::YtDlp,
             entries: info.items.len(),
+            available: info.items.iter().map(|i| i.index).collect(),
             items,
             video_choice: String::new(),
             audio_choice: String::new(),
@@ -1766,6 +1828,57 @@ async fn media_probe(info: MediaInfo) -> Probe {
         book: None,
         drive: None,
         mega: None,
+        gallery: None,
+    }
+}
+
+/// gallery-dl's look at a link, when it's there: what it found, or None
+/// (nothing, or a site it doesn't know).
+async fn gallery_check(url: &str) -> Option<crate::gallerydl::Gallery> {
+    if !crate::gallerydl::available() {
+        return None;
+    }
+    match crate::gallerydl::probe(url).await {
+        Ok(gallery) => Some(gallery),
+        Err(e) if e == "Unsupported URL" => None,
+        Err(e) => {
+            log::warn!(target: "ytdlp", "gallery-dl: {url}: {e}");
+            None
+        }
+    }
+}
+
+/// A media link's check with gallery-dl offered too, when it found
+/// something (before Direct).
+fn with_gallery(mut probe: Probe, gallery: Option<crate::gallerydl::Gallery>) -> Probe {
+    if let Some(gallery) = gallery {
+        let at = probe.backends.iter().position(|b| *b == LinkBackend::Direct).unwrap_or(probe.backends.len());
+        probe.backends.insert(at, LinkBackend::Gallery);
+        probe.gallery = Some(gallery.files.len());
+    }
+    probe
+}
+
+/// A link only gallery-dl found something in: its files, to pick from.
+fn gallery_probe(gallery: crate::gallerydl::Gallery) -> Probe {
+    let count = gallery.files.len();
+    let first = gallery.files.first().map(|(name, _)| name.clone()).unwrap_or_default();
+    // One file is named as it is; several go in a folder named after the
+    // gallery.
+    let filename = if count == 1 { first.clone() } else { clean_name(&gallery.title) };
+    Probe {
+        file_type: if count == 0 { FileType::Folder } else { file_type_for(&first, None) },
+        filename: filename.chars().take(150).collect(),
+        size: String::new(),
+        backends: vec![LinkBackend::Gallery],
+        formats: Vec::new(),
+        files: if count > 1 { gallery.files.iter().enumerate().map(|(i, (name, _))| (i + 1, name.clone(), 0)).collect() } else { Vec::new() },
+        items: Vec::new(),
+        media: None,
+        book: None,
+        drive: None,
+        mega: None,
+        gallery: Some(count),
     }
 }
 
@@ -1896,6 +2009,14 @@ fn book_options(format: &str) -> crate::novels::NovelOptions {
     options
 }
 
+/// The items for all of a playlist: none (yt-dlp takes every entry), or,
+/// when the check missed some or only one came through, just the ones it
+/// read, by their places (the missing ones would fail the run again).
+fn whole_playlist(meta: &MediaMeta) -> Vec<usize> {
+    let gaps = meta.available.iter().enumerate().any(|(i, &place)| i != place);
+    if meta.playlist && (gaps || meta.available.len() == 1) { meta.available.clone() } else { Vec::new() }
+}
+
 /// What a media download asks the downloader for: the extractor, the
 /// items, and the quality the preview passed (`format`: a quality key, or
 /// "audio|<kbps>|<mp3/m4a>" for converting to audio).
@@ -1932,6 +2053,9 @@ fn media_request(id: i32, link: &PendingLink, format: &str) -> MediaRequest {
     }
     if link.files_selected < link.files.row_count() as i32 {
         request.items = link.files.iter().filter(|f| f.selected).map(|f| (f.index - 1) as usize).collect();
+    }
+    if let Some(meta) = meta.as_ref().filter(|_| request.items.is_empty()) {
+        request.items = whole_playlist(meta);
     }
     request.item_qualities =
         link.files.iter().filter(|f| f.selected && !f.quality.is_empty()).map(|f| ((f.index - 1) as usize, f.quality.to_string())).collect();

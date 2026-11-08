@@ -32,6 +32,9 @@ pub enum Backend {
     /// A MEGA file or folder; `format` is a mega::MegaRequest (a folder's
     /// picked files).
     Mega,
+    /// A gallery's files, through gallery-dl; `format` is a
+    /// gallerydl::GalleryRequest (the picked files).
+    Gallery,
 }
 
 impl Backend {
@@ -43,6 +46,7 @@ impl Backend {
             4 => Backend::Book,
             5 => Backend::Drive,
             6 => Backend::Mega,
+            7 => Backend::Gallery,
             _ => Backend::Direct,
         }
     }
@@ -55,6 +59,7 @@ impl Backend {
             Backend::Book => 4,
             Backend::Drive => 5,
             Backend::Mega => 6,
+            Backend::Gallery => 7,
         }
     }
 }
@@ -588,6 +593,7 @@ fn launch(request: &DownloadRequest) -> Result<Option<Handle>, String> {
         Backend::Book => Some(Handle::Job(book::start(request, &dir, name, deliver.clone())?)),
         Backend::Drive => Some(Handle::Job(drive::start(request, &dir, name, deliver.clone())?)),
         Backend::Mega => Some(Handle::Job(mega::start(request, &dir, name, deliver.clone())?)),
+        Backend::Gallery => Some(Handle::Job(media::start_gallery(request, &dir, name, deliver.clone())?)),
         Backend::Auto => {
             CHOOSING.fetch_add(1, Ordering::SeqCst);
             let mut request = request.clone();

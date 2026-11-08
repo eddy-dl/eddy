@@ -178,6 +178,31 @@ fn refresh() {
                 progress: state.1,
             },
         );
+        // gallery-dl, which runs on the same Python.
+        let version = crate::gallerydl::installed_version();
+        let release = match &releases {
+            Some(Ok(map)) => map.get("gallerydl").cloned(),
+            _ => None,
+        };
+        let state = match (in_progress.get("gallerydl"), &version, &release) {
+            (Some(p), ..) => (4, *p),
+            (None, None, Some(_)) => (1, 0.0),
+            (None, None, None) if matches!(releases, Some(Err(_))) => (7, 0.0),
+            (None, None, None) => (0, 0.0),
+            (None, Some(v), Some(r)) if newer(&r.version, v) => (3, 0.0),
+            (None, Some(_), _) => (2, 0.0),
+        };
+        rows.insert(
+            2,
+            HelperPackage {
+                key: "gallerydl".into(),
+                installed: version.unwrap_or_default().into(),
+                latest: release.as_ref().map(|r| r.version.clone()).unwrap_or_default().into(),
+                size: release.as_ref().map(|r| crate::links::format_size(r.size)).unwrap_or_default().into(),
+                state: state.0,
+                progress: state.1,
+            },
+        );
     }
 
     UI.with(|u| {
@@ -284,6 +309,10 @@ async fn fetch_releases(abi: &str) -> Result<HashMap<String, Release>, String> {
             }
         }
     }
+    // gallery-dl's newest wheel on PyPI (with what it needs, a little more).
+    if let Ok((version, size)) = crate::gallerydl::latest().await {
+        found.insert("gallerydl".to_string(), Release { version, url: String::new(), size });
+    }
     Ok(found)
 }
 
@@ -330,6 +359,26 @@ fn update_ytdlp(release: Release) {
     });
 }
 
+/// Downloads gallery-dl's wheels into Eddy's folder (the user confirmed).
+fn install_gallerydl() {
+    set_downloading("gallerydl", Some(0.0));
+    refresh();
+    crate::downloader::runtime().spawn(async move {
+        let result = crate::gallerydl::install(|p| {
+            set_downloading("gallerydl", Some(p));
+            let _ = slint::invoke_from_event_loop(refresh);
+        })
+        .await;
+        set_downloading("gallerydl", None);
+        if let Err(e) = &result {
+            log::error!(target: "ytdlp", "couldn't install gallery-dl: {e}");
+            let message = format!("Couldn't install gallery-dl: {e}");
+            let _ = slint::invoke_from_event_loop(move || crate::platform::show_toast(&message));
+        }
+        let _ = slint::invoke_from_event_loop(refresh);
+    });
+}
+
 /// Downloads a package's APK (the user confirmed), then opens the installer.
 fn download(key: String) {
     let release = match RELEASES.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
@@ -341,6 +390,10 @@ fn download(key: String) {
     };
     if key == "ytdlp" {
         update_ytdlp(release);
+        return;
+    }
+    if key == "gallerydl" {
+        install_gallerydl();
         return;
     }
     if is_cached(&key, &release) {
