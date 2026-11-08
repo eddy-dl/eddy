@@ -13,9 +13,38 @@ const NAMES_EVERY: Duration = Duration::from_secs(5);
 /// Each thread's name and CPU time (clock ticks), by thread id.
 type Threads = std::collections::HashMap<u32, (String, u64)>;
 
+/// Frames drawn since the overlay's last update, and the time they took on
+/// the UI thread (from Slint's rendering notifier).
+#[derive(Default)]
+struct Frames {
+    count: u32,
+    busy: Duration,
+    began: Option<Instant>,
+}
+
 /// Starts the once-a-second sampling (it reads nothing while the overlay is
 /// off).
 pub fn start(ui: &DownloaderApp) {
+    let frames = std::rc::Rc::new(std::cell::RefCell::new(Frames::default()));
+    let counted = frames.clone();
+    // Two clock reads a frame; renderers that don't say leave no frame line.
+    let timed = ui
+        .window()
+        .set_rendering_notifier(move |state, _| {
+            let mut frames = counted.borrow_mut();
+            match state {
+                slint::RenderingState::BeforeRendering => frames.began = Some(Instant::now()),
+                slint::RenderingState::AfterRendering => {
+                    if let Some(began) = frames.began.take() {
+                        frames.busy += began.elapsed();
+                        frames.count += 1;
+                    }
+                }
+                _ => {}
+            }
+        })
+        .is_ok();
+    let mut frames_since = Instant::now();
     let ui_weak = ui.as_weak();
     // The CPU time at the last sample, and when.
     let mut last: Option<(Duration, Instant)> = None;
@@ -30,6 +59,8 @@ pub fn start(ui: &DownloaderApp) {
         let settings = ui.global::<AppSettings>();
         if !settings.get_show_usage() {
             last = None;
+            *frames.borrow_mut() = Frames::default();
+            frames_since = Instant::now();
             if !settings.get_usage_text().is_empty() {
                 settings.set_usage_text("".into());
             }
@@ -47,6 +78,17 @@ pub fn start(ui: &DownloaderApp) {
         };
         last = cpu.map(|cpu| (cpu, now));
         let mut text = text(percent);
+        // "frames 58/s · 1.9 ms": how often the window is drawn, and what a
+        // frame costs the UI thread on average.
+        if timed {
+            let mut counted = frames.borrow_mut();
+            let wall = now.duration_since(frames_since).as_secs_f64().max(0.001);
+            let each = if counted.count > 0 { counted.busy.as_secs_f64() * 1000.0 / counted.count as f64 } else { 0.0 };
+            text.push_str(&format!("\nframes {:.0}/s · {each:.1} ms", counted.count as f64 / wall));
+            counted.count = 0;
+            counted.busy = Duration::ZERO;
+            frames_since = now;
+        }
         if settings.get_usage_threads() {
             if names.as_ref().is_none_or(|(.., at)| at.elapsed() >= NAMES_EVERY) {
                 let threads = read_threads();
