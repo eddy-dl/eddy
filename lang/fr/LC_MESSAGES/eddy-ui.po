@@ -861,6 +861,12 @@ msgstr "Afficher l’utilisation des ressources"
 msgid "Eddy's memory and CPU use, at the top of the screen."
 msgstr "La mémoire et le processeur utilisés par Eddy, en haut de l’écran."
 
+msgid "Thread names"
+msgstr "Noms des threads"
+
+msgid "Eddy's threads by name in the overlay, to see whose they are."
+msgstr "Les threads d’Eddy par nom dans l’incrustation, pour voir à qui ils sont."
+
 msgid "Save logs to Downloads"
 msgstr "Enregistrer les journaux dans Téléchargements"
 

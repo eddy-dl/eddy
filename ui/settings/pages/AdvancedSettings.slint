@@ -118,6 +118,15 @@ export component AdvancedSettings inherits Rectangle {
                 checked <=> AppSettings.show_usage;
                 toggled => { AppSettings.preferences_changed(); }
             }
+            if AppSettings.show_usage: SwitchRow {
+                first: false;
+                last: false;
+                title: @tr("Thread names");
+                subtitle: @tr("Eddy's threads by name in the overlay, to see whose they are.");
+                text_color: root.text_color;
+                checked <=> AppSettings.usage_threads;
+                toggled => { AppSettings.preferences_changed(); }
+            }
 
             // Logs: private unless asked (they hold links and file names).
             SwitchRow {
