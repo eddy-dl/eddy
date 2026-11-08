@@ -419,6 +419,8 @@ pub fn label_for(request: &DownloadRequest) -> String {
 /// Downloads that ended since the last call (checking aria2's for news).
 pub fn take_finished() -> Vec<Finished> {
     if let Some(engine) = ENGINE.get() {
+        // Asked before the watch list is locked (the downloads' own lock).
+        let paused = crate::downloads::paused_ids();
         let mut watched = WATCHED.lock().unwrap_or_else(|e| e.into_inner());
         let mut followers = Vec::new();
         watched.retain(|w| match engine.get_progress(&w.gid) {
@@ -444,6 +446,11 @@ pub fn take_finished() -> Vec<Finished> {
                 }
                 false
             }
+            // Paused by the user: aria2 ends the task ("Download paused"),
+            // but the download goes on when it's resumed, which only resumes
+            // this gid: it stays watched, or its progress and its end would
+            // never reach the record (left Active, holding a queue slot).
+            Some(p) if p.status == "error" && paused.contains(&w.id) => true,
             Some(p) if p.status == "error" || p.status == "removed" => {
                 let message = engine.error_message(&w.gid).unwrap_or_else(|| p.status.clone());
                 if p.status == "error" {

@@ -423,6 +423,12 @@ pub fn running(id: i64, handle: Handle) {
     });
 }
 
+/// The records paused now (aria2 reports a paused download's task as ended:
+/// see downloader::take_finished).
+pub fn paused_ids() -> Vec<i64> {
+    with_entries(|entries| entries.iter().filter(|e| e.saved.state == State::Paused).map(|e| e.id).collect())
+}
+
 /// Whether download `id` should start now that Auto has picked how: still
 /// there and Active (not paused, cancelled or deleted while it was checked,
 /// nor queued), and not running already.
