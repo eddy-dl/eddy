@@ -43,9 +43,12 @@ jobs:
             webview
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      # Just the program (--bin): a plain build also makes the library's
+      # cdylib, which the desktop doesn't use, and whose .pdb on Windows has
+      # the program's name (Cargo's output filename collision).
       - name: Build (release)
         run: |
-          cargo build --release --target x86_64-pc-windows-msvc
+          cargo build --release --bin eddy --target x86_64-pc-windows-msvc
           cargo build --release --target x86_64-pc-windows-msvc --manifest-path webview/Cargo.toml
 
       - name: Rename Binary
@@ -87,7 +90,7 @@ jobs:
 
       - name: Build (release)
         run: |
-          cargo build --release
+          cargo build --release --bin eddy
           cargo build --release --manifest-path webview/Cargo.toml
 
       - name: Rename Binary
@@ -135,7 +138,7 @@ jobs:
 
       - name: Build (release)
         run: |
-          cargo build --release
+          cargo build --release --bin eddy
           cargo build --release --manifest-path webview/Cargo.toml
 
       - name: Tests
@@ -186,7 +189,7 @@ jobs:
 
       - name: Build (release)
         run: |
-          cargo build --release
+          cargo build --release --bin eddy
           cargo build --release --manifest-path webview/Cargo.toml
 
       - name: Rename Binary
@@ -236,7 +239,7 @@ jobs:
 
       - name: Build (release)
         run: |
-          cargo build --release
+          cargo build --release --bin eddy
           cargo build --release --manifest-path webview/Cargo.toml
 
       # Eddy.app: Eddy with its webview helper beside it (macOS's own WebKit,
