@@ -170,6 +170,64 @@ fn android_main(app: AndroidApp) {
     platform::deinit();
 }
 
+/// iOS: the app as on Android (the phone layout), with downloads run in the
+/// app's own process. Started by the eddy-ios binary.
+#[cfg(target_os = "ios")]
+pub fn ios_main() {
+    logs::init();
+    log::info!("Starting Eddy on iOS");
+    if let Err(e) = db::init(platform::get_app_data_dir()) {
+        log::error!("Failed to initialize database: {e}");
+    }
+    let ui = match DownloaderApp::new() {
+        Ok(ui) => ui,
+        Err(e) => {
+            log::error!("Failed to create Slint window: {:?}", e);
+            return;
+        }
+    };
+    logs::trim();
+    let ui_weak = ui.as_weak();
+    // Short messages show in the app's snackbar (no system toasts).
+    platform::set_toast_handler(move |message| {
+        let ui_weak = ui_weak.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                let snackbar = ui.global::<Snackbar>();
+                snackbar.set_message(message.into());
+                snackbar.set_serial(snackbar.get_serial().wrapping_add(1));
+            }
+        });
+    });
+    let ui_weak = ui.as_weak();
+    preferences::load_preferences(ui_weak.clone());
+    usage::start(&ui);
+    let app_settings = ui.global::<AppSettings>();
+    app_settings.on_preferences_changed(move || preferences::save_preferences(ui_weak.clone()));
+    let settings_weak = slint::Global::<'_, DownloaderApp>::as_weak(&app_settings);
+    app_settings.on_language_changed(move || {
+        if let Some(settings) = settings_weak.upgrade() {
+            preferences::apply_language(&settings.get_language());
+        }
+    });
+    app_settings.set_is_mobile(true);
+    app_settings.set_app_version(VERSION.into());
+    app_settings.set_slint_version(SLINT_VERSION.into());
+    app_settings.on_open_url(|url| platform::open_url(&url));
+    app_settings.set_default_download_path(storage::default_display().into());
+    // Downloads go to the app's Documents, which needs no permission.
+    app_settings.set_all_files_access(true);
+    links::install_main(&ui);
+    selection::install(&ui);
+    downloads::install(&ui);
+    folders::install(&ui);
+    cookies::install(&ui);
+    cache::install(&ui);
+    if let Err(e) = ui.run() {
+        log::error!("Eddy stopped: {:?}", e);
+    }
+}
+
 /// The share popup ("Download with Eddy" / "Preview in Eddy"): a small Slint
 /// window over the app the links came from, in its own process. Whatever
 /// isn't started or skipped stays pending for the main app.

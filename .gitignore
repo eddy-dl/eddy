@@ -18,3 +18,6 @@
 # Local editor / assistant settings
 /.claude/
 /.helix/
+/platforms/ios/Eddy.xcodeproj/
+/platforms/ios/build/
+/platforms/ios/Info.plist

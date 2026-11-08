@@ -1,11 +1,30 @@
 use super::PrefError;
+use std::collections::HashMap;
+use std::path::PathBuf;
 
-pub fn save_pref(_key: &str, _value: &str) -> Result<(), PrefError> {
+/// The app's own container (iOS sets HOME to it).
+fn home() -> PathBuf {
+    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(std::env::temp_dir)
+}
+
+// Preferences: a JSON file, as on desktop.
+fn prefs_path() -> PathBuf {
+    PathBuf::from(get_app_data_dir()).join("prefs.json")
+}
+
+fn read_all_prefs() -> HashMap<String, String> {
+    std::fs::read_to_string(prefs_path()).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+}
+
+pub fn save_pref(key: &str, value: &str) -> Result<(), PrefError> {
+    let mut map = read_all_prefs();
+    map.insert(key.to_string(), value.to_string());
+    std::fs::write(prefs_path(), serde_json::to_string(&map)?)?;
     Ok(())
 }
 
-pub fn get_pref(_key: &str, default: &str) -> Result<String, PrefError> {
-    Ok(default.to_string())
+pub fn get_pref(key: &str, default: &str) -> Result<String, PrefError> {
+    Ok(read_all_prefs().remove(key).unwrap_or_else(|| default.to_string()))
 }
 
 pub fn system_accent() -> Option<slint::Color> {
@@ -16,8 +35,10 @@ pub fn system_second_accent() -> Option<slint::Color> {
     None
 }
 
+/// Documents, which the Files app shows under "On My iPhone › Eddy"
+/// (UIFileSharingEnabled, LSSupportsOpeningDocumentsInPlace).
 pub fn get_default_download_location() -> String {
-    String::from("Documents")
+    home().join("Documents").to_string_lossy().into_owned()
 }
 
 pub fn pick_download_folder<F>(on_picked: F)
@@ -39,8 +60,9 @@ where
 {
 }
 
-pub fn start_download(_request: &crate::downloader::DownloadRequest) -> Result<(), String> {
-    Err("Downloads aren't supported on iOS yet".to_string())
+/// In-process, as on desktop (iOS has no download service to hand it to).
+pub fn start_download(request: &crate::downloader::DownloadRequest) -> Result<(), String> {
+    crate::downloader::start(request)
 }
 
 pub fn open_file(_path: &str) {}
@@ -71,13 +93,27 @@ pub fn has_all_files_access() -> bool {
 
 pub fn request_all_files_access() {}
 
+/// Library/Application Support/Eddy: kept and backed up, not shown in Files.
 pub fn get_app_data_dir() -> String {
-    std::env::var("HOME").into_owned()
+    let dir = home().join("Library").join("Application Support").join("Eddy");
+    let _ = std::fs::create_dir_all(&dir);
+    dir.to_string_lossy().into_owned()
 }
 
 pub fn open_native_url(_url: &str) {}
 pub fn trigger_haptic(_: super::Haptic) {}
-pub fn show_toast(_: &str) {}
+/// The app's snackbar, set up by ios_main (iOS has no toasts).
+static TOAST: std::sync::OnceLock<Box<dyn Fn(String) + Send + Sync>> = std::sync::OnceLock::new();
+
+pub fn set_toast_handler(show: impl Fn(String) + Send + Sync + 'static) {
+    let _ = TOAST.set(Box::new(show));
+}
+
+pub fn show_toast(message: &str) {
+    if let Some(show) = TOAST.get() {
+        show(message.to_string());
+    }
+}
 pub fn set_bar_icons_dark(_: bool) {}
 
 /// The yt-dlp helper apps are Android's; elsewhere yt-dlp is a normal program.

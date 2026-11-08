@@ -326,6 +326,59 @@ jobs:
           path: eddy-macos-${{ matrix.arch }}.zip
           retention-days: 1
 
+  build-ios:
+    name: Build (iOS)
+    runs-on: macos-latest
+    env:
+      SLINT_STYLE: material
+      # Cargo's output where the cache below finds it (Xcode's own folder
+      # otherwise; see platforms/ios/build_for_ios_with_cargo.bash).
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ios
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      # Eddy.app from the Xcode project XcodeGen makes (cargo builds the
+      # executable), not signed.
+      - name: Build (release)
+        run: |
+          cd platforms/ios
+          xcodegen
+          xcodebuild -project Eddy.xcodeproj -scheme Eddy -configuration Release \
+            -sdk iphoneos -destination generic/platform=iOS -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+
+      # An unsigned .ipa: AltStore, SideStore or Sideloadly sign it with the
+      # installer's Apple ID.
+      - name: Package
+        run: |
+          mkdir Payload
+          cp -R platforms/ios/build/Build/Products/Release-iphoneos/Eddy.app Payload/
+          zip -qry eddy-ios-unsigned.ipa Payload
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: eddy-ios-unsigned
+          path: eddy-ios-unsigned.ipa
+          retention-days: 1
+
   build-android:
     name: Build (Android)
     runs-on: ubuntu-latest

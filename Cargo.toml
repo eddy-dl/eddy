@@ -89,6 +89,10 @@ slint = { version = "1.18.1", features = ["backend-android-activity-06"] }
 
 # Taskbar progress: the Unity launcher entry signal (KDE, Dash to Dock),
 # over the D-Bus library Slint already uses.
+# iOS: Slint's winit backend, drawn with Skia on Metal (Slint's iOS guide).
+[target.'cfg(target_os = "ios")'.dependencies]
+slint = { version = "1.18.1", features = ["renderer-skia"] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = "5"
 

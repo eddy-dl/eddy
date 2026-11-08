@@ -1,0 +1,42 @@
+# The iOS app's Xcode project: `xcodegen` here makes Eddy.xcodeproj. Cargo
+# builds the executable (eddy-ios) through build_for_ios_with_cargo.bash,
+# as Slint's iOS guide does.
+name: Eddy
+options:
+  bundleIdPrefix: dev.pah
+settings:
+  ENABLE_USER_SCRIPT_SANDBOXING: NO
+targets:
+  Eddy:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.0"
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: dev.pah.eddy
+      MARKETING_VERSION: "0.2.0"
+      CURRENT_PROJECT_VERSION: "1"
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Eddy
+        # Full refresh rate on ProMotion screens (iOS caps apps at 60 otherwise).
+        CADisableMinimumFrameDurationOnPhone: true
+        UILaunchScreen:
+          - ImageRespectSafeAreaInsets: false
+        # Downloads go to Documents: shown in Files, under On My iPhone › Eddy.
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        # UIKit's scene lifecycle (iOS 27 won't launch an app without it), with
+        # the scene delegate Slint's winit backend provides.
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations:
+            UIWindowSceneSessionRoleApplication:
+              - UISceneConfigurationName: Slint
+                UISceneDelegateClassName: SlintWindowSceneDelegate
+    sources: []
+    postCompileScripts:
+      - script: |
+          ./build_for_ios_with_cargo.bash eddy-ios
+        outputFileLists:
+          $TARGET_BUILD_DIR/$EXECUTABLE_PATH
