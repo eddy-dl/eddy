@@ -64,6 +64,10 @@ On Windows and Linux, the desktop app is a plain Cargo build:
 SLINT_STYLE=fluent cargo build --release --bin eddy
 ```
 
+Links and files given on its command line (`eddy <link>… <file.torrent>…`) open in the
+preview, in the window already open if there is one. Settings → General can make it what
+Windows and Linux open magnet links and `.torrent` files with.
+
 To look at the interface without building the app, open it in `slint-viewer`:
 
 ```sh

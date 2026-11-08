@@ -13,6 +13,8 @@ pub mod downloads;
 pub mod extractors;
 pub mod folders;
 pub mod gallerydl;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub mod handoff;
 pub mod links;
 pub mod logs;
 pub mod novels;
