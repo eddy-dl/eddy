@@ -3,12 +3,17 @@ package dev.pah.eddy
 import android.annotation.SuppressLint
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.webkit.CookieManager
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.WebViewRenderProcess
+import android.webkit.WebViewRenderProcessClient
 import org.json.JSONObject
 import org.json.JSONTokener
 import java.io.File
@@ -37,6 +42,14 @@ object PageFetcher {
     // A check that hasn't passed by itself in this long wants a tap.
     private const val CHECK_MS = 15_000L
     private const val TIMEOUT_MS = 60_000L
+    // A page still unfinished this long after it began, however the WebView
+    // is doing: polls only come back through its callbacks, which a hung
+    // renderer never calls, so this doesn't wait for them.
+    private const val WATCHDOG_MS = TIMEOUT_MS + 5_000L
+    // A script call answers in milliseconds, even while a slow page loads:
+    // unanswered this long, the WebView is stuck (not the network).
+    private const val ANSWER_MS = 10_000L
+    private const val WATCH_EVERY_MS = 2_000L
     // The WebView goes once nothing's been asked for this long.
     private const val IDLE_MS = 120_000L
     // Set on the page before a load: the new page doesn't have it.
@@ -70,6 +83,9 @@ object PageFetcher {
     private var serial = 0
     private var ask = Ask.NONE
     private var loading = false
+    private var watchdog: Runnable? = null
+    // When the script call still unanswered went out (0: none).
+    private var waitingSince = 0L
 
     fun fetch(context: Context, url: String, result: String) {
         val app = context.applicationContext
@@ -93,6 +109,26 @@ object PageFetcher {
         ask = Ask.NONE
         loading = false
         Log.i(TAG, "fetching ${job.first} in the background browser")
+        waitingSince = 0L
+        // Stuck (a script call unanswered, or the page far past its time):
+        // this page fails and the WebView goes, so the pages after it get a
+        // fresh one rather than waiting until the app restarts.
+        val dog = object : Runnable {
+            override fun run() {
+                if (current !== job) return
+                val now = System.currentTimeMillis()
+                val unanswered = waitingSince != 0L && now - waitingSince > ANSWER_MS
+                if (unanswered || now - began > WATCHDOG_MS) {
+                    Log.w(TAG, "the background browser stopped answering on ${job.first}; starting a new one")
+                    discard()
+                    finish(context, job, "error the background browser stopped answering")
+                } else {
+                    handler.postDelayed(this, WATCH_EVERY_MS)
+                }
+            }
+        }
+        watchdog = dog
+        handler.postDelayed(dog, WATCH_EVERY_MS)
         val view = web
         if (view == null) {
             load(context, job, create(context).also { web = it })
@@ -110,7 +146,7 @@ object PageFetcher {
             handler.postDelayed({ poll(context, job) }, POLL_MS)
         }
         // A new WebView has no page before.
-        if (view.url == null) go() else view.evaluateJavascript(MARK_OLD) { if (current === job) go() }
+        if (view.url == null) go() else eval(view, MARK_OLD) { if (current === job) go() }
     }
 
     private fun origin(url: String): String {
@@ -120,7 +156,29 @@ object PageFetcher {
 
     private fun askFor(job: Pair<String, File>, view: WebView) {
         ask = Ask.ASKING
-        view.evaluateJavascript(FETCH + "(" + JSONObject.quote(job.first) + ", " + JSONObject.quote(origin(job.first)) + ", " + serial + ")", null)
+        eval(view, FETCH + "(" + JSONObject.quote(job.first) + ", " + JSONObject.quote(origin(job.first)) + ", " + serial + ")", null)
+    }
+
+    // A script call, noted until it answers (see the watchdog).
+    private fun eval(view: WebView, js: String, callback: ((String) -> Unit)?) {
+        waitingSince = System.currentTimeMillis()
+        view.evaluateJavascript(js) { result ->
+            waitingSince = 0L
+            callback?.invoke(result)
+        }
+    }
+
+    // The WebView, given up on: the next page makes a new one.
+    private fun discard() {
+        waitingSince = 0L
+        val view = web ?: return
+        web = null
+        try {
+            view.stopLoading()
+            view.destroy()
+        } catch (e: Exception) {
+            Log.w(TAG, "couldn't close the background browser", e)
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -130,7 +188,42 @@ object PageFetcher {
         // Only the HTML is wanted.
         settings.loadsImagesAutomatically = false
         settings.blockNetworkImage = true
-        webViewClient = WebViewClient()
+        // Android 10+ notices a renderer that stopped responding: it's ended,
+        // which comes back as onRenderProcessGone below.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            setWebViewRenderProcessClient(object : WebViewRenderProcessClient() {
+                override fun onRenderProcessUnresponsive(view: WebView, renderer: WebViewRenderProcess?) {
+                    Log.w(TAG, "the background browser's renderer stopped responding; ending it")
+                    renderer?.terminate()
+                }
+                override fun onRenderProcessResponsive(view: WebView, renderer: WebViewRenderProcess?) {}
+            })
+        }
+        webViewClient = object : WebViewClient() {
+            // The page itself didn't load (no connection, the name didn't
+            // resolve…): said straight away rather than found by polling.
+            override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                val job = current ?: return
+                if (request.isForMainFrame && web === view && loading) {
+                    finish(context, job, "error the page didn't load (${error.description})")
+                }
+            }
+
+            // Its renderer crashed or was killed for memory: that WebView is
+            // done for (unhandled, Android would end Eddy with it). The page
+            // fails, and the next gets a new WebView.
+            override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
+                Log.w(TAG, "the background browser's renderer went (crashed: ${detail.didCrash()})")
+                if (web === view) {
+                    web = null
+                    view.destroy()
+                    current?.let { finish(context, it, "error the background browser's page crashed") }
+                } else {
+                    view.destroy()
+                }
+                return true
+            }
+        }
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
     }
@@ -145,8 +238,8 @@ object PageFetcher {
         }
         val again = { handler.postDelayed({ poll(context, job) }, POLL_MS) }
         if (ask == Ask.ASKING) {
-            view.evaluateJavascript(FETCHED + "(" + serial + ")") { json ->
-                if (current !== job) return@evaluateJavascript
+            eval(view, FETCHED + "(" + serial + ")") { json ->
+                if (current !== job) return@eval
                 val answer = try { JSONTokener(json).nextValue() as? String } catch (e: Exception) { null }
                 when {
                     answer == null -> { ask = Ask.NONE; again() }
@@ -160,11 +253,11 @@ object PageFetcher {
             }
             return
         }
-        view.evaluateJavascript(STATE + "(" + JSONObject.quote(origin(job.first)) + ")") { state ->
-            if (current !== job) return@evaluateJavascript
+        eval(view, STATE + "(" + JSONObject.quote(origin(job.first)) + ")") { state ->
+            if (current !== job) return@eval
             when (state) {
-                "\"page\"" -> view.evaluateJavascript("document.documentElement.outerHTML") { json ->
-                    if (current !== job) return@evaluateJavascript
+                "\"page\"" -> eval(view, "document.documentElement.outerHTML") { json ->
+                    if (current !== job) return@eval
                     val html = try { JSONTokener(json).nextValue() as? String } catch (e: Exception) { null }
                     finish(context, job, if (html.isNullOrEmpty()) "error its HTML didn't come out (${json.length} characters)" else "page\n" + html)
                 }
@@ -190,6 +283,8 @@ object PageFetcher {
 
     private fun finish(context: Context, job: Pair<String, File>, text: String) {
         if (current !== job) return
+        watchdog?.let { handler.removeCallbacks(it) }
+        watchdog = null
         val file = job.second
         try {
             file.parentFile?.mkdirs()
