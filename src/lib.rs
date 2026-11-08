@@ -12,6 +12,7 @@ pub mod downloader;
 pub mod downloads;
 pub mod extractors;
 pub mod folders;
+pub mod gallerydl;
 pub mod links;
 pub mod logs;
 pub mod novels;

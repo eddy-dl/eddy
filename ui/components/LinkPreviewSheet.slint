@@ -350,10 +350,14 @@ export component LinkPreviewSheet inherits Rectangle {
     // A post's or playlist's items get picked the same way, and a Drive or
     // MEGA folder's files (even just one: they still go in its folder).
     private property <bool> drive_folder: (root.backend == LinkBackend.Drive || root.backend == LinkBackend.Mega) && root.link.files.length > 0;
-    // A book's chapters too (picked one by one, or a volume at a time).
+    // A book's chapters too (picked one by one, or a volume at a time), and
+    // a gallery's files when gallery-dl found them (next to yt-dlp, the list
+    // is yt-dlp's, and gallery-dl saves everything).
+    private property <bool> gallery_files: root.backend == LinkBackend.Gallery && root.link.backends.length > 0
+        && root.link.backends[0] == LinkBackend.Gallery && root.link.files.length > 1;
     private property <bool> show_files: ((root.backend == LinkBackend.Torrent || root.is_media) && root.link.files.length > 1) || root.drive_folder
-        || (root.is_book && root.link.files.length > 0);
-    private property <bool> can_download: !((root.backend == LinkBackend.Torrent || root.is_media || root.drive_folder || root.is_book)
+        || (root.is_book && root.link.files.length > 0) || root.gallery_files;
+    private property <bool> can_download: !((root.backend == LinkBackend.Torrent || root.is_media || root.drive_folder || root.is_book || root.gallery_files)
         && root.link.files.length > 0 && root.link.files_selected == 0);
 
     height: Math.min(root.content_height, root.available_height);
@@ -646,6 +650,7 @@ export component LinkPreviewSheet inherits Rectangle {
                             : backend == LinkBackend.Torrent ? @tr("Torrent")
                             : backend == LinkBackend.Drive ? @tr("Google Drive")
                             : backend == LinkBackend.Mega ? "MEGA"
+                            : backend == LinkBackend.Gallery ? "gallery-dl"
                             : @tr("Direct");
                         selected: root.backend == backend;
                         clicked => {

@@ -1040,6 +1040,21 @@ pub fn ytdlp_command() -> Option<std::process::Command> {
     })
 }
 
+/// The Python package's Python, with what it needs to run (gallery-dl runs
+/// on it too: see gallerydl.rs).
+pub fn python_command() -> Option<std::process::Command> {
+    with_runtime(RUNTIME_WAIT, |r| {
+        let mut command = std::process::Command::new(r.python.as_ref()?);
+        command.envs(&r.env);
+        Some(command)
+    })
+}
+
+/// Whether the Python package is installed (doesn't wait).
+pub fn python_ready() -> bool {
+    with_runtime(std::time::Duration::ZERO, |r| Some(r.python.is_some())).unwrap_or(false)
+}
+
 /// Where Eddy keeps its own yt-dlp (one file, run by the Python package).
 pub fn own_ytdlp() -> std::path::PathBuf {
     std::path::PathBuf::from(get_app_data_dir()).join("ytdl").join("yt-dlp")

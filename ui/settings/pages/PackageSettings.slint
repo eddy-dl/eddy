@@ -13,6 +13,7 @@ component HelperRow inherits SettingsCard {
 
     property <string> name: root.package.key == "python" ? "Python"
         : root.package.key == "ytdlp" ? "yt-dlp"
+        : root.package.key == "gallerydl" ? "gallery-dl"
         : root.package.key == "ffmpeg" ? "FFmpeg" : "Deno";
     property <string> action: root.package.state == 1 ? @tr("Get")
         : root.package.state == 3 ? @tr("Update")
@@ -42,8 +43,9 @@ component HelperRow inherits SettingsCard {
                 color: root.text_color;
             }
             WrappedText {
-                text: root.package.key == "python" ? @tr("Runs yt-dlp")
+                text: root.package.key == "python" ? (AppSettings.is_mobile ? @tr("Runs yt-dlp and gallery-dl") : @tr("Runs yt-dlp"))
                     : root.package.key == "ytdlp" ? @tr("Downloads media from most sites")
+                    : root.package.key == "gallerydl" ? @tr("Downloads galleries: image boards, art and photo sites")
                     : root.package.key == "ffmpeg" ? @tr("Joins video and audio, converts to audio, saves streams")
                     : @tr("Optional: helps with YouTube and Instagram");
                 font-size: 13px;
@@ -109,6 +111,7 @@ export component PackageSettings inherits Rectangle {
     private property <HelperPackage> confirming;
     private property <string> confirming_name: root.confirming.key == "python" ? "Python"
         : root.confirming.key == "ytdlp" ? "yt-dlp"
+        : root.confirming.key == "gallerydl" ? "gallery-dl"
         : root.confirming.key == "ffmpeg" ? "FFmpeg" : "Deno";
 
     function helper_tapped(package: HelperPackage) {
@@ -124,9 +127,9 @@ export component PackageSettings inherits Rectangle {
         }
     }
 
-    // yt-dlp already there with a newer one out (state 3, the row's "Update"):
-    // the sheet just says it's updating it.
-    private property <bool> updates_ytdlp: root.confirming.key == "ytdlp" && root.confirming.state == 3;
+    // yt-dlp or gallery-dl already there with a newer one out (state 3, the
+    // row's "Update"): the sheet just says it's updating it.
+    private property <bool> updates_own: (root.confirming.key == "ytdlp" || root.confirming.key == "gallerydl") && root.confirming.state == 3;
 
     confirm_popup := PopupWindow {
         // Spans the whole window (popup coordinates are relative to this page).
@@ -152,14 +155,17 @@ export component PackageSettings inherits Rectangle {
                 spacing: 12px;
 
                 WrappedText {
-                    text: root.updates_ytdlp ? @tr("Update yt-dlp?") : @tr("Download {}?", root.confirming_name);
+                    text: root.updates_own ? @tr("Update {}?", root.confirming_name) : @tr("Download {}?", root.confirming_name);
                     font-size: 18px;
                     font-weight: 700;
                     color: root.text_color;
                 }
                 WrappedText {
-                    text: root.updates_ytdlp
-                        ? @tr("Eddy gets the newest yt-dlp ({}).", root.confirming.size)
+                    text: root.updates_own
+                        ? @tr("Eddy gets the newest {} ({}).", root.confirming_name, root.confirming.size)
+                        // gallery-dl on Android: Python packages, from PyPI.
+                        : AppSettings.is_mobile && root.confirming.key == "gallerydl"
+                        ? @tr("Eddy downloads it and what it needs from PyPI and keeps them in its own folder. Python runs it.")
                         // The others are apps of their own on Android; yt-dlp is
                         // Eddy's to fetch everywhere.
                         : AppSettings.is_mobile && root.confirming.key != "ytdlp"
@@ -178,7 +184,7 @@ export component PackageSettings inherits Rectangle {
                         clicked => { root.dismiss_popup(); }
                     }
                     ActionButton {
-                        text: root.updates_ytdlp ? @tr("Update") : @tr("Download");
+                        text: root.updates_own ? @tr("Update") : @tr("Download");
                         primary: true;
                         horizontal-stretch: 1;
                         height: 48px;
