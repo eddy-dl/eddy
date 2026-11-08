@@ -122,7 +122,7 @@ export component AdvancedSettings inherits Rectangle {
                 first: false;
                 last: false;
                 title: @tr("Thread names");
-                subtitle: @tr("Eddy's threads by name in the overlay, to see whose they are.");
+                subtitle: @tr("Eddy's threads by name in the overlay, and the busiest ones' CPU, to see whose it is.");
                 text_color: root.text_color;
                 checked <=> AppSettings.usage_threads;
                 toggled => { AppSettings.preferences_changed(); }
