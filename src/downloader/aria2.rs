@@ -547,6 +547,10 @@ fn apply(options: &mut DownloadOptions, settings: &super::DownloadSettings) {
     let connections = settings.connections();
     options.max_connection_per_server = Some(connections);
     options.split = Some(connections.into());
+    // Split from 1 MiB (aria2's smallest), as before v0.3.12: its 20 MiB
+    // default would fetch smaller files over one connection whatever the
+    // setting says.
+    options.min_split_size = Some(1024 * 1024);
     options.max_download_limit = (settings.max_speed > 0).then_some(settings.max_speed);
     // aria2's own unless one was picked: some servers drop requests that
     // claim to be a browser.
