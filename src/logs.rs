@@ -38,6 +38,14 @@ pub fn init() {
         }
         use tracing_subscriber::layer::SubscriberExt;
         let _ = tracing::subscriber::set_global_default(tracing_subscriber::registry().with(TracingFiles));
+        // A panic ends the app (release builds abort): its message and where
+        // it happened go to the log first, or a crash leaves no trace.
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let thread = std::thread::current();
+            log::error!("panic on thread {}: {info}", thread.name().unwrap_or("?"));
+            previous(info);
+        }));
     });
 }
 
