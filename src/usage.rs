@@ -84,7 +84,7 @@ pub fn start(ui: &DownloaderApp) {
             let mut counted = frames.borrow_mut();
             let wall = now.duration_since(frames_since).as_secs_f64().max(0.001);
             let each = if counted.count > 0 { counted.busy.as_secs_f64() * 1000.0 / counted.count as f64 } else { 0.0 };
-            text.push_str(&format!("\nframes {:.0}/s · {each:.1} ms", counted.count as f64 / wall));
+            text.push_str(&format!("\nframes {:.0}/s · {each:.1} ms{}", counted.count as f64 / wall, ui_core()));
             counted.count = 0;
             counted.busy = Duration::ZERO;
             frames_since = now;
@@ -198,6 +198,37 @@ fn busiest(before: &Threads, now: &Threads, wall: Duration) -> String {
     }
     let top: Vec<String> = used.iter().take(4).map(|(name, percent)| format!("{name} {percent:.0}%")).collect();
     format!("\nbusiest: {}", top.join(" · "))
+}
+
+/// " · UI on cpu6 @ 1.2 of 2.2 GHz": the core the UI thread (this one: the
+/// overlay's timer runs on it) last ran on, and that core's clock now and
+/// at most (a slow core's top is lower); just the core where the clocks
+/// can't be read. Empty where it can't tell.
+fn ui_core() -> String {
+    #[cfg(target_os = "android")]
+    {
+        // SAFETY: gettid has no preconditions.
+        let id = unsafe { libc::gettid() };
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/self/task/{id}/stat")) else {
+            return String::new();
+        };
+        // The processor is the 39th field: the 37th after the name.
+        let Some(core) = stat.rsplit_once(')').and_then(|(_, rest)| rest.split_whitespace().nth(36)?.parse::<u32>().ok()) else {
+            return String::new();
+        };
+        let khz = |file: &str| {
+            std::fs::read_to_string(format!("/sys/devices/system/cpu/cpu{core}/cpufreq/{file}")).ok()?.trim().parse::<f64>().ok()
+        };
+        match (khz("scaling_cur_freq"), khz("cpuinfo_max_freq")) {
+            (Some(now), Some(top)) => format!(" · UI on cpu{core} @ {:.1} of {:.1} GHz", now / 1e6, top / 1e6),
+            (Some(now), None) => format!(" · UI on cpu{core} @ {:.1} GHz", now / 1e6),
+            _ => format!(" · UI on cpu{core}"),
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        String::new()
+    }
 }
 
 /// The CPU time this process has used, user and system.
