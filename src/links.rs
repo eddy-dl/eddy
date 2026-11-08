@@ -910,6 +910,9 @@ struct MediaMeta {
     /// A yt-dlp playlist, and how many entries it had.
     playlist: bool,
     entries: usize,
+    /// The items that came through, by their place in the playlist (with
+    /// gaps where yt-dlp couldn't read one).
+    available: Vec<usize>,
     /// Its items (several), and the preview's choice for them: a video
     /// quality and an audio bitrate ("128"), which items follow unless
     /// they've been given their own.
@@ -1049,6 +1052,7 @@ pub async fn pick_backend(url: &str) -> (Backend, String) {
                     service: Some(media.service),
                     playlist: media.playlist,
                     entries: media.entries,
+                    items: whole_playlist(media),
                     square_covers: media.square_covers.clone(),
                     info_json: media.info_json.clone(),
                     image: media.kind == MediaKind::Image,
@@ -1725,11 +1729,12 @@ async fn media_probe(info: MediaInfo) -> Probe {
     // Each item's thumbnail, a few at once (a long playlist's first ones).
     let items = if several { item_metas(&info.items).await } else { Vec::new() };
     // Several items go in a folder: the playlist's title, else the post's
-    // caption.
+    // caption. A playlist's one readable item too (it's downloaded into the
+    // playlist's folder).
     let filename = info
         .title
         .as_deref()
-        .filter(|_| several)
+        .filter(|_| several || info.playlist)
         .or(first.caption.as_deref())
         .map(clean_name)
         .filter(|c| !c.is_empty())
@@ -1753,8 +1758,10 @@ async fn media_probe(info: MediaInfo) -> Probe {
         media: Some(MediaMeta {
             service: info.service,
             kind: first.kind,
-            playlist: several && info.service == Service::YtDlp,
+            // Even one item of a playlist is fetched as an item of it.
+            playlist: info.playlist && info.service == Service::YtDlp,
             entries: info.items.len(),
+            available: info.items.iter().map(|i| i.index).collect(),
             items,
             video_choice: String::new(),
             audio_choice: String::new(),
@@ -1932,6 +1939,9 @@ fn media_request(id: i32, link: &PendingLink, format: &str) -> MediaRequest {
     }
     if link.files_selected < link.files.row_count() as i32 {
         request.items = link.files.iter().filter(|f| f.selected).map(|f| (f.index - 1) as usize).collect();
+    }
+    if let Some(meta) = meta.as_ref().filter(|_| request.items.is_empty()) {
+        request.items = whole_playlist(meta);
     }
     request.item_qualities =
         link.files.iter().filter(|f| f.selected && !f.quality.is_empty()).map(|f| ((f.index - 1) as usize, f.quality.to_string())).collect();

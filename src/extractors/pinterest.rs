@@ -263,7 +263,7 @@ pub async fn get_info(url: &str) -> Result<MediaInfo, String> {
             },
         })
         .collect();
-    Ok(MediaInfo { service: Service::Pinterest, id, title: None, items, info_json: None })
+    Ok(MediaInfo { service: Service::Pinterest, id, title: None, items, info_json: None, playlist: false })
 }
 
 pub async fn resolve(url: &str, request: &MediaRequest) -> Result<Vec<Fetch>, String> {

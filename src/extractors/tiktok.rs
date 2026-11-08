@@ -406,7 +406,7 @@ async fn tikmate_info(url: &str) -> Result<MediaInfo, String> {
         items.push(slideshow_item(items.len(), size, thumbnail, post.caption.clone()));
     }
     let id = FULL_RE.captures(url).map(|c| c[5].to_string()).unwrap_or_else(|| "tiktok".to_string());
-    Ok(MediaInfo { service: Service::TikTok, id, title: None, items, info_json: None })
+    Ok(MediaInfo { service: Service::TikTok, id, title: None, items, info_json: None, playlist: false })
 }
 
 /// The post from TikTok's own page.
@@ -445,7 +445,7 @@ async fn native_info(url: &str) -> Result<MediaInfo, String> {
             duration,
         });
     }
-    Ok(MediaInfo { service: Service::TikTok, id, title: None, items, info_json: None })
+    Ok(MediaInfo { service: Service::TikTok, id, title: None, items, info_json: None, playlist: false })
 }
 
 /// Fresh links for the items asked for, the same way get_info found them:

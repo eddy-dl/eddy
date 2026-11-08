@@ -133,16 +133,19 @@ pub async fn get_info(url: &str) -> Result<MediaInfo, String> {
     let id = info.get("id").and_then(|i| i.as_str()).unwrap_or_default().to_string();
     let entries = info.get("entries").and_then(|e| e.as_array());
     let title = entries.and(info.get("title")).and_then(|t| t.as_str()).map(str::trim).filter(|t| !t.is_empty()).map(String::from);
+    // Each item keeps its place in the playlist, gaps and all (entries
+    // yt-dlp couldn't read, e.g. behind YouTube's bot check, are null):
+    // --playlist-items counts them.
     let items = match entries {
         Some(entries) => entries
             .iter()
-            .filter(|e| e.is_object())
             .enumerate()
+            .filter(|(_, e)| e.is_object())
             .map(|(index, entry)| parse_entry(index, entry, url))
             .collect(),
         None => vec![parse_entry(0, &info, url)],
     };
-    Ok(MediaInfo { service: Service::YtDlp, id, title, items, info_json: saved.ok().map(|_| path) })
+    Ok(MediaInfo { service: Service::YtDlp, id, title, items, info_json: saved.ok().map(|_| path), playlist: entries.is_some() })
 }
 
 /// A playlist check's progress, from yt-dlp's "Downloading N items" and
@@ -494,7 +497,11 @@ fn run_args(
 
     args.extend(["-o".to_string(), template.to_string()]);
     match playlist {
-        Playlist::Off => args.push("--no-playlist".to_string()),
+        // --no-playlist only means something for a video link that's also
+        // in a playlist; a playlist's own link (or saved info) would still
+        // pour all its items into this one file name, each "already
+        // downloaded" retagging the first.
+        Playlist::Off => args.extend(["--no-playlist", "--playlist-items", "1"].map(String::from)),
         Playlist::All => args.push("--yes-playlist".to_string()),
         Playlist::Items(items) => {
             let items: Vec<String> = items.iter().map(|i| (i + 1).to_string()).collect();

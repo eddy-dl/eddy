@@ -86,6 +86,9 @@ pub struct MediaInfo {
     /// yt-dlp's full info, saved so the download can reuse it
     /// (`--load-info-json`) instead of asking the site again.
     pub info_json: Option<PathBuf>,
+    /// A playlist (yt-dlp), even if only one of its items came through:
+    /// downloaded as one, so yt-dlp is told which items to fetch.
+    pub playlist: bool,
 }
 
 /// What the user picked, handed from the preview to the downloader (as JSON,
