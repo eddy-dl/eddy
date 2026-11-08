@@ -34,11 +34,11 @@ browser (`BrowserActivity`). Kotlin talks to Rust through `EddyNative` (JNI, in
   ```
 
   A page or component on its own: `--component Name`, and `--screenshot out.png --size WxH` to
-  look at it.
+  look at it. A "BackendSelector" message is normal.
   The README's screenshots (`docs/screenshots/`) are such renders of the sample data: phone
   ones in material at 412×915, desktop ones in fluent at 1280 wide with `SettingsLayout.desktop`
   and `AppSettings.top_navigation_bar` defaulted to true for the shot (what the desktop app
-  sets at start), then put back. A "BackendSelector" message is normal.
+  sets at start), then put back.
 - **Kotlin:** only Gradle builds it (`platforms/android`, `./gradlew assembleRelease`).
 
 ## Conventions
