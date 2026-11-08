@@ -223,17 +223,52 @@ pub fn installed_version() -> Option<String> {
     lib_dir().join("gallery_dl").is_dir().then(|| std::fs::read_to_string(base_dir().join("version")).unwrap_or_default().trim().to_string())
 }
 
+/// A small PyPI page as text, tried a few times (on a poor connection a
+/// response is often cut off).
+async fn pypi_text(url: &str) -> Result<String, String> {
+    let mut last = String::new();
+    for attempt in 0..4 {
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_secs(2 * attempt)).await;
+        }
+        let response = crate::extractors::http::client().get(url).send().await.and_then(|r| r.error_for_status());
+        match response {
+            Ok(r) => match r.text().await {
+                Ok(text) => return Ok(text),
+                Err(e) => last = e.to_string(),
+            },
+            // Not there: asking again won't help.
+            Err(e) if e.status().is_some_and(|s| s.is_client_error()) => return Err(e.to_string()),
+            Err(e) => last = e.to_string(),
+        }
+    }
+    Err(last)
+}
+
+/// A version's parts, for a final release only ("1.32.19", not "2.0.0rc1").
+fn release_parts(version: &str) -> Option<Vec<u64>> {
+    version.split('.').map(|p| p.parse().ok()).collect()
+}
+
+/// A package's newest release, from its feed of recent ones (a few KB;
+/// its full JSON lists every release's files, megabytes for some). The
+/// highest, not the latest posted: a fix to an older line comes later.
+async fn newest_version(name: &str) -> Result<String, String> {
+    let feed = pypi_text(&format!("https://pypi.org/rss/project/{name}/releases.xml")).await?;
+    feed.split("<title>")
+        .skip(1)
+        .filter_map(|t| t.split("</title>").next())
+        .map(str::trim)
+        .filter_map(|v| release_parts(v).map(|parts| (parts, v)))
+        .max()
+        .map(|(_, v)| v.to_string())
+        .ok_or_else(|| format!("{name} has no release"))
+}
+
 /// A package's pure-Python wheel on PyPI: its version, address and size.
 async fn wheel(name: &str) -> Result<(String, String, u64), String> {
-    let text = crate::extractors::http::client()
-        .get(format!("https://pypi.org/pypi/{name}/json"))
-        .send()
-        .await
-        .and_then(|r| r.error_for_status())
-        .map_err(|e| e.to_string())?
-        .text()
-        .await
-        .map_err(|e| e.to_string())?;
+    let version = newest_version(name).await?;
+    let text = pypi_text(&format!("https://pypi.org/pypi/{name}/{version}/json")).await?;
     let json: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
     let file = json["urls"]
         .as_array()
@@ -241,11 +276,7 @@ async fn wheel(name: &str) -> Result<(String, String, u64), String> {
         .flatten()
         .find(|u| u["filename"].as_str().is_some_and(|f| f.ends_with("-py3-none-any.whl") || f.ends_with("-py2.py3-none-any.whl")))
         .ok_or_else(|| format!("{name} has no pure-Python wheel"))?;
-    Ok((
-        json["info"]["version"].as_str().unwrap_or_default().to_string(),
-        file["url"].as_str().unwrap_or_default().to_string(),
-        file["size"].as_u64().unwrap_or(0),
-    ))
+    Ok((version, file["url"].as_str().unwrap_or_default().to_string(), file["size"].as_u64().unwrap_or(0)))
 }
 
 /// gallery-dl's newest version and its wheel's size.
@@ -254,21 +285,34 @@ pub async fn latest() -> Result<(String, u64), String> {
 }
 
 /// Downloads gallery-dl's wheels and those it needs, and unpacks them in
-/// place of the ones before. Returns the version installed.
+/// place of the ones before. Returns the version installed. Wheels already
+/// downloaded by a try that failed are kept, and not downloaded again.
 pub async fn install(progress: impl Fn(f32)) -> Result<String, String> {
     let base = base_dir();
     let downloads = base.join("download");
-    let _ = tokio::fs::remove_dir_all(&downloads).await;
-    let mut files = Vec::new();
-    let mut version = String::new();
-    for (i, name) in WHEELS.iter().enumerate() {
-        let (v, url, _) = wheel(name).await?;
-        if i == 0 {
-            version = v;
-        }
+    let mut wheels = Vec::new();
+    for name in WHEELS {
+        let (version, url, size) = wheel(name).await?;
         let file = url.rsplit('/').next().unwrap_or(name).to_string();
-        files.push(crate::downloader::fetch_file(&url, &downloads, &file, |_, _| {}).await?);
-        progress((i + 1) as f32 / WHEELS.len() as f32);
+        wheels.push((version, url, size, file));
+    }
+    let version = wheels[0].0.clone();
+    // The progress bar moves with the bytes (gallery-dl's is most of them).
+    let total = wheels.iter().map(|w| w.2).sum::<u64>().max(1) as f32;
+    let mut done = 0;
+    let mut files = Vec::new();
+    for (_, url, size, file) in &wheels {
+        let path = downloads.join(file);
+        let whole = tokio::fs::metadata(&path).await.is_ok_and(|m| *size > 0 && m.len() == *size);
+        if !whole {
+            crate::downloader::fetch_file(url, &downloads, file, |completed, _| {
+                progress((done + completed.min(*size)) as f32 / total);
+            })
+            .await?;
+        }
+        done += size;
+        progress(done as f32 / total);
+        files.push(path);
     }
     let (fresh, lib) = (base.join("lib.new"), lib_dir());
     let unpacked = tokio::task::spawn_blocking(move || -> Result<(), String> {
@@ -282,6 +326,8 @@ pub async fn install(progress: impl Fn(f32)) -> Result<String, String> {
     })
     .await
     .map_err(|e| e.to_string())?;
+    // Gone even when unpacking failed: a wheel that's whole but broken
+    // would fail every try.
     let _ = tokio::fs::remove_dir_all(&downloads).await;
     unpacked?;
     tokio::fs::write(base.join("version"), &version).await.map_err(|e| e.to_string())?;

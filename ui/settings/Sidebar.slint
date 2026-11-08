@@ -198,7 +198,7 @@ export component Sidebar inherits Rectangle {
             SidebarItem {
                 width: 100%;
                 text: @tr("Downloads");
-                subtitle: @tr("Folder, cookies, books, yt-dlp packages");
+                subtitle: @tr("Folder, cookies, books, external packages");
                 icon: @image-url("../icons/rounded/download.svg");
                 icon_filled: @image-url("../icons/rounded/filled/download.svg");
                 active: root.active_tab == download_tab || root.active_tab == SettingsTab.Packages || root.active_tab == SettingsTab.Books || root.active_tab == SettingsTab.Downloading || root.active_tab == SettingsTab.Cookies;

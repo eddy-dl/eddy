@@ -1239,7 +1239,7 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
             Some(Err(e)) if is_page && gallery.is_none() => return Err(format!("yt-dlp: {e}")),
             Some(Err(e)) => log::warn!(target: "ytdlp", "{url}: {e}"),
             None if is_page && gallery.is_none() && !crate::gallerydl::available() => {
-                return Err("A web page: Eddy needs the yt-dlp packages (Settings → Downloads) to get its media".to_string());
+                return Err("A web page: Eddy needs the external packages (Settings → Downloads) to get its media".to_string());
             }
             None => {}
         }

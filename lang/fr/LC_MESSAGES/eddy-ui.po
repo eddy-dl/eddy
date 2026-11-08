@@ -99,8 +99,8 @@ msgstr "Archives"
 msgid "Change themes & accent color"
 msgstr "Thème et couleur d’accent"
 
-msgid "Folder, cookies, books, yt-dlp packages"
-msgstr "Dossier, cookies, livres, paquets yt-dlp"
+msgid "Folder, cookies, books, external packages"
+msgstr "Dossier, cookies, livres, paquets externes"
 
 msgid "Theme Mode"
 msgstr "Thème"
@@ -405,8 +405,8 @@ msgstr "Télécharger {} ?"
 msgid "Eddy downloads its installer ({}) from YTDLnis's packages on GitHub. Android then asks you whether to install it."
 msgstr "Eddy télécharge son installateur ({}) depuis les paquets de YTDLnis sur GitHub. Android vous demande ensuite si vous voulez l'installer."
 
-msgid "yt-dlp packages"
-msgstr "Paquets yt-dlp"
+msgid "External packages"
+msgstr "Paquets externes"
 
 msgid "Media from most sites needs these. They're separate apps, YTDLnis's packages: Eddy can fetch one for you, and you install it."
 msgstr "Les médias de la plupart des sites en ont besoin. Ce sont des applications séparées, les paquets de YTDLnis : Eddy peut en récupérer un pour vous, et vous l'installez."
@@ -549,8 +549,8 @@ msgstr "Les livres sont enregistrés en EPUB, lu par la plupart des liseuses."
 msgid "Web novel download options"
 msgstr "Options de téléchargement des romans web"
 
-msgid "Manage yt-dlp packages"
-msgstr "Gérer les paquets yt-dlp"
+msgid "Manage external packages"
+msgstr "Gérer les paquets externes"
 
 msgid "Manage media tools"
 msgstr "Gérer les outils média"

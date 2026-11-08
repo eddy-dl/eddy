@@ -32,7 +32,7 @@ export component SettingsPage inherits Rectangle {
     out property <bool> general_tab_is_active: root.active_tab == SettingsTab.General;
     out property <bool> download_tab_is_active: root.active_tab == SettingsTab.Download;
     out property <bool> packages_tab_is_active: root.active_tab == SettingsTab.Packages;
-    // Opening the yt-dlp packages page looks for package updates.
+    // Opening the external packages page looks for package updates.
     changed packages_tab_is_active => {
         if (self.packages_tab_is_active) {
             AppSettings.helpers_check();
@@ -53,7 +53,7 @@ export component SettingsPage inherits Rectangle {
             AppSettings.cache_refresh();
         }
     }
-    private property <string> packages_title: AppSettings.is_mobile ? @tr("yt-dlp packages") : @tr("Media tools");
+    private property <string> packages_title: AppSettings.is_mobile ? @tr("External packages") : @tr("Media tools");
 
     callback back_pressed();
 
