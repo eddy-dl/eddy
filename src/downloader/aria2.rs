@@ -546,7 +546,7 @@ impl AriaEngineClient {
 fn apply(options: &mut DownloadOptions, settings: &super::DownloadSettings) {
     let connections = settings.connections();
     options.max_connection_per_server = Some(connections);
-    options.split = Some(connections);
+    options.split = Some(connections.into());
     options.max_download_limit = (settings.max_speed > 0).then_some(settings.max_speed);
     // aria2's own unless one was picked: some servers drop requests that
     // claim to be a browser.
