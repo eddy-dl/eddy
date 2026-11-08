@@ -27,8 +27,10 @@ browser (`BrowserActivity`). Kotlin talks to Rust through `EddyNative` (JNI, in
   The UI is a crate of its own (`ui/`, package `eddy-ui`, re-exported at Eddy's root; the app's
   package is `eddy`): its generated Rust is most of what rustc checks, so only a `.slint` edit
   has it checked again.
-  The desktop app (`src/main.rs`, `src/platform/desktop.rs`) builds with plain
-  `SLINT_STYLE=fluent cargo build --release`; CI builds Windows, Linux and Android.
+  The desktop app (`src/main.rs`, `src/platform/desktop.rs`) builds with
+  `SLINT_STYLE=fluent cargo build --release --bin eddy` (just the program: the library's cdylib is
+  Android's, and on Windows its .pdb would clash with the program's); CI builds Windows, Linux,
+  macOS and Android.
 - **Slint only:** no Rust build needed. Open it in the viewer, in both styles:
 
   ```sh
