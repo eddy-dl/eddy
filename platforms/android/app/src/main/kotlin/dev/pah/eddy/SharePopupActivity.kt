@@ -32,6 +32,7 @@ class SharePopupActivity : GameActivity() {
         mode = if (intent?.component?.className?.endsWith(".DownloadShare") == true) MODE_DOWNLOAD else MODE_PREVIEW
         shared = SharedContent.from(this, intent)
         super.onCreate(savedInstanceState)
+        RefreshRate.apply(this)
 
         // The window covers the whole screen (or the whole small window, so
         // HiOS's border goes round all of it). Slint draws the sheet at the

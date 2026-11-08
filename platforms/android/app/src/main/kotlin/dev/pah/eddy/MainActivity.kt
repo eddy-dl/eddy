@@ -39,6 +39,7 @@ class MainActivity : GameActivity() {
         // Edge to edge, like NativeActivity's window was: Slint pads the
         // content by the system bars itself (its safe-area insets).
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        RefreshRate.apply(this)
 
         // Draw under the camera cutout instead of letterboxing it. Slint 1.18+
         // already pads by the cutout inset, so letterboxing doubled the gap.
