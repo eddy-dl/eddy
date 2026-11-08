@@ -91,6 +91,9 @@ export global AppSettings {
     in-out property <bool> show_usage: false;
     // With it, the threads counted by name (the WebView's, Android's…).
     in-out property <bool> usage_threads: false;
+    // Android: Slint redraws only what changed in a frame: 0 off, 1 on, 2 on
+    // and outlining it (read by Rendering.kt when Eddy starts).
+    in-out property <int> partial_rendering: 0;
     // Settings → Advanced: the logs in the download folder, where other apps
     // (Termux) can read them, rather than in Eddy's own; and sharing them.
     in-out property <bool> logs_in_downloads: false;

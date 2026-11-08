@@ -899,3 +899,21 @@ msgstr "Mettre à jour {} ?"
 
 msgid "Eddy gets the newest {} ({})."
 msgstr "Eddy récupère la dernière version de {} ({})."
+
+msgid "Drawing"
+msgstr "Affichage"
+
+msgid "Redraw only what changed"
+msgstr "Ne redessiner que ce qui change"
+
+msgid "Less work for each frame (an animation redraws just itself), if the phone's graphics driver handles it. \"Show\" outlines what each frame redraws."
+msgstr "Moins de travail à chaque image (une animation ne redessine qu’elle-même), si le pilote graphique du téléphone le gère. « Afficher » entoure ce que chaque image redessine."
+
+msgid "Off"
+msgstr "Désactivé"
+
+msgid "On"
+msgstr "Activé"
+
+msgid "Takes effect when Eddy is opened again."
+msgstr "S’applique à la prochaine ouverture d’Eddy."

@@ -1,4 +1,5 @@
 import { WrappedText } from "../../components/WrappedText.slint";
+import { Chip } from "../../components/Chips.slint";
 import { Note } from "../../components/Note.slint";
 import { SwitchRow } from "../../components/SwitchRow.slint";
 import { AppSettings } from "../../globals/AppSettings.slint";
@@ -187,6 +188,47 @@ export component AdvancedSettings inherits Rectangle {
                                 clicked => { AppSettings.share_logs(); }
                             }
                         }
+                    }
+                }
+            }
+
+            // Android: whether Slint redraws only what changed (Rendering.kt).
+            if AppSettings.is_mobile: SectionHeader { text: @tr("Drawing"); }
+            if AppSettings.is_mobile: SettingsCard {
+                VerticalLayout {
+                    padding: 8px;
+                    padding-top: 12px;
+                    padding-bottom: 14px;
+                    padding-left: SettingsLayout.inset;
+                    padding-right: SettingsLayout.inset;
+                    spacing: 10px;
+
+                    Text {
+                        text: @tr("Redraw only what changed");
+                        font-size: 18px;
+                        font-weight: 600;
+                        color: root.text_color;
+                    }
+                    WrappedText {
+                        text: @tr("Less work for each frame (an animation redraws just itself), if the phone's graphics driver handles it. \"Show\" outlines what each frame redraws.");
+                        font-size: 13px;
+                        color: root.text_color.transparentize(40%);
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        for choice[i] in [@tr("Off"), @tr("On"), @tr("Show")]: Chip {
+                            text: choice;
+                            selected: AppSettings.partial_rendering == i;
+                            clicked => {
+                                AppSettings.partial_rendering = i;
+                                AppSettings.preferences_changed();
+                            }
+                        }
+                    }
+                    Note {
+                        text: @tr("Takes effect when Eddy is opened again.");
+                        font_size: 13px;
+                        text_color: root.text_color;
                     }
                 }
             }

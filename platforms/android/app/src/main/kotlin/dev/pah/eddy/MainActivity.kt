@@ -34,6 +34,7 @@ class MainActivity : GameActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         // Before super.onCreate, which starts Rust (and Slint's fonts).
         SystemFont.apply(this)
+        Rendering.apply(this)
         super.onCreate(savedInstanceState)
 
         // Edge to edge, like NativeActivity's window was: Slint pads the

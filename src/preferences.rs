@@ -19,6 +19,9 @@ const NOVEL_SMALL_IMAGES_KEY: &str = "novel_small_images";
 const NOVEL_PARTS_KEY: &str = "novel_parts";
 const SHOW_USAGE_KEY: &str = "show_usage";
 const USAGE_THREADS_KEY: &str = "usage_threads";
+// Settings → Advanced → Redraw only what changed: "off", "on" or "show"
+// (Rendering.kt reads it before Slint starts).
+const PARTIAL_RENDERING_KEY: &str = "partial_rendering";
 // Settings → Downloads → Downloading: every download's defaults.
 const DL_SPEED_KEY: &str = "download_max_speed_kbps";
 const DL_CONNECTIONS_KEY: &str = "download_connections";
@@ -164,6 +167,11 @@ pub fn load_preferences(ui_weak: slint::Weak<DownloaderApp>) {
         app_settings.set_logs_in_downloads(platform::get_pref(crate::logs::IN_DOWNLOADS_KEY, "false").ok().is_some_and(|v| v == "true"));
         app_settings.set_show_usage(platform::get_pref(SHOW_USAGE_KEY, "false").ok().is_some_and(|v| v == "true"));
         app_settings.set_usage_threads(platform::get_pref(USAGE_THREADS_KEY, "false").ok().is_some_and(|v| v == "true"));
+        app_settings.set_partial_rendering(match platform::get_pref(PARTIAL_RENDERING_KEY, "off").unwrap_or_default().as_str() {
+            "on" => 1,
+            "show" => 2,
+            _ => 0,
+        });
     }
 }
 
@@ -320,6 +328,7 @@ pub fn save_preferences(ui_weak: slint::Weak<DownloaderApp>) {
             (DL_CATEGORY_KEY, app_settings.get_dl_category_folders().to_string()),
             (DL_REPLACE_KEY, app_settings.get_dl_replace_existing().to_string()),
             (LINKS_SPACES_KEY, app_settings.get_links_with_spaces().to_string()),
+            (PARTIAL_RENDERING_KEY, ["off", "on", "show"].get(app_settings.get_partial_rendering() as usize).unwrap_or(&"off").to_string()),
             (QUIT_WHEN_DONE_KEY, app_settings.get_quit_when_done().to_string()),
             (DL_MAX_CONCURRENT_KEY, app_settings.get_dl_max_concurrent().max(0).to_string()),
         ] {
