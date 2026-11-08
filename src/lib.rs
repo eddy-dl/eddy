@@ -23,7 +23,8 @@ pub mod storage;
 pub mod usage;
 pub mod ytdlp_plugin;
 
-slint::include_modules!();
+// The UI (ui/, a crate of its own so Rust edits don't re-check it).
+pub use eddy_ui::*;
 
 #[cfg(target_os = "android")]
 use android_activity::AndroidApp;

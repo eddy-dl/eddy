@@ -1,0 +1,18 @@
+[package]
+name = "eddy-ui"
+version = "0.2.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+
+# The UI (the .slint files here, compiled to Rust) as a crate of its own:
+# it's most of what rustc has to check, so an edit to Eddy's Rust no longer
+# has it checked again. Eddy re-exports it (src/lib.rs). Its name is also the
+# translations' (lang/*/LC_MESSAGES/eddy-ui.po): Slint takes the package's.
+[lib]
+path = "lib.rs"
+
+[dependencies]
+slint = { version = "1.18.1" }
+
+[build-dependencies]
+slint-build = { version = "1.18.1" }

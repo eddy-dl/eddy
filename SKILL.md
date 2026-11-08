@@ -24,6 +24,9 @@ browser (`BrowserActivity`). Kotlin talks to Rust through `EddyNative` (JNI, in
   The release profile is LTO with one codegen unit: `check` skips that, so use `build` only when
   an APK is wanted. On a phone, run it niced on the small cores
   (`taskset -c 0-5 nice -n 19 …`). Code changed while a check runs: stop it and start again.
+  The UI is a crate of its own (`ui/`, package `eddy-ui`, re-exported at Eddy's root; the app's
+  package is `eddy`): its generated Rust is most of what rustc checks, so only a `.slint` edit
+  has it checked again.
   The desktop app (`src/main.rs`, `src/platform/desktop.rs`) builds with plain
   `SLINT_STYLE=fluent cargo build --release`; CI builds Windows, Linux and Android.
 - **Slint only:** no Rust build needed. Open it in the viewer, in both styles:
