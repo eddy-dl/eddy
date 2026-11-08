@@ -2020,7 +2020,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "eddy-ui"
+name = "eddy"
 version = "0.2.0"
 dependencies = [
  "aes 0.9.3",
@@ -2031,6 +2031,7 @@ dependencies = [
  "base64 0.21.7",
  "ctr 0.10.1",
  "dirs 5.0.1",
+ "eddy-ui",
  "ego-tree",
  "jni 0.22.4",
  "libc",
@@ -2052,7 +2053,6 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "slint",
- "slint-build",
  "sys-locale",
  "system-theme",
  "tar",
@@ -2065,6 +2065,14 @@ dependencies = [
  "winres",
  "zbus 5.19.0",
  "zip",
+]
+
+[[package]]
+name = "eddy-ui"
+version = "0.2.0"
+dependencies = [
+ "slint",
+ "slint-build",
 ]
 
 [[package]]

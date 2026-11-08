@@ -1,5 +1,5 @@
 [package]
-name = "eddy-ui"
+name = "eddy"
 version = "0.2.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
@@ -49,6 +49,8 @@ sha2 = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 slint = { version = "1.18.1" }
+# The UI, compiled from ui/*.slint (re-exported in src/lib.rs).
+eddy-ui = { path = "ui" }
 sys-locale = "0.3"
 tokio = { version = "1.30", features = ["rt-multi-thread", "macros", "time", "sync", "fs", "io-util"] }
 url = "2"
@@ -95,9 +97,6 @@ ndk-context = "0.1"
 rustls-platform-verifier = "0.7"
 serde_json = "1.0"
 slint = { version = "1.18.1", features = ["backend-android-activity-06"] }
-
-[build-dependencies]
-slint-build = { version = "1.18.1" }
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
 winres = "0.1"
