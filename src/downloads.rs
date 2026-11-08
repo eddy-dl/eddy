@@ -423,6 +423,13 @@ pub fn running(id: i64, handle: Handle) {
     });
 }
 
+/// Whether download `id` should start now that Auto has picked how: still
+/// there and Active (not paused, cancelled or deleted while it was checked,
+/// nor queued), and not running already.
+pub fn wants_start(id: i64) -> bool {
+    with_entries(|entries| entries.iter().any(|e| e.id == id && e.saved.state == State::Active && e.handle.is_none()))
+}
+
 /// Auto picked how to download it: kept for resuming.
 pub fn update_request(request: &DownloadRequest) {
     with_entries(|entries| {

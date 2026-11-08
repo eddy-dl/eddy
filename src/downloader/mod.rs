@@ -8,7 +8,6 @@ use aria2::AriaEngineClient;
 use aria2_core::engine::download_engine::DownloadEngine;
 use aria2_core::request::request_group_man::RequestGroupMan;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 #[derive(Clone)]
@@ -319,8 +318,14 @@ pub fn engine() -> &'static AriaEngineClient {
     })
 }
 
-/// Auto downloads still being checked before they start.
-static CHOOSING: AtomicUsize = AtomicUsize::new(0);
+/// Auto downloads (record ids) still being checked before they start: a
+/// download has no handle until then, so pausing or resuming it meanwhile
+/// mustn't start a second check (see `launch`).
+static CHOOSING: Mutex<Vec<i64>> = Mutex::new(Vec::new());
+
+fn choosing() -> std::sync::MutexGuard<'static, Vec<i64>> {
+    CHOOSING.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 /// What's doing a download's work, for its progress and to pause or stop
 /// it: an aria2 download (its gid), or a job (media, books).
@@ -595,18 +600,31 @@ fn launch(request: &DownloadRequest) -> Result<Option<Handle>, String> {
         Backend::Mega => Some(Handle::Job(mega::start(request, &dir, name, deliver.clone())?)),
         Backend::Gallery => Some(Handle::Job(media::start_gallery(request, &dir, name, deliver.clone())?)),
         Backend::Auto => {
-            CHOOSING.fetch_add(1, Ordering::SeqCst);
+            {
+                // Already being checked (resumed, or started from the queue,
+                // meanwhile): that check starts it.
+                let mut checking = choosing();
+                if checking.contains(&request.id) {
+                    return Ok(None);
+                }
+                checking.push(request.id);
+            }
             let mut request = request.clone();
             runtime().spawn(async move {
                 (request.backend, request.format) = crate::links::pick_backend(&request.url).await;
                 // The record keeps what was picked, for resuming.
                 crate::downloads::update_request(&request);
+                choosing().retain(|&id| id != request.id);
+                // Paused, cancelled or deleted while it was checked: what was
+                // picked is kept, nothing starts.
+                if !crate::downloads::wants_start(request.id) {
+                    return;
+                }
                 match launch(&request) {
                     Ok(Some(handle)) => crate::downloads::running(request.id, handle),
                     Ok(None) => {}
                     Err(e) => finished(request.id, label_for(&request), false, e, None, None),
                 }
-                CHOOSING.fetch_sub(1, Ordering::SeqCst);
             });
             None
         }
@@ -725,7 +743,7 @@ pub fn active_count() -> usize {
     let aria = ENGINE.get().map(|e| e.active_count()).unwrap_or(0);
     // Queued ones too: the download service keeps going for them.
     // A native extractor's job downloads its files with aria2: counted once.
-    aria.saturating_sub(media::aria_downloads()) + media::jobs().len() + CHOOSING.load(Ordering::SeqCst) + crate::downloads::queued_count()
+    aria.saturating_sub(media::aria_downloads()) + media::jobs().len() + choosing().len() + crate::downloads::queued_count()
 }
 
 /// Downloads `url` to `dir/out` with aria2 (several connections, retries),
