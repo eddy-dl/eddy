@@ -68,11 +68,11 @@ export component NavIcon inherits Rectangle {
                 height: 24px;
                 viewbox-width: 24;
                 viewbox-height: 24;
-                fill: root.icon_color;
-                // 12 dots forming a full dotted circle, each a filled circle
-                // of radius 1 (zero-length strokes with round caps made them
-                // before, which some renderers drop).
-                commands: "M 20 12 a 1 1 0 1 0 2 0 a 1 1 0 1 0 -2 0 M 18.79 16.5 a 1 1 0 1 0 2 0 a 1 1 0 1 0 -2 0 M 15.5 19.79 a 1 1 0 1 0 2 0 a 1 1 0 1 0 -2 0 M 11 21 a 1 1 0 1 0 2 0 a 1 1 0 1 0 -2 0 M 6.5 19.79 a 1 1 0 1 0 2 0 a 1 1 0 1 0 -2 0 M 3.21 16.5 a 1 1 0 1 0 2 0 a 1 1 0 1 0 -2 0 M 2 12 a 1 1 0 1 0 2 0 a 1 1 0 1 0 -2 0 M 3.21 7.5 a 1 1 0 1 0 2 0 a 1 1 0 1 0 -2 0 M 6.5 4.21 a 1 1 0 1 0 2 0 a 1 1 0 1 0 -2 0 M 11 3 a 1 1 0 1 0 2 0 a 1 1 0 1 0 -2 0 M 15.5 4.21 a 1 1 0 1 0 2 0 a 1 1 0 1 0 -2 0 M 18.79 7.5 a 1 1 0 1 0 2 0 a 1 1 0 1 0 -2 0";
+                stroke: root.icon_color;
+                stroke-width: 2px;
+                stroke-line-cap: round;
+                // 12 points forming a full dotted circle
+                commands: "M 21 12 l 0.01 0 M 19.79 16.5 l 0.01 0 M 16.5 19.79 l 0.01 0 M 12 21 l 0.01 0 M 7.5 19.79 l 0.01 0 M 4.21 16.5 l 0.01 0 M 3 12 l 0.01 0 M 4.21 7.5 l 0.01 0 M 7.5 4.21 l 0.01 0 M 12 3 l 0.01 0 M 16.5 4.21 l 0.01 0 M 19.79 7.5 l 0.01 0";
             }
         }
 
