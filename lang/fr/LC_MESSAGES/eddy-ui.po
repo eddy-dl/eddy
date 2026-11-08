@@ -774,6 +774,12 @@ msgstr "Liens avec des espaces"
 msgid "A pasted link runs on through spaces, up to the next link or the end of its line"
 msgstr "Un lien collé continue après les espaces, jusqu'au lien suivant ou à la fin de sa ligne"
 
+msgid "Quit when done"
+msgstr "Quitter une fois terminé"
+
+msgid "Eddy closes once its downloads are finished, if it's in the background"
+msgstr "Eddy se ferme quand ses téléchargements sont finis, s’il est en arrière-plan"
+
 msgid "Saved"
 msgstr "Enregistré"
 

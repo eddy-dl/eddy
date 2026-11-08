@@ -31,6 +31,55 @@ struct LongPressDetection {
     position: LogicalPosition,
 }
 
+/// eddy patch: where a touch went down, in the window's pixels, and the system
+/// gesture zone it went down in, if any.
+#[derive(Clone, Copy)]
+struct TouchStart {
+    x: f32,
+    y: f32,
+    edge: Option<GestureEdge>,
+}
+
+/// The system gesture zones: back swipes start at the sides, home at the bottom.
+#[derive(Clone, Copy, PartialEq)]
+enum GestureEdge {
+    Left,
+    Right,
+    Bottom,
+}
+
+impl TouchStart {
+    /// Whether a touch that ended at `x`, `y` moved like the system gesture
+    /// of the zone it started in: more than Android's touch slop (8 dp),
+    /// mostly inwards from that side or up from the bottom. The system may
+    /// take such a touch over too late for a cancel to reach the app first.
+    fn looks_like_system_gesture(&self, x: f32, y: f32, scale: f32) -> bool {
+        let slop = 8. * scale;
+        let (dx, dy) = (x - self.x, y - self.y);
+        match self.edge {
+            Some(GestureEdge::Left) => dx > slop && dx.abs() > dy.abs(),
+            Some(GestureEdge::Right) => -dx > slop && dx.abs() > dy.abs(),
+            Some(GestureEdge::Bottom) => -dy > slop && dy.abs() > dx.abs(),
+            None => false,
+        }
+    }
+}
+
+/// eddy patch: a touch that went down in a system gesture zone, not yet passed on
+/// to Slint: a home or back swipe would otherwise press (and nudge) whatever is
+/// under it before Android takes it over.
+#[derive(Clone, Copy)]
+struct HeldTouch {
+    id: i32,
+    position: i_slint_core::lengths::LogicalPoint,
+    /// It moved like the zone's gesture: none of it goes to Slint.
+    swallowed: bool,
+}
+
+/// eddy patch: how long a touch in a gesture zone may stay put before it's
+/// pressed after all (a gesture moves well before then).
+const HOLD_IN_GESTURE_ZONE: std::time::Duration = std::time::Duration::from_millis(150);
+
 pub struct AndroidWindowAdapter {
     app: AndroidApp,
     pub(crate) window: Window,
@@ -49,6 +98,9 @@ pub struct AndroidWindowAdapter {
 
     long_press: RefCell<Option<LongPressDetection>>,
     last_pressed_state: Cell<ButtonState>,
+    touch_start: Cell<Option<TouchStart>>,
+    held: Cell<Option<HeldTouch>>,
+    held_timer: Timer,
 }
 
 impl WindowAdapter for AndroidWindowAdapter {
@@ -194,6 +246,9 @@ impl AndroidWindowAdapter {
             show_cursor_handles: Cell::new(false),
             long_press: RefCell::default(),
             last_pressed_state: Cell::new(ButtonState(0)),
+            touch_start: Cell::new(None),
+            held: Cell::new(None),
+            held_timer: Timer::default(),
         })
     }
 
@@ -286,6 +341,36 @@ impl AndroidWindowAdapter {
         Ok(ControlFlow::Continue(()))
     }
 
+    /// eddy patch: a touch going down at `x`, `y` (window pixels), and the
+    /// system gesture zone that is in.
+    fn touch_start_at(&self, x: f32, y: f32) -> TouchStart {
+        // No zones rather than a panic if it fails: a touch mustn't crash the app.
+        let zones = self.java_helper.get_gesture_area().unwrap_or_default();
+        let size = self.size();
+        let edge = if zones.left > 0 && x < zones.left as f32 {
+            Some(GestureEdge::Left)
+        } else if zones.right > 0 && x >= (size.width as i32 - zones.right) as f32 {
+            Some(GestureEdge::Right)
+        } else if zones.bottom > 0 && y >= (size.height as i32 - zones.bottom) as f32 {
+            Some(GestureEdge::Bottom)
+        } else {
+            None
+        };
+        TouchStart { x, y, edge }
+    }
+
+    /// eddy patch: the held touch goes down after all (unless it was a gesture).
+    fn release_held(&self) {
+        self.held_timer.stop();
+        if let Some(held) = self.held.take().filter(|h| !h.swallowed) {
+            self.window.dispatch_event(WindowEvent::internal(InternalEvent::Touch {
+                id: held.id,
+                position: held.position,
+                phase: TouchPhase::Started,
+            }));
+        }
+    }
+
     fn process_inputs(&self) -> Result<(), PlatformError> {
         let mut iter =
             self.app.input_events_iter().map_err(|e| PlatformError::Other(e.to_string()))?;
@@ -354,7 +439,27 @@ impl AndroidWindowAdapter {
                                 long_press_timeout,
                             );
                             self.long_press.replace(Some(LongPressDetection { position, _timer }));
-                            if let Some(p) = motion_event.pointers().next() {
+                            let start =
+                                motion_event.pointers().next().map(|p| self.touch_start_at(p.x(), p.y()));
+                            self.touch_start.set(start);
+                            self.held_timer.stop();
+                            self.held.take();
+                            if let (Some(p), Some(_)) =
+                                (motion_event.pointers().next(), start.and_then(|s| s.edge))
+                            {
+                                // eddy patch: in a gesture zone, held back until it's clear
+                                // it isn't the system's gesture.
+                                self.held.set(Some(HeldTouch {
+                                    id: p.pointer_id(),
+                                    position: touch_pos(&p),
+                                    swallowed: false,
+                                }));
+                                self.held_timer.start(TimerMode::SingleShot, HOLD_IN_GESTURE_ZONE, || {
+                                    if let Some(adaptor) = CURRENT_WINDOW.with_borrow(|x| x.upgrade()) {
+                                        adaptor.release_held();
+                                    }
+                                });
+                            } else if let Some(p) = motion_event.pointers().next() {
                                 self.window.dispatch_event(WindowEvent::internal(
                                     InternalEvent::Touch {
                                         id: p.pointer_id(),
@@ -367,6 +472,42 @@ impl AndroidWindowAdapter {
                         }
                         MotionAction::Up => {
                             self.long_press.take();
+                            // eddy patch: a held touch: a tap after all, or a gesture
+                            // that was never passed on.
+                            if let Some(held) = self.held.take() {
+                                self.held_timer.stop();
+                                let start = self.touch_start.take();
+                                let gesture = held.swallowed
+                                    || match (start, motion_event.pointers().next()) {
+                                        (Some(start), Some(p)) => {
+                                            start.looks_like_system_gesture(p.x(), p.y(), scale)
+                                        }
+                                        _ => false,
+                                    };
+                                if !gesture {
+                                    self.held.set(Some(held));
+                                    self.release_held();
+                                    if let Some(p) = motion_event.pointers().next() {
+                                        self.window.dispatch_event(WindowEvent::internal(
+                                            InternalEvent::Touch {
+                                                id: p.pointer_id(),
+                                                position: touch_pos(&p),
+                                                phase: TouchPhase::Ended,
+                                            },
+                                        ));
+                                    }
+                                }
+                                return InputStatus::Handled;
+                            }
+                            if let (Some(start), Some(p)) =
+                                (self.touch_start.take(), motion_event.pointers().next())
+                            {
+                                // eddy patch: a system gesture fast enough to end before the
+                                // system cancelled it here: as for a cancel (below).
+                                if start.looks_like_system_gesture(p.x(), p.y(), scale) {
+                                    self.window.dispatch_event(WindowEvent::PointerExited);
+                                }
+                            }
                             if let Some(p) = motion_event.pointers().next() {
                                 self.window.dispatch_event(WindowEvent::internal(
                                     InternalEvent::Touch {
@@ -391,6 +532,31 @@ impl AndroidWindowAdapter {
                             }
                             drop(lp);
 
+                            // eddy patch: a held touch stays held while it barely moves,
+                            // is dropped once it moves like the zone's gesture, and goes
+                            // down where it started once it moves any other way.
+                            if let Some(mut held) = self.held.get() {
+                                if held.swallowed {
+                                    return InputStatus::Handled;
+                                }
+                                let (Some(start), Some(p)) =
+                                    (self.touch_start.get(), motion_event.pointers().next())
+                                else {
+                                    return InputStatus::Handled;
+                                };
+                                let slop = 8. * scale;
+                                if start.looks_like_system_gesture(p.x(), p.y(), scale) {
+                                    self.held_timer.stop();
+                                    held.swallowed = true;
+                                    self.held.set(Some(held));
+                                    return InputStatus::Handled;
+                                }
+                                if (p.x() - start.x).hypot(p.y() - start.y) <= slop {
+                                    return InputStatus::Handled;
+                                }
+                                self.release_held();
+                            }
+
                             for p in motion_event.pointers() {
                                 self.window.dispatch_event(WindowEvent::internal(
                                     InternalEvent::Touch {
@@ -403,8 +569,10 @@ impl AndroidWindowAdapter {
                             InputStatus::Handled
                         }
                         MotionAction::PointerDown => {
-                            // A second finger means no long-press.
+                            // A second finger means no long-press (and no system gesture).
                             self.long_press.take();
+                            self.touch_start.take();
+                            self.release_held();
                             let idx = motion_event.pointer_index();
                             if let Some(p) = motion_event.pointers().nth(idx) {
                                 self.window.dispatch_event(WindowEvent::internal(
@@ -439,6 +607,19 @@ impl AndroidWindowAdapter {
                         }
                         MotionAction::Cancel | MotionAction::Outside => {
                             self.long_press.take();
+                            self.touch_start.take();
+                            // eddy patch: a held touch never reached Slint: nothing to undo.
+                            self.held_timer.stop();
+                            if self.held.take().is_some() {
+                                return InputStatus::Handled;
+                            }
+                            // eddy patch: Slint ends a cancelled touch with a release where
+                            // it was, which clicks whatever is there. Android cancels the
+                            // app's touch when a system gesture takes it over (a back swipe
+                            // from an edge, home, the notification shade), so those became
+                            // taps. Leaving the window first lets go of anything pressed or
+                            // dragged, so the release finds nothing to click.
+                            self.window.dispatch_event(WindowEvent::PointerExited);
                             for p in motion_event.pointers() {
                                 self.window.dispatch_event(WindowEvent::internal(
                                     InternalEvent::Touch {

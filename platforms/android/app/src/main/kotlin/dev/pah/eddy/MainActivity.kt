@@ -81,6 +81,16 @@ class MainActivity : GameActivity() {
         super.onDestroy()
     }
 
+    override fun onStart() {
+        super.onStart()
+        DownloadService.mainAppVisible = true
+    }
+
+    override fun onStop() {
+        DownloadService.mainAppVisible = false
+        super.onStop()
+    }
+
     // Back from the installer (or anywhere): pick up helper apps that were
     // installed or updated meanwhile.
     override fun onResume() {

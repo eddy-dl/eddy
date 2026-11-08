@@ -34,12 +34,6 @@ export component PreviewApp inherits Window {
     // they still don't fit, with the buttons kept in view.
     private property <length> preview_height: Math.max(0px, root.sheet_height - root.safe-area-insets.bottom);
 
-    // The preview took its options at creation, before Rust had read the
-    // download defaults into AppSettings: takes them again.
-    public function reload_options() {
-        preview.reset_options();
-    }
-
     init => {
         ThemeSettings.system_is_dark = Palette.color-scheme == ColorScheme.dark;
         scope.focus();

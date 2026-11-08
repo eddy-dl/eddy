@@ -247,12 +247,14 @@ pub struct SavedBook {
 }
 
 /// Saves the book as `<dir>/<name>.epub`, reporting (chapters done, total).
+/// `named` gets the file's name as soon as the book's details are in.
 /// Returns the file's path and the book.
 pub async fn download(
     url: &str,
     options: &NovelOptions,
     dir: &Path,
     name: Option<&str>,
+    named: impl FnOnce(&str),
     progress: impl Fn(usize, usize),
 ) -> Result<(PathBuf, SavedBook), String> {
     let mut book = book(url).await?;
@@ -260,6 +262,8 @@ pub async fn download(
     if !options.title.trim().is_empty() {
         book.title = options.title.trim().to_string();
     }
+    let file_name = format!("{}.epub", clean::safe_file_name(name.unwrap_or(&default_name(&book))));
+    named(&file_name);
     let chapters = wanted(&book, options);
     if chapters.is_empty() {
         return Err("No chapters to save".to_string());
@@ -290,7 +294,6 @@ pub async fn download(
         packed.push(epub::Chapter { title: c.title.clone(), volume: c.volume.clone(), xhtml });
     }
 
-    let file_name = format!("{}.epub", clean::safe_file_name(name.unwrap_or(&default_name(&book))));
     let path = dir.join(file_name);
     let series = options.parts.then_some(options.part.max(1));
     let bytes = epub::pack(&book, &packed, cover, collected.into_images(), series)?;

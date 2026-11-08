@@ -149,10 +149,14 @@ fn set_browser_only(host: &str) {
 /// PageFetcher), for a site that lets the browser in but not Eddy's own
 /// requests: Cloudflare judges the connection itself, so its pass doesn't
 /// carry over. A check that wants the user opens as usual, then the page is
-/// asked for again.
+/// asked for again; a page that didn't load is tried again a few times.
 async fn browser_text(url: &str, host: &str) -> Result<String, String> {
     let mut count = BROWSER.lock().await;
-    for round in 0..2 {
+    let mut checked = false;
+    let mut wait = Duration::from_secs(2);
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
         *count += 1;
         let file = PathBuf::from(crate::platform::get_app_data_dir()).join("browser").join(format!("page-{}.html", *count));
         let _ = std::fs::remove_file(&file);
@@ -170,12 +174,12 @@ async fn browser_text(url: &str, host: &str) -> Result<String, String> {
             *last = Some(Instant::now());
         }
         if !crate::platform::fetch_page(url, &file.to_string_lossy()) {
-            return Err(if round == 0 { CHALLENGE } else { STILL_BLOCKED }.to_string());
+            return Err(if checked { STILL_BLOCKED } else { CHALLENGE }.to_string());
         }
         let began = Instant::now();
         let text = loop {
             if began.elapsed() > BROWSER_TIMEOUT {
-                return Err("The site took too long in the browser".to_string());
+                break String::from("error it didn't load in time");
             }
             tokio::time::sleep(Duration::from_millis(300)).await;
             if let Ok(text) = std::fs::read_to_string(&file) {
@@ -189,15 +193,23 @@ async fn browser_text(url: &str, host: &str) -> Result<String, String> {
         let state = if state.trim() == "page" && looks_like_check(html) { "check" } else { state.trim() };
         match state {
             "page" => return Ok(html.to_string()),
-            "check" if round == 0 => pass_check(url, host, SystemTime::now()).await?,
+            "check" if !checked => {
+                checked = true;
+                pass_check(url, host, SystemTime::now()).await?;
+            }
             "check" => return Err(CHALLENGE.to_string()),
             _ => {
-                log::warn!("background browser: {url}: {}", state.trim().trim_start_matches("error").trim());
-                return Err("The site's page didn't load in the browser".to_string());
+                let why = state.trim_start_matches("error").trim();
+                if attempt >= ATTEMPTS {
+                    log::warn!("background browser: {url}: {why}");
+                    return Err("The site's page didn't load in the browser".to_string());
+                }
+                log::warn!("background browser: {url}: {why}, retrying");
+                tokio::time::sleep(wait).await;
+                wait *= 2;
             }
         }
     }
-    Err(CHALLENGE.to_string())
 }
 
 /// A page's HTML.

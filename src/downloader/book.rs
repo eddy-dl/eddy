@@ -15,12 +15,19 @@ pub fn start(request: &DownloadRequest, dir: &str, name: Option<String>, deliver
     } else {
         serde_json::from_str(&request.format).map_err(|e| format!("Bad book request: {e}"))?
     };
-    let label = super::label_for(request);
+    let mut label = super::label_for(request);
     let record = request.id;
     let (job, cancelled) = media::begin(&label);
     let (url, dir) = (request.url.clone(), PathBuf::from(dir));
     let task = runtime().spawn(async move {
-        let result = crate::novels::download(&url, &options, &dir, name.as_deref(), |done, total| {
+        // Started before the link was checked, it's named after the link
+        // (the book's id) until the book's details are in.
+        let named = |file: &str| {
+            label = file.to_string();
+            media::relabel(job, file);
+            crate::downloads::set_name(record, file);
+        };
+        let result = crate::novels::download(&url, &options, &dir, name.as_deref(), named, |done, total| {
             media::progress(job, done as u64, total as u64);
         })
         .await;

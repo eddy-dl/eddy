@@ -95,6 +95,15 @@ pub(super) fn progress(id: u64, done: u64, total: u64) {
     });
 }
 
+/// The job's name, once it's known.
+pub(super) fn relabel(id: u64, label: &str) {
+    with_jobs(|jobs| {
+        if let Some((job, _)) = jobs.get_mut(&id) {
+            job.label = label.to_string();
+        }
+    });
+}
+
 /// The next of a job's `count` files starts (named `name`).
 pub(super) fn next_part(id: u64, count: usize, name: &str) {
     with_jobs(|jobs| {

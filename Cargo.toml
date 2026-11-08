@@ -109,8 +109,9 @@ panic = "abort"
 
 # Slint 1.18.1's Android backend with the upstream fix that releases the GPU
 # surface when the window goes, running on GameActivity (see
-# patches/i-slint-backend-game-activity).
-# Drop once a Slint release includes it.
+# patches/i-slint-backend-game-activity), and touches the system takes over
+# for a gesture (back swipe, home, the notification shade) no longer clicking
+# what was under them. Drop once a Slint release includes these.
 [patch.crates-io]
 i-slint-backend-android-activity = { path = "patches/i-slint-backend-game-activity" }
 

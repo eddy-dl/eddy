@@ -26,6 +26,9 @@ const DL_UA_CUSTOM_KEY: &str = "download_user_agent_custom";
 const DL_CATEGORY_KEY: &str = "download_category_folders";
 const DL_REPLACE_KEY: &str = "download_replace_existing";
 const LINKS_SPACES_KEY: &str = "links_with_spaces";
+// Android: Eddy quits once its downloads are done while it's in the
+// background (DownloadService reads it).
+const QUIT_WHEN_DONE_KEY: &str = "quit_when_done";
 // How many downloads run at once (0: no limit); the rest wait their turn.
 const DL_MAX_CONCURRENT_KEY: &str = "download_max_concurrent";
 pub const DEFAULT_MAX_CONCURRENT: i32 = 3;
@@ -208,6 +211,7 @@ pub fn apply_download_defaults(settings: &AppSettings) {
     settings.set_dl_category_folders(platform::get_pref(DL_CATEGORY_KEY, "false").ok().is_some_and(|v| v == "true"));
     settings.set_dl_replace_existing(replace_existing());
     settings.set_links_with_spaces(links_with_spaces());
+    settings.set_quit_when_done(platform::get_pref(QUIT_WHEN_DONE_KEY, "false").ok().is_some_and(|v| v == "true"));
     let max = number(DL_MAX_CONCURRENT_KEY, DEFAULT_MAX_CONCURRENT).max(0);
     settings.set_dl_max_concurrent(max);
     crate::downloads::set_max_concurrent(max as usize);
@@ -314,6 +318,7 @@ pub fn save_preferences(ui_weak: slint::Weak<DownloaderApp>) {
             (DL_CATEGORY_KEY, app_settings.get_dl_category_folders().to_string()),
             (DL_REPLACE_KEY, app_settings.get_dl_replace_existing().to_string()),
             (LINKS_SPACES_KEY, app_settings.get_links_with_spaces().to_string()),
+            (QUIT_WHEN_DONE_KEY, app_settings.get_quit_when_done().to_string()),
             (DL_MAX_CONCURRENT_KEY, app_settings.get_dl_max_concurrent().max(0).to_string()),
         ] {
             if let Err(e) = platform::save_pref(key, &value) {

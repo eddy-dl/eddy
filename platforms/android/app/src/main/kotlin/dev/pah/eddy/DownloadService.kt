@@ -38,6 +38,9 @@ class DownloadService : Service() {
         private const val ACTION_CANCEL = "dev.pah.eddy.CANCEL_ALL"
         // Its Exit button: everything paused, Eddy closed.
         private const val ACTION_EXIT = "dev.pah.eddy.EXIT"
+        // A "Download failed" notification's Retry, with "id" (the
+        // download's record) and "notification" (to take it away).
+        private const val ACTION_RETRY = "dev.pah.eddy.RETRY"
         // From Rust (any process): a site's Cloudflare check to pass in a
         // WebView (CloudflareActivity), with "url" and "result" extras.
         private const val ACTION_CHECK_SITE = "dev.pah.eddy.CHECK_SITE"
@@ -50,6 +53,8 @@ class DownloadService : Service() {
 
         // The main app's activity is open (same process as the service).
         @Volatile var mainAppOpen = false
+        // And on screen (started, not stopped).
+        @Volatile var mainAppVisible = false
         // That activity, so Exit can close it.
         @Volatile var mainActivity: java.lang.ref.WeakReference<Activity>? = null
 
@@ -104,12 +109,25 @@ class DownloadService : Service() {
     private var nextResultId = NOTIFICATION_ID + 1
     // Finished downloads still being copied into their picked folders.
     @Volatile private var copying = 0
+    // Something downloaded since the service started or Eddy was last on
+    // screen: "Quit when done" waits for that.
+    private var hadWork = false
 
     private val check = object : Runnable {
         override fun run() {
             postResults()
             val (active, name, permille, kind) = status()
-            if (active == 0 && copying == 0 && !mainAppOpen && !popupOpen) {
+            if (active > 0 || copying > 0) hadWork = true
+            if (mainAppVisible || popupOpen) hadWork = false
+            if (active == 0 && copying == 0 && hadWork && mainAppOpen && quitWhenDone()) {
+                // The same two checks in a row as below.
+                idleChecks += 1
+                if (idleChecks >= 2) {
+                    Log.i(TAG, "downloads done in the background, quitting")
+                    exit()
+                    return
+                }
+            } else if (active == 0 && copying == 0 && !mainAppOpen && !popupOpen) {
                 // Twice in a row, so a download that's just being added
                 // doesn't stop the service.
                 idleChecks += 1
@@ -152,6 +170,10 @@ class DownloadService : Service() {
             ACTION_EXIT -> {
                 exit()
                 return START_NOT_STICKY
+            }
+            ACTION_RETRY -> {
+                notificationManager().cancel(intent.getIntExtra("notification", 0))
+                EddyNative.retryDownload(intent.getLongExtra("id", 0L))
             }
             ACTION_CHECK_SITE -> CloudflareActivity.show(
                 this,
@@ -264,6 +286,10 @@ class DownloadService : Service() {
         }
     }
 
+    // Settings → Downloading → Quit when done (saved by Rust as "true"/"false").
+    private fun quitWhenDone(): Boolean =
+        getSharedPreferences("app_prefs", Context.MODE_PRIVATE).getString("quit_when_done", "false") == "true"
+
     // Exit: every download paused (each carries on from there next time),
     // the app's window closed and out of recents, the service stopped, then
     // Eddy's processes (the share popup's too) ended once the pause has
@@ -288,6 +314,16 @@ class DownloadService : Service() {
         this, action.hashCode(),
         Intent(this, DownloadService::class.java).setAction(action),
         PendingIntent.FLAG_IMMUTABLE,
+    )
+
+    // Retry on download `id`'s "Download failed" notification (`notification`).
+    private fun retryIntent(id: Long, notification: Int): PendingIntent = PendingIntent.getService(
+        this, notification,
+        Intent(this, DownloadService::class.java)
+            .setAction(ACTION_RETRY)
+            .putExtra("id", id)
+            .putExtra("notification", notification),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
     private fun progressNotification(active: Int, name: String, permille: Int, kind: Int): android.app.Notification {
@@ -350,20 +386,22 @@ class DownloadService : Service() {
                     delivered.uri?.let { EddyNative.delivered(id, it.toString()) }
                     handler.post {
                         copying -= 1
-                        postResult(delivered.error == null, name, delivered.error ?: "", id, kind)
+                        // Downloaded, only the copy failed: nothing to retry.
+                        postResult(delivered.error == null, name, delivered.error ?: "", id, kind, retry = false)
                     }
                 }.start()
                 continue
             }
-            postResult(ok, name, message, id, kind)
+            postResult(ok, name, message, id, kind, retry = !ok && id != 0L)
         }
     }
 
     // Downloaded: a tap opens it (as its card in the list does); failed, the
-    // app.
-    private fun postResult(ok: Boolean, name: String, message: String, id: Long, kind: Int) {
+    // app, with Retry when `retry`.
+    private fun postResult(ok: Boolean, name: String, message: String, id: Long, kind: Int, retry: Boolean) {
         Haptics.play(this, if (ok) Haptics.DOWNLOADED else Haptics.FAILED)
-        val notification = NotificationCompat.Builder(this, RESULTS_CHANNEL_ID)
+        val notificationId = nextResultId++
+        val builder = NotificationCompat.Builder(this, RESULTS_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setLargeIcon(TypeIcon.bitmap(this, kind))
             .setContentTitle(getString(if (ok) R.string.downloaded_name else R.string.download_failed_name, name))
@@ -371,7 +409,9 @@ class DownloadService : Service() {
             .setStyle(if (ok) null else NotificationCompat.BigTextStyle().bigText(message))
             .setContentIntent(if (ok && id != 0L) openFileIntent(id) ?: openDownloadIntent(id) else openAppIntent())
             .setAutoCancel(true)
-            .build()
-        notificationManager().notify(nextResultId++, notification)
+        if (retry) {
+            builder.addAction(R.drawable.ic_notification, getString(R.string.retry), retryIntent(id, notificationId))
+        }
+        notificationManager().notify(notificationId, builder.build())
     }
 }
