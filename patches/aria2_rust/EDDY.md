@@ -137,6 +137,9 @@ does stop for the pause re-queues it as Waiting when it completes, as before.
 Test: `test_e2e_engine_unpause_before_task_stops_runs_as_active`
 (`tests/test_e2e_download.rs`); it failed (Waiting) before the fix.
 
+Upstream issue: <https://github.com/balovess/aria2_rust/issues/90>. Drop this
+change once a fix is released.
+
 ## Warnings
 
 `aria2-core/src/lib.rs` allows upstream's warnings (unused imports, a
