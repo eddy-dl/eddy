@@ -6,6 +6,17 @@ A download manager for Android, Windows and Linux, written in Rust with a [Slint
 interface.
 Paste or share a link: Eddy works out what it is, shows a preview, and downloads it.
 
+<p>
+  <img src="docs/screenshots/mobile-downloads.png" alt="Downloads on a phone" width="240">
+  <img src="docs/screenshots/mobile-settings.png" alt="Settings on a phone" width="240">
+</p>
+<p>
+  <img src="docs/screenshots/desktop-downloads.png" alt="Downloads on desktop" width="720">
+</p>
+<p>
+  <img src="docs/screenshots/desktop-settings.png" alt="Settings on desktop" width="720">
+</p>
+
 ## What it downloads
 
 - **Files**: plain links, with several connections, pause and resume, through a patched
