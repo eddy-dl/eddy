@@ -6,6 +6,12 @@ use slint::ComponentHandle;
 
 fn main() -> Result<(), slint::PlatformError> {
     eddy::logs::init();
+    // `eddy <link>… <file>…`: to the Eddy already open if there is one (it
+    // comes forward), else to this one once it's up.
+    let args = eddy::handoff::arguments();
+    if eddy::handoff::hand_over(&args) {
+        return Ok(());
+    }
     if let Err(e) = eddy::db::init(platform::get_app_data_dir()) {
         eprintln!("Failed to initialize database: {e}");
     }
@@ -47,6 +53,11 @@ fn main() -> Result<(), slint::PlatformError> {
     app_settings.set_app_version(eddy::VERSION.into());
     app_settings.set_slint_version(eddy::SLINT_VERSION.into());
     app_settings.on_open_url(|url| platform::open_url(&url));
+    app_settings.set_can_register_handlers(eddy::handoff::can_register_handlers());
+    app_settings.on_register_handlers(|| match eddy::handoff::register_handlers() {
+        Ok(()) => platform::show_toast("Eddy now opens magnet links and .torrent files"),
+        Err(e) => platform::show_toast(&format!("Couldn't set Eddy up for them: {e}")),
+    });
     app_settings.on_preferences_changed({
         move || {
             preferences::save_preferences(ui_weak.clone());
@@ -67,6 +78,8 @@ fn main() -> Result<(), slint::PlatformError> {
     eddy::desktop_notify::install(&ui);
     eddy::cookies::install(&ui);
     eddy::cache::install(&ui);
+    eddy::handoff::listen(&ui);
+    eddy::handoff::open(&ui, &args);
     ui.window().set_size(slint::PhysicalSize::new(800, 600));
     ui.run()
 }

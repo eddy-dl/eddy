@@ -899,3 +899,9 @@ msgstr "Mettre à jour {} ?"
 
 msgid "Eddy gets the newest {} ({})."
 msgstr "Eddy récupère la dernière version de {} ({})."
+
+msgid "Open magnet links and torrents"
+msgstr "Ouvrir les liens magnet et les torrents"
+
+msgid "Click to make Eddy the app that opens magnet links and .torrent files."
+msgstr "Cliquez pour qu’Eddy ouvre les liens magnet et les fichiers .torrent."
