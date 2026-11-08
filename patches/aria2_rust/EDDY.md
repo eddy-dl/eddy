@@ -124,6 +124,13 @@ picked file into its (renamed) folder with the others untouched.
 Upstream issue: <https://github.com/balovess/aria2_rust/issues/78>. Drop this
 copy once a fix is released.
 
+## iOS
+
+`engine/bittorrent/discovery/lpd/receive_loop.rs` set `sockaddr_in`'s
+`sin_len` on macOS only; iOS (and every Apple platform) has it too, so iOS
+didn't compile. It's `target_vendor = "apple"` now. Still so in v0.3.12
+(`receive_socket.rs`).
+
 ## Warnings
 
 `aria2-core/src/lib.rs` allows upstream's warnings (unused imports, a
