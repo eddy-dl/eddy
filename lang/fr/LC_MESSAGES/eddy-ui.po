@@ -905,3 +905,9 @@ msgstr "Ouvrir les liens magnet et les torrents"
 
 msgid "Click to make Eddy the app that opens magnet links and .torrent files."
 msgstr "Cliquez pour qu’Eddy ouvre les liens magnet et les fichiers .torrent."
+
+msgid "Animated Downloading tab"
+msgstr "Onglet « En cours » animé"
+
+msgid "Its icon moves while something downloads. Off saves battery: the screen isn't redrawn for it."
+msgstr "Son icône bouge pendant un téléchargement. Désactivé, cela économise la batterie : l’écran n’est pas redessiné pour elle."

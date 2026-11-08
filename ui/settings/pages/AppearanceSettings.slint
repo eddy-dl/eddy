@@ -698,7 +698,7 @@ export component AppearanceSettings inherits Rectangle {
 
             SettingsCard {
                 first: true;
-                last: true;
+                last: false;
                 highlighted: top_nav_ta.has-hover;
 
                 top_nav_ta := TouchArea {
@@ -755,6 +755,16 @@ export component AppearanceSettings inherits Rectangle {
                         toggled => { AppSettings.preferences_changed(); }
                     }
                 }
+            }
+
+            SwitchRow {
+                first: false;
+                last: true;
+                title: @tr("Animated Downloading tab");
+                subtitle: @tr("Its icon moves while something downloads. Off saves battery: the screen isn't redrawn for it.");
+                text_color: root.text_color;
+                checked <=> AppSettings.animate_downloading_tab;
+                toggled => { AppSettings.preferences_changed(); }
             }
         }
     }

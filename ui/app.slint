@@ -126,6 +126,11 @@ export component DownloaderApp inherits Window {
 
     // The first item is enough: queued items always come after the active ones.
     out property <bool> has_active_downloads: root.downloading_items.length > 0 && root.downloading_items[0].state == DownloadState.Active;
+    // The Downloading tab's cards are on screen (its progress bars glide
+    // only then), and the main screen at all (the tab's icon moves only
+    // then, if the setting allows): what isn't seen isn't redrawn.
+    private property <bool> downloading_in_view: root.active_tab == 0 && !root.show_settings;
+    private property <bool> tab_icon_moves: root.has_active_downloads && !root.show_settings && AppSettings.animate_downloading_tab;
     out property <ColorScheme> system-theme: Palette.color-scheme;
     out property <brush> system-accent: Palette.accent-background;
 
@@ -527,7 +532,7 @@ export component DownloaderApp inherits Window {
 
                     if AppSettings.top_navigation_bar: TopNavBar {
                         active_tab: root.active_tab;
-                        is_downloading: root.has_active_downloads;
+                        is_downloading: root.tab_icon_moves;
                         tab_selected(tab) => { root.tab_clicked(tab); }
                     }
                 }
@@ -632,6 +637,7 @@ export component DownloaderApp inherits Window {
                                                 y: row_0.label_height;
                                                 item: item;
                                                 selected: row_0.selected;
+                                                animated: root.downloading_in_view;
                                                 clicked => {
                                                     if (root.selection_mode) {
                                                         row_0.selected_in = row_0.selected_in == root.selection_gen ? 0 : root.selection_gen;
@@ -955,7 +961,7 @@ export component DownloaderApp inherits Window {
                         text: @tr("Downloading");
                         icon_type: 0;
                         is_active: root.active_tab == 0;
-                        is_downloading: root.has_active_downloads;
+                        is_downloading: root.tab_icon_moves;
                         clicked => { root.tab_clicked(0); }
                     }
 
