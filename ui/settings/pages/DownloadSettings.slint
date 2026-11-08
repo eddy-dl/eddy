@@ -9,7 +9,7 @@ export component DownloadSettings inherits Rectangle {
     // True once the content has scrolled away from the top; tints the settings header.
     out property <bool> scrolled: scroller.content-y < 0;
 
-    // Opens the yt-dlp packages page.
+    // Opens the external packages page.
     callback open_packages();
     // Opens the Books page.
     callback open_books();
@@ -366,13 +366,13 @@ export component DownloadSettings inherits Rectangle {
                         horizontal-stretch: 1;
 
                         Text {
-                            text: AppSettings.is_mobile ? @tr("yt-dlp packages") : @tr("Media tools");
+                            text: AppSettings.is_mobile ? @tr("External packages") : @tr("Media tools");
                             font-size: 18px;
                             font-weight: 600;
                             color: root.text_color;
                         }
                         WrappedText {
-                            text: AppSettings.is_mobile ? @tr("Manage yt-dlp packages") : @tr("Manage media tools");
+                            text: AppSettings.is_mobile ? @tr("Manage external packages") : @tr("Manage media tools");
                             font-size: 13px;
                             color: root.text_color.transparentize(40%);
                         }

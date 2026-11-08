@@ -243,7 +243,7 @@ fn check() {
     crate::downloader::runtime().spawn(async move {
         let result = fetch_releases(&abi).await;
         if let Err(e) = &result {
-            log::warn!("couldn't check the yt-dlp packages: {e}");
+            log::warn!("couldn't check the external packages: {e}");
         }
         *RELEASES.lock().unwrap_or_else(|e| e.into_inner()) = Some(result);
         let _ = slint::invoke_from_event_loop(refresh);

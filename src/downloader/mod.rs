@@ -754,7 +754,7 @@ pub fn active_count() -> usize {
 }
 
 /// Downloads `url` to `dir/out` with aria2 (several connections, retries),
-/// for Eddy's own files: the yt-dlp packages, desktop's tools. Not a user
+/// for Eddy's own files: the external packages, desktop's tools. Not a user
 /// download, so it's not in the lists. `on_progress(done, total)` gets
 /// called as it goes.
 pub async fn fetch_file(url: &str, dir: &std::path::Path, out: &str, on_progress: impl Fn(u64, u64)) -> Result<PathBuf, String> {
