@@ -79,16 +79,21 @@ pub fn open_file(path: &str) {
     });
 }
 
-pub fn open_site_check(_url: &str, _result: &str) -> bool {
-    false
+/// A site's bot check, passed by the user in the browser over the app; its
+/// user agent and cookies are written to `result` (see novels::fetch).
+pub fn open_site_check(url: &str, result: &str) -> bool {
+    super::webview::send("check", url, result)
 }
 
+/// No browser to catch a page's download in (as on desktop).
 pub fn open_browser(_page: &str, _result: &str) -> bool {
     false
 }
 
-pub fn fetch_page(_url: &str, _result: &str) -> bool {
-    false
+/// A page read in the browser, unseen, for a site that turns Eddy's own
+/// requests away; written to `result` as Android's PageFetcher does.
+pub fn fetch_page(url: &str, result: &str) -> bool {
+    super::webview::send("fetch", url, result)
 }
 
 pub fn open_url(url: &str) {

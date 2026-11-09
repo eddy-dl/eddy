@@ -91,7 +91,10 @@ slint = { version = "1.18.1", features = ["backend-android-activity-06"] }
 # over the D-Bus library Slint already uses.
 # iOS: Slint's winit backend, drawn with Skia on Metal (Slint's iOS guide).
 [target.'cfg(target_os = "ios")'.dependencies]
-slint = { version = "1.18.1", features = ["renderer-skia"] }
+# The window's handle: the browser for bot checks goes in it (platform/ios_webview.rs).
+slint = { version = "1.18.1", features = ["renderer-skia", "raw-window-handle-06"] }
+# The desktop helper's jobs for that browser, run in-process (webview/src/lib.rs).
+eddy-webview = { path = "webview", default-features = false }
 # UIKit (opening links and files, the share sheet) and BackgroundTasks
 # (downloads kept going in the background, platform/ios_background.rs), with
 # the objc2 versions Slint's winit backend already uses.
@@ -103,11 +106,20 @@ objc2-core-foundation = { version = "0.3.2", default-features = false, features 
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSDictionary", "NSError", "NSObject", "NSProgress", "NSSet", "NSString", "NSURL"] }
 objc2-ui-kit = { version = "0.3.2", default-features = false, features = [
     "std",
+    "bitflags",
     "block2",
     "objc2-core-foundation",
+    "UIAction",
     "UIActivity",
     "UIActivityViewController",
     "UIApplication",
+    "UIButton",
+    "UIColor",
+    "UIControl",
+    "UIGeometry",
+    "UIImage",
+    "UIInterface",
+    "UIMenuElement",
     "UIPopoverPresentationController",
     "UIPresentationController",
     "UIResponder",
