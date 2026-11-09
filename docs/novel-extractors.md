@@ -5,7 +5,7 @@ books, the way [WebToEpub](https://github.com/dteviot/WebToEpub) does in the
 browser, but inside Eddy's link checks and downloads.
 
 Status: Royal Road, AO3, Wattpad, Sufficient Velocity, SpaceBattles,
-FanFiction.net, FictionPress and Wuxiaworld implemented (engine, preview,
+FanFiction.net, FictionPress, Wuxiaworld and NovelPing implemented (engine, preview,
 download, Books settings, library and updates). SpaceBattles, FanFiction.net
 and FictionPress are behind Cloudflare's browser check (a 403 "Just a
 moment" page), passed in a WebView (CloudflareActivity); FanFiction.net and

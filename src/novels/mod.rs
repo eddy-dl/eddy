@@ -9,6 +9,7 @@ pub mod fetch;
 pub mod ao3;
 pub mod fanfiction;
 pub mod images;
+pub mod novelping;
 pub mod royalroad;
 pub mod wattpad;
 pub mod wuxiaworld;
@@ -28,6 +29,7 @@ pub enum Site {
     SpaceBattles,
     FanFiction,
     FictionPress,
+    NovelPing,
 }
 
 impl Site {
@@ -41,6 +43,7 @@ impl Site {
             Site::SpaceBattles => "SpaceBattles",
             Site::FanFiction => "FanFiction.net",
             Site::FictionPress => "FictionPress",
+            Site::NovelPing => "NovelPing",
         }
     }
 
@@ -55,6 +58,7 @@ impl Site {
             Site::SpaceBattles => "spacebattles",
             Site::FanFiction => "fanfiction",
             Site::FictionPress => "fictionpress",
+            Site::NovelPing => "novelping",
         }
     }
 }
@@ -69,6 +73,8 @@ pub fn site_for(url: &str) -> Option<Site> {
         Some(Site::Wattpad)
     } else if wuxiaworld::is_book_url(url) {
         Some(Site::Wuxiaworld)
+    } else if novelping::is_book_url(url) {
+        Some(Site::NovelPing)
     } else {
         xenforo::site_for(url).or_else(|| fanfiction::site_for(url))
     }
@@ -162,6 +168,7 @@ pub async fn book(url: &str) -> Result<Book, String> {
         Site::SufficientVelocity | Site::SpaceBattles => xenforo::book(url).await,
         Site::FanFiction | Site::FictionPress => fanfiction::book(url).await,
         Site::Wuxiaworld => wuxiaworld::book(url).await,
+        Site::NovelPing => novelping::book(url).await,
     }
 }
 
@@ -180,6 +187,7 @@ async fn chapter(book: &Book, chapter: &ChapterRef, options: &NovelOptions) -> R
                 Site::SufficientVelocity | Site::SpaceBattles => xenforo::chapter(&chapter.url).await?,
                 Site::FanFiction | Site::FictionPress => fanfiction::chapter(&chapter.url).await?,
                 Site::Wuxiaworld => wuxiaworld::chapter(&chapter.url).await?,
+                Site::NovelPing => novelping::chapter(&chapter.url).await?,
             };
             let cached = CachedChapter { body: raw.body, notes: raw.notes, hidden_classes: raw.hidden_classes };
             if let Some(dir) = cache.parent() {

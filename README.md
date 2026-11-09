@@ -37,8 +37,8 @@ Paste or share a link: Eddy works out what it is, shows a preview, and downloads
   gallery-dl's own build, or one on your PATH.
 - **Google Drive** and **MEGA** files and folders (MEGA's decrypted in place).
 - **Web novels as EPUB books**: Royal Road, AO3, Wattpad, Sufficient Velocity, SpaceBattles,
-  FanFiction.net, FictionPress and Wuxiaworld. Pick chapters, keep author notes and images or
-  not, and check for new chapters later. Sites behind Cloudflare or Anubis are passed in a
+  FanFiction.net, FictionPress, Wuxiaworld and NovelPing. Pick chapters, keep author notes and
+  images or not, and check for new chapters later. Sites behind Cloudflare or Anubis are passed in a
   browser check. See [docs/novel-extractors.md](docs/novel-extractors.md).
 - **Pages whose file only comes from a click**, in Eddy's own browser.
 
