@@ -716,13 +716,27 @@ for stream in (sys.stdout, sys.stderr):
 result.put(code)
 '''
 
+_eddy_interpreters_checked = None
+
+def _eddy_interpreters():
+    """concurrent.interpreters, if a subinterpreter starts (tried once), or
+    None."""
+    global _eddy_interpreters_checked
+    with _eddy_subs_lock:
+        if _eddy_interpreters_checked is None:
+            try:
+                from concurrent import interpreters
+                interpreters.create().close()
+                _eddy_interpreters_checked = interpreters
+            except Exception as e:
+                sys.__stderr__.write(f"[eddy] no subinterpreters: {e}\n")
+                _eddy_interpreters_checked = False
+        return _eddy_interpreters_checked or None
+
 def _eddy_gallery_dl(run_id, out_fd, err_fd, status, args):
     """Runs gallery-dl in a subinterpreter of its own: its exit code."""
-    try:
-        from concurrent import interpreters
-    except ImportError:
-        interpreters = None
-    if interpreters is None or _eddy_set_async_exc is None:
+    interpreters = _eddy_interpreters() if _eddy_set_async_exc is not None else None
+    if interpreters is None:
         import gallery_dl
         status.write(f"{threading.get_ident()}\n")
         with _eddy_argv:
