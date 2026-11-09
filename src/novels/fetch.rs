@@ -15,9 +15,18 @@ const USER_AGENT: &str =
 const PAUSE: Duration = Duration::from_millis(1000);
 /// FanFiction.net and FictionPress block readers that go faster.
 const SLOW_PAUSE: Duration = Duration::from_millis(3000);
+/// Ranobes blocks readers that go faster than one page every 8 s or so
+/// (WebToEpub's pace for it).
+const SLOWEST_PAUSE: Duration = Duration::from_millis(8000);
 
 fn pause_for(host: &str) -> Duration {
-    if host.ends_with("fanfiction.net") || host.ends_with("fictionpress.com") { SLOW_PAUSE } else { PAUSE }
+    if host.ends_with("ranobes.top") || host.ends_with("ranobes.net") {
+        SLOWEST_PAUSE
+    } else if host.ends_with("fanfiction.net") || host.ends_with("fictionpress.com") {
+        SLOW_PAUSE
+    } else {
+        PAUSE
+    }
 }
 const ATTEMPTS: u32 = 4;
 
