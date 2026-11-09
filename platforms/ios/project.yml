@@ -26,6 +26,13 @@ targets:
         # Downloads go to Documents: shown in Files, under On My iPhone › Eddy.
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
+        # Downloads keep going in the background: a continued-processing
+        # task (iOS 26), one identifier per task asked for (see
+        # src/platform/ios_background.rs).
+        BGTaskSchedulerPermittedIdentifiers:
+          - dev.pah.eddy.downloads.*
+        UIBackgroundModes:
+          - processing
         # UIKit's scene lifecycle (iOS 27 won't launch an app without it), with
         # the scene delegate Slint's winit backend provides.
         UIApplicationSceneManifest:
