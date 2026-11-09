@@ -57,12 +57,25 @@ fn link_ffmpeg(root: &Path) {
         .compile("eddy_ffmpeg_wrapper");
     println!("cargo:rustc-link-search=native={}", slice.display());
     println!("cargo:rustc-link-lib=static=FFmpeg");
-    // What SwiftFFmpeg-iOS's Package.swift links.
-    for framework in ["AudioToolbox", "AVFoundation", "CoreMedia", "VideoToolbox"] {
+    // What SwiftFFmpeg-iOS's Package.swift links, and CoreVideo, which Xcode
+    // adds by itself.
+    for framework in ["AudioToolbox", "AVFoundation", "CoreMedia", "CoreVideo", "VideoToolbox"] {
         println!("cargo:rustc-link-lib=framework={framework}");
     }
     for library in ["z", "bz2", "iconv", "xml2"] {
         println!("cargo:rustc-link-lib=dylib={library}");
+    }
+    // Clang's runtime (`@available` checks in FFmpeg), which Rust's link
+    // leaves out (-nodefaultlibs).
+    let runtime = if simulator { "libclang_rt.iossim.a" } else { "libclang_rt.ios.a" };
+    let compiler = cc::Build::new().get_compiler();
+    if let Ok(output) = Command::new(compiler.path()).arg(format!("-print-file-name={runtime}")).output() {
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if Path::new(&path).is_file() {
+            println!("cargo:rustc-link-arg={path}");
+        } else {
+            println!("cargo:warning=clang's {runtime} wasn't found ({path})");
+        }
     }
     println!("cargo:rustc-cfg=eddy_ffmpeg");
     println!("cargo:rerun-if-changed={}", wrapper.join("ffmpeg_wrapper.c").display());
