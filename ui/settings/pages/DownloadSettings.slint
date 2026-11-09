@@ -273,7 +273,7 @@ export component DownloadSettings inherits Rectangle {
             // How web novels are saved, on a page of their own.
             SettingsCard {
                 first: false;
-                last: AppSettings.helper_packages.length == 0;
+                last: AppSettings.helper_packages.length == 0 && AppSettings.python_tools.length == 0;
                 highlighted: books_ta.has-hover;
 
                 books_ta := TouchArea {
@@ -331,7 +331,7 @@ export component DownloadSettings inherits Rectangle {
             }
 
             // yt-dlp and friends, on a page of their own.
-            if AppSettings.helper_packages.length > 0: SettingsCard {
+            if AppSettings.helper_packages.length > 0 || AppSettings.python_tools.length > 0: SettingsCard {
                 first: false;
                 last: true;
                 highlighted: packages_ta.has-hover;

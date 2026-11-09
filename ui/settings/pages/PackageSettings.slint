@@ -218,7 +218,8 @@ export component PackageSettings inherits Rectangle {
             padding-bottom: 24px;
 
             // Android: YTDLnis's packages, then what runs on their Python.
-            if AppSettings.python_tools.length > 0: SectionHeader {
+            // iOS has only the latter (its Python's built in).
+            if AppSettings.python_tools.length > 0 && AppSettings.helper_packages.length > 0: SectionHeader {
                 text: @tr("YTDLnis's packages");
                 first: true;
             }
@@ -231,7 +232,7 @@ export component PackageSettings inherits Rectangle {
             }
 
             // Lined up with the rows' text.
-            VerticalLayout {
+            if AppSettings.helper_packages.length > 0: VerticalLayout {
                 padding-left: SettingsLayout.inset;
                 padding-right: SettingsLayout.inset;
                 padding-top: 12px;
@@ -246,6 +247,7 @@ export component PackageSettings inherits Rectangle {
             // yt-dlp and gallery-dl: greyed out until Python's installed.
             if AppSettings.python_tools.length > 0: SectionHeader {
                 text: @tr("Downloaders");
+                first: AppSettings.helper_packages.length == 0;
             }
             for package[i] in AppSettings.python_tools: HelperRow {
                 first: i == 0;
@@ -253,6 +255,16 @@ export component PackageSettings inherits Rectangle {
                 package: package;
                 text_color: root.text_color;
                 clicked => { root.helper_tapped(package); }
+            }
+            // iOS: they come with the app; newer ones from PyPI.
+            if AppSettings.python_tools.length > 0 && AppSettings.helper_packages.length == 0: VerticalLayout {
+                padding-left: SettingsLayout.inset;
+                padding-right: SettingsLayout.inset;
+                padding-top: 12px;
+                Note {
+                    text: @tr("They come with Eddy; newer versions are downloaded from PyPI and used from then on.");
+                    text_color: root.text_color;
+                }
             }
         }
     }

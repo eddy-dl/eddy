@@ -72,6 +72,10 @@ pub use ios::*;
 #[cfg(target_os = "ios")]
 #[path = "ios_python.rs"]
 pub mod python;
+// yt-dlp and gallery-dl updated from PyPI (Settings → External packages).
+#[cfg(target_os = "ios")]
+#[path = "ios_packages.rs"]
+pub mod packages;
 // Downloads kept going while the app's in the background.
 #[cfg(target_os = "ios")]
 #[path = "ios_background.rs"]

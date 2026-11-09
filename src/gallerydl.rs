@@ -266,8 +266,9 @@ async fn newest_version(name: &str) -> Result<String, String> {
         .ok_or_else(|| format!("{name} has no release"))
 }
 
-/// A package's pure-Python wheel on PyPI: its version, address and size.
-async fn wheel(name: &str) -> Result<(String, String, u64), String> {
+/// A package's pure-Python wheel on PyPI: its version, address and size
+/// (iOS's package updates use it too).
+pub(crate) async fn wheel(name: &str) -> Result<(String, String, u64), String> {
     let version = newest_version(name).await?;
     let text = pypi_text(&format!("https://pypi.org/pypi/{name}/{version}/json")).await?;
     let json: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
