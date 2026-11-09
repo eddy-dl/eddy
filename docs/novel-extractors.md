@@ -5,11 +5,13 @@ books, the way [WebToEpub](https://github.com/dteviot/WebToEpub) does in the
 browser, but inside Eddy's link checks and downloads.
 
 Status: Royal Road, AO3, Wattpad, Sufficient Velocity, SpaceBattles,
-FanFiction.net, FictionPress, Wuxiaworld and NovelPing implemented (engine, preview,
-download, Books settings, library and updates). SpaceBattles, FanFiction.net
-and FictionPress are behind Cloudflare's browser check (a 403 "Just a
-moment" page), passed in a WebView (CloudflareActivity); FanFiction.net and
-FictionPress are fetched at one page every 3 s, as they block faster readers.
+FanFiction.net, FictionPress, Wuxiaworld, NovelPing, NovelBin and Ranobes
+implemented (engine, preview, download, Books settings, library and
+updates). SpaceBattles, FanFiction.net, FictionPress, NovelBin and Ranobes
+are behind Cloudflare's browser check (a 403 "Just a moment" page), passed
+in a WebView (CloudflareActivity; on desktop and iOS, the webview helper);
+FanFiction.net and FictionPress are fetched at one page every 3 s, Ranobes
+at one every 8 s, as they block faster readers.
 When a site still turns Eddy's own requests away after the WebView passed
 (Cloudflare judges the connection, not just the cookies), its pages are
 loaded for 30 minutes in an unseen WebView (PageFetcher) and their HTML used.
