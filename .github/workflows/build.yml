@@ -589,6 +589,10 @@ jobs:
           WIN_ARM_SHA=$(sha256sum eddy-windows-arm64.exe | awk '{print $1}')
           LINUX_X64_SHA=$(sha256sum eddy-linux-x86_64 | awk '{print $1}')
           LINUX_ARM_SHA=$(sha256sum eddy-linux-arm64 | awk '{print $1}')
+          WV_WIN_X64_SHA=$(sha256sum eddy-webview-windows-x86_64.exe | awk '{print $1}')
+          WV_WIN_ARM_SHA=$(sha256sum eddy-webview-windows-arm64.exe | awk '{print $1}')
+          WV_LINUX_X64_SHA=$(sha256sum eddy-webview-linux-x86_64 | awk '{print $1}')
+          WV_LINUX_ARM_SHA=$(sha256sum eddy-webview-linux-arm64 | awk '{print $1}')
           MAC_ARM_SHA=$(sha256sum eddy-macos-arm64.zip | awk '{print $1}')
           MAC_X64_SHA=$(sha256sum eddy-macos-x86_64.zip | awk '{print $1}')
           IOS_SHA=$(sha256sum eddy-ios-unsigned.ipa | awk '{print $1}')
@@ -607,6 +611,10 @@ jobs:
           echo "| Windows arm64 | $WIN_ARM_SHA |" >> $GITHUB_ENV
           echo "| Linux x86_64 | $LINUX_X64_SHA |" >> $GITHUB_ENV
           echo "| Linux arm64 | $LINUX_ARM_SHA |" >> $GITHUB_ENV
+          echo "| Webview helper, Windows x86_64 | $WV_WIN_X64_SHA |" >> $GITHUB_ENV
+          echo "| Webview helper, Windows arm64 | $WV_WIN_ARM_SHA |" >> $GITHUB_ENV
+          echo "| Webview helper, Linux x86_64 | $WV_LINUX_X64_SHA |" >> $GITHUB_ENV
+          echo "| Webview helper, Linux arm64 | $WV_LINUX_ARM_SHA |" >> $GITHUB_ENV
           echo "| macOS arm64 | $MAC_ARM_SHA |" >> $GITHUB_ENV
           echo "| macOS x86_64 | $MAC_X64_SHA |" >> $GITHUB_ENV
           echo "| iOS (unsigned) | $IOS_SHA |" >> $GITHUB_ENV
@@ -627,6 +635,7 @@ jobs:
             release-artifacts/eddy-windows-arm64.exe
             release-artifacts/eddy-linux-x86_64
             release-artifacts/eddy-linux-arm64
+            release-artifacts/eddy-webview-*
             release-artifacts/eddy-macos-*.zip
             release-artifacts/eddy-ios-unsigned.ipa
             release-artifacts/*.apk
