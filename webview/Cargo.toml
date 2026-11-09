@@ -6,9 +6,20 @@ license = "GPL-3.0-or-later"
 
 [dependencies]
 serde_json = "1"
-tao = "0.37"
+# Only the helper program's: Eddy's iOS app uses the library alone
+# (default-features = false), in its own window.
+tao = { version = "0.37", optional = true }
 wry = "0.57"
 
+[features]
+default = ["helper"]
+helper = ["dep:tao"]
+
+[[bin]]
+name = "eddy-webview"
+required-features = ["helper"]
+
 # Built on its own (cargo build --release --manifest-path webview/Cargo.toml),
-# with its own lock file: Eddy's builds never see WebKitGTK.
+# with its own lock file: Eddy's desktop builds never see WebKitGTK (only
+# its iOS app uses the library, see platform/ios_webview.rs).
 [workspace]

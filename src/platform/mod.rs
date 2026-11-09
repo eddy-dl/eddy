@@ -80,6 +80,10 @@ pub mod packages;
 #[cfg(target_os = "ios")]
 #[path = "ios_background.rs"]
 pub mod background;
+// The browser for sites behind bot checks (the desktop helper's jobs).
+#[cfg(target_os = "ios")]
+#[path = "ios_webview.rs"]
+pub mod webview;
 
 // Fallback for desktop (Windows, macOS, Linux)
 #[cfg(not(any(target_os = "android", target_os = "ios")))]

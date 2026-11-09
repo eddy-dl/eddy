@@ -227,6 +227,8 @@ pub fn ios_main() {
     platform::background::install();
     // yt-dlp and gallery-dl updates (Settings → External packages).
     platform::packages::install(&ui);
+    // The browser for sites behind bot checks, built in this window.
+    platform::webview::install(&ui);
     if let Err(e) = ui.run() {
         log::error!("Eddy stopped: {:?}", e);
     }
