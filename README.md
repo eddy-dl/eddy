@@ -2,7 +2,7 @@
 
 [![Latest release](https://img.shields.io/github/v/release/eddy-dl/eddy)](https://github.com/eddy-dl/eddy/releases/latest)
 
-A download manager for Android, Windows and Linux, written in Rust with a [Slint](https://slint.dev)
+A download manager for Android, iOS, Windows, macOS and Linux, written in Rust with a [Slint](https://slint.dev)
 interface.
 Paste or share a link: Eddy works out what it is, shows a preview, and downloads it.
 
@@ -27,12 +27,20 @@ Paste or share a link: Eddy works out what it is, shows a preview, and downloads
   [YTDLnis](https://github.com/deniscerri/ytdlnis)'s helper apps
   ([ytdlnis-packages](https://github.com/deniscerri/ytdlnis-packages)), which Eddy can fetch
   for you to install.
+- **Galleries** (image boards, art and photo sites…) through
+  [gallery-dl](https://github.com/mikf/gallery-dl), offered next to yt-dlp in the preview. On
+  Android it runs on YTDLnis's Python, with gallery-dl itself fetched from PyPI; on desktop it's
+  gallery-dl's own build, or one on your PATH.
 - **Google Drive** and **MEGA** files and folders (MEGA's decrypted in place).
 - **Web novels as EPUB books**: Royal Road, AO3, Wattpad, Sufficient Velocity, SpaceBattles,
   FanFiction.net, FictionPress and Wuxiaworld. Pick chapters, keep author notes and images or
   not, and check for new chapters later. Sites behind Cloudflare or Anubis are passed in a
   browser check. See [docs/novel-extractors.md](docs/novel-extractors.md).
 - **Pages whose file only comes from a click**, in Eddy's own browser.
+
+On iOS (a first build, sideloaded with AltStore, SideStore or Sideloadly; not on the App Store),
+yt-dlp and gallery-dl run in the app's own Python, with ffmpeg and a JavaScript engine built in,
+as iOS lets an app start no other programs.
 
 Downloads go to `Download/Eddy` (by type, if you like) or a folder you pick.
 English and French. The French translation was written by an AI model, not a translator, and
@@ -82,6 +90,7 @@ slint-viewer --style material ui/app.slint
 | `src/` | The app: links and previews (`links.rs`), the download list (`downloads.rs`), the downloaders (`downloader/`), extractors (`extractors/`), web novels (`novels/`), platform code (`platform/`) |
 | `ui/` | The Slint interface: `app.slint`, components, settings pages, icons |
 | `platforms/android/` | The Android app: Gradle, the download service, the browser check and Eddy's browser (Kotlin) |
+| `platforms/ios/` | The iOS app: its Xcode project (XcodeGen) and build script; CI fetches Python, ffmpeg and QuickJS-ng into it |
 | `patches/` | Patched crates: aria2_rust, and Slint's Android backend |
 | `lang/` | Translations (gettext `.po`) |
 | `tools/` | The icon and wordmark generators, and `sync_po.py` for the translations |
@@ -92,6 +101,21 @@ slint-viewer --style material ui/app.slint
 Warnings and errors are written to Eddy's own storage. Settings → Advanced → Debug can keep them
 in `Download/Eddy/logs` instead, or share them for a bug report. They list the links you
 download, so look at them before sending them anywhere.
+
+## Credits
+
+- [Palladium](https://github.com/tfourj/Palladium) by [tfourj](https://github.com/tfourj): Eddy's
+  iOS port follows its approach: yt-dlp and gallery-dl in an embedded Python, yt-dlp's ffmpeg
+  calls answered in-process, and JavaScriptCore with QuickJS as the JavaScript runtime for
+  YouTube's challenges.
+- [SwiftFFmpeg-iOS](https://github.com/tfourj/SwiftFFmpeg-iOS), also by tfourj: the ffmpeg and
+  ffprobe Eddy's iOS app runs.
+- [Python-Apple-support](https://github.com/beeware/Python-Apple-support) (BeeWare): the Python
+  in the iOS app.
+- [QuickJS-ng](https://github.com/quickjs-ng/quickjs): the iOS app's JavaScript fallback.
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [gallery-dl](https://github.com/mikf/gallery-dl),
+  which do the work for most sites; [aria2_rust](https://github.com/balovess/aria2_rust) for
+  files and torrents; [YTDLnis](https://github.com/deniscerri/ytdlnis)'s packages on Android.
 
 ## License
 
