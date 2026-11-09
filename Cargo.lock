@@ -2021,7 +2021,7 @@ dependencies = [
 
 [[package]]
 name = "eddy"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "aes 0.9.3",
  "android-activity 0.6.1",
@@ -2077,7 +2077,7 @@ dependencies = [
 
 [[package]]
 name = "eddy-ui"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "slint",
  "slint-build",
