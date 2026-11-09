@@ -27,6 +27,10 @@ Paste or share a link: Eddy works out what it is, shows a preview, and downloads
   [YTDLnis](https://github.com/deniscerri/ytdlnis)'s helper apps
   ([ytdlnis-packages](https://github.com/deniscerri/ytdlnis-packages)), which Eddy can fetch
   for you to install.
+- **Galleries** (image boards, art and photo sites…) through
+  [gallery-dl](https://github.com/mikf/gallery-dl), offered next to yt-dlp in the preview. On
+  Android it runs on YTDLnis's Python, with gallery-dl itself fetched from PyPI; on desktop it's
+  gallery-dl's own build, or one on your PATH.
 - **Google Drive** and **MEGA** files and folders (MEGA's decrypted in place).
 - **Web novels as EPUB books**: Royal Road, AO3, Wattpad, Sufficient Velocity, SpaceBattles,
   FanFiction.net, FictionPress and Wuxiaworld. Pick chapters, keep author notes and images or
