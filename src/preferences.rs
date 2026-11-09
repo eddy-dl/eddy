@@ -151,7 +151,7 @@ pub fn load_preferences(ui_weak: slint::Weak<DownloaderApp>) {
         theme_settings.set_accent(accent_color);
         theme_settings.set_amoled_dark(amoled);
         app_settings.set_haptic_feedback(enable_haptic_feedback);
-        let system_font = platform::get_pref(SYSTEM_FONT_KEY, "false").ok().is_some_and(|v| v == "true");
+        let system_font = system_font_wanted();
         app_settings.set_system_font(system_font);
         app_settings.set_system_font_status(system_font_status(system_font).into());
         app_settings.set_current_download_path(download_dir_display.into());
@@ -179,6 +179,11 @@ pub fn apply_font(theme: &ThemeSettings) {
         // system pick their own (Segoe UI with Fluent).
         theme.set_font_family("".into());
     }
+}
+
+/// Whether Settings asks for the system font (iOS sets it up before its UI).
+pub fn system_font_wanted() -> bool {
+    platform::get_pref(SYSTEM_FONT_KEY, "false").ok().is_some_and(|v| v == "true")
 }
 
 /// What Settings says about the system font, and what the logs get: the
