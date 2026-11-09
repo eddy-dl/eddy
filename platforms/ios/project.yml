@@ -35,8 +35,25 @@ targets:
               - UISceneConfigurationName: Slint
                 UISceneDelegateClassName: SlintWindowSceneDelegate
     sources: []
+    # Python (BeeWare's Python-Apple-support, fetched by CI into this
+    # folder): embedded, not linked; Eddy loads it when yt-dlp first runs.
+    dependencies:
+      - framework: Python.xcframework
+        embed: true
+        link: false
     postCompileScripts:
       - script: |
           ./build_for_ios_with_cargo.bash eddy-ios
         outputFileLists:
           $TARGET_BUILD_DIR/$EXECUTABLE_PATH
+      # Python's standard library and Eddy's packages (yt-dlp, gallery-dl)
+      # into the app, their binary modules made frameworks (Python's iOS
+      # guide). Unsigned builds sign those ad hoc; sideloading re-signs.
+      - name: Process Python libraries
+        basedOnDependencyAnalysis: false
+        script: |
+          set -e
+          export EXPANDED_CODE_SIGN_IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:--}"
+          rsync -a --delete "$PROJECT_DIR/app_packages/" "$CODESIGNING_FOLDER_PATH/app_packages/"
+          source "$PROJECT_DIR/Python.xcframework/build/utils.sh"
+          install_python Python.xcframework app_packages

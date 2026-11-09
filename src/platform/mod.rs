@@ -68,6 +68,10 @@ pub use android::*;
 pub mod ios;
 #[cfg(target_os = "ios")]
 pub use ios::*;
+// yt-dlp and gallery-dl in the app's own Python (iOS starts no processes).
+#[cfg(target_os = "ios")]
+#[path = "ios_python.rs"]
+pub mod python;
 
 // Fallback for desktop (Windows, macOS, Linux)
 #[cfg(not(any(target_os = "android", target_os = "ios")))]

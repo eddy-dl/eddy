@@ -131,18 +131,18 @@ pub fn deno_command() -> Option<std::process::Command> {
     None
 }
 
-/// iOS can't run yt-dlp: TikTok, Instagram and Pinterest still work through
-/// the native extractors, other pages download directly.
+/// No yt-dlp program: it runs in the app's own Python (children::spawn_tool).
 pub fn ytdlp_command() -> Option<std::process::Command> {
     None
 }
 
+/// yt-dlp is in this build (platforms/ios puts it in app_packages).
 pub fn ytdlp_available() -> bool {
-    false
+    crate::children::available(crate::children::Tool::Ytdlp)
 }
 
 pub fn ytdlp_ready() -> bool {
-    false
+    ytdlp_available()
 }
 
 /// Where Eddy would keep its own yt-dlp (Android's; desktop installs its

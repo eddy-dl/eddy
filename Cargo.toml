@@ -104,6 +104,10 @@ windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# iOS: compiles SwiftFFmpeg-iOS's C wrapper, linked with its FFmpeg (build.rs).
+[build-dependencies]
+cc = "1"
+
 [target.'cfg(target_os = "windows")'.build-dependencies]
 winres = "0.1"
 

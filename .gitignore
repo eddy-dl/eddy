@@ -21,3 +21,6 @@
 /platforms/ios/Eddy.xcodeproj/
 /platforms/ios/build/
 /platforms/ios/Info.plist
+/platforms/ios/Python.xcframework/
+/platforms/ios/app_packages/
+/platforms/ios/SwiftFFmpeg-iOS/
