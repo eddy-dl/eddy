@@ -18,6 +18,10 @@
 //! It runs JavaScript (yt-dlp's YouTube challenge solver, as its QuickJS
 //! runtime, `qjs`) in iOS's own JavaScriptCore, or QuickJS-ng (compiled in
 //! when the build has it: `eddy_quickjs`) when that fails.
+//!
+//! The approach (an embedded Python, yt-dlp's ffmpeg and JavaScript runtime
+//! answered in-process) is Palladium's (github.com/tfourj/Palladium, by
+//! tfourj); the code is Eddy's own.
 
 use std::collections::HashMap;
 use std::ffi::{CString, c_char, c_int, c_ulong, c_void};
