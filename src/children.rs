@@ -10,11 +10,12 @@ use std::io::Read;
 use std::process::{Child, Command};
 use std::sync::Mutex;
 
-/// The Python programs Eddy runs.
+/// The programs Eddy reads output from: the Python ones, and ffmpeg.
 #[derive(Clone, Copy, Debug)]
 pub enum Tool {
     Ytdlp,
     GalleryDl,
+    Ffmpeg,
 }
 
 impl Tool {
@@ -23,6 +24,7 @@ impl Tool {
         match self {
             Tool::Ytdlp => "yt-dlp",
             Tool::GalleryDl => "gallery-dl",
+            Tool::Ffmpeg => "ffmpeg",
         }
     }
 }
@@ -31,13 +33,17 @@ impl Tool {
 pub fn available(tool: Tool) -> bool {
     #[cfg(target_os = "ios")]
     {
-        crate::platform::python::has(module(tool))
+        match tool {
+            Tool::Ffmpeg => crate::platform::python::has_ffmpeg(),
+            _ => crate::platform::python::has(module(tool)),
+        }
     }
     #[cfg(not(target_os = "ios"))]
     {
         match tool {
             Tool::Ytdlp => crate::platform::ytdlp_command().is_some(),
             Tool::GalleryDl => crate::gallerydl::command().is_some(),
+            Tool::Ffmpeg => crate::platform::ffmpeg_command().is_some(),
         }
     }
 }
@@ -47,6 +53,8 @@ fn module(tool: Tool) -> &'static str {
     match tool {
         Tool::Ytdlp => "yt_dlp",
         Tool::GalleryDl => "gallery_dl",
+        // The FFmpeg linked into the app, run by the same Python.
+        Tool::Ffmpeg => "ffmpeg",
     }
 }
 
@@ -62,6 +70,7 @@ pub fn spawn_tool(tool: Tool, args: &[String]) -> std::io::Result<Running> {
         let command = match tool {
             Tool::Ytdlp => crate::platform::ytdlp_command(),
             Tool::GalleryDl => crate::gallerydl::command(),
+            Tool::Ffmpeg => crate::platform::ffmpeg_command(),
         };
         let mut command = command.ok_or_else(|| std::io::Error::other(format!("{} isn't available", tool.name())))?;
         use std::process::Stdio;

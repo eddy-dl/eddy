@@ -359,7 +359,7 @@ fn video_choices(video: &Value, can_join: bool) -> Vec<Choice> {
 
 /// Whether ffmpeg is there to join a video-only variant with its sound.
 fn can_join() -> bool {
-    crate::platform::ffmpeg_command().is_some()
+    crate::children::available(crate::children::Tool::Ffmpeg)
 }
 
 /// The post's media: every image of a photo post, else the video in each

@@ -71,6 +71,12 @@ pub fn has(module: &str) -> bool {
     bundle.join("Frameworks/Python.framework/Python").is_file() && bundle.join("app_packages").join(module).is_dir()
 }
 
+/// Whether ffmpeg can run: linked into this build, with the Python that
+/// runs it (children::Tool::Ffmpeg).
+pub fn has_ffmpeg() -> bool {
+    cfg!(eddy_ffmpeg) && bundle().join("Frameworks/Python.framework/Python").is_file()
+}
+
 /// Sets up Python once: the bundle's home and search path, as Python's iOS
 /// guide has them, then the bootstrap.
 fn init() -> Result<Api, String> {
@@ -171,6 +177,7 @@ struct State {
 }
 
 struct Shared {
+    id: u32,
     state: Mutex<State>,
     changed: Condvar,
 }
@@ -202,11 +209,11 @@ pub fn run(module: &str, args: &[String]) -> std::io::Result<crate::children::Ru
     let (err_r, err_w) = pipe()?;
     let (status_r, status_w) = pipe()?;
     let id = NEXT.fetch_add(1, Ordering::SeqCst);
-    let shared = Arc::new(Shared { state: Mutex::new(State::default()), changed: Condvar::new() });
+    let shared = Arc::new(Shared { id, state: Mutex::new(State::default()), changed: Condvar::new() });
     RUNS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).insert(id, Arc::clone(&shared));
     // A JSON list of strings is a Python list literal too.
     let call = format!(
-        "__eddy_run({out_w}, {err_w}, {status_w}, {module:?}, {})",
+        "__eddy_run({id}, {out_w}, {err_w}, {status_w}, {module:?}, {})",
         serde_json::to_string(args).map_err(std::io::Error::other)?
     );
     let call = CString::new(call).map_err(std::io::Error::other)?;
@@ -263,9 +270,22 @@ fn stop_shared(shared: &Shared) {
         return;
     }
     state.stop = true;
-    if let Some(thread) = state.thread {
-        drop(state);
+    let thread = state.thread;
+    drop(state);
+    if let Some(thread) = thread {
         interrupt(thread);
+    }
+    // A merge in FFmpeg's C code doesn't see the interrupt until it ends:
+    // FFmpeg is asked to stop too, if this run is the one using it.
+    if let Ok(api) = api() {
+        let call = CString::new(format!("__eddy_stop({})", shared.id)).unwrap();
+        // SAFETY: the API from init; the GIL is held for the call (FFmpeg's
+        // run released it, so this doesn't wait for the merge).
+        unsafe {
+            let gil = (api.gil_ensure)();
+            (api.run_string)(call.as_ptr());
+            (api.gil_release)(gil);
+        }
     }
 }
 
@@ -348,9 +368,10 @@ sys.stderr = _EddyStream("err", sys.stderr)
 _eddy_start = threading.Thread.start
 def _eddy_inherit(self, *args, **kwargs):
     out, err = getattr(_eddy, "out", None), getattr(_eddy, "err", None)
+    run_id = getattr(_eddy, "run_id", None)
     run = self.run
     def run_in_its_run():
-        _eddy.out, _eddy.err = out, err
+        _eddy.out, _eddy.err, _eddy.run_id = out, err, run_id
         run()
     self.run = run_in_its_run
     return _eddy_start(self, *args, **kwargs)
@@ -498,8 +519,12 @@ def _eddy_js_run(source):
             failures.append(f"{name}: {str(e).strip()[:300]}")
     return 1, b"", ("\n".join(failures) + "\n").encode()
 
+# The run using FFmpeg now (its id), for __eddy_stop.
+_eddy_ff_owner = None
+
 def _eddy_ff_run(tool, args):
     """Runs ffmpeg or ffprobe: (exit code, stdout, stderr) as bytes."""
+    global _eddy_ff_owner
     import ctypes
     argv = [tool.encode()] + [os.fsencode(a) if isinstance(a, str) else bytes(a) for a in args]
     array = (ctypes.c_char_p * len(argv))(*argv)
@@ -507,8 +532,17 @@ def _eddy_ff_run(tool, args):
     err = ctypes.create_string_buffer(1 << 20)
     with _eddy_ff_lock:
         _eddy_ff["clear"]()
-        code = _eddy_ff[tool](len(argv), array, out, len(out), err, len(err))
+        _eddy_ff_owner = getattr(_eddy, "run_id", None)
+        try:
+            code = _eddy_ff[tool](len(argv), array, out, len(out), err, len(err))
+        finally:
+            _eddy_ff_owner = None
     return code, out.value, err.value
+
+def __eddy_stop(run_id):
+    """Run `run_id` is being stopped: FFmpeg too, if it's that run's."""
+    if _eddy_ff is not None and run_id is not None and _eddy_ff_owner == run_id:
+        _eddy_ff["cancel"]()
 
 class _EddyPopen:
     """yt-dlp's Popen for ffmpeg and ffprobe, run in-process (iOS starts no
@@ -597,12 +631,12 @@ def _eddy_patch_ytdlp():
 # gallery-dl reads its command line from sys.argv: one at a time for now.
 _eddy_argv = threading.Lock()
 
-def __eddy_run(out_fd, err_fd, status_fd, module, args):
+def __eddy_run(run_id, out_fd, err_fd, status_fd, module, args):
     out = open(out_fd, "w", encoding="utf-8", errors="replace", buffering=1)
     err = open(err_fd, "w", encoding="utf-8", errors="replace", buffering=1)
     status = open(status_fd, "w", buffering=1)
     status.write(f"{threading.get_ident()}\n")
-    _eddy.out, _eddy.err = out, err
+    _eddy.out, _eddy.err, _eddy.run_id = out, err, run_id
     code = 0
     try:
         if module == "yt_dlp":
@@ -614,6 +648,13 @@ def __eddy_run(out_fd, err_fd, status_fd, module, args):
             if "--js-runtimes" not in args:
                 args = ["--js-runtimes", f"quickjs:{os.path.join(_eddy_dir, 'qjs')}", *args]
             yt_dlp.main(args)
+        elif module == "ffmpeg":
+            # Eddy's own ffmpeg runs (downloader::media): as the program.
+            if _eddy_ff is None:
+                raise RuntimeError("FFmpeg isn't in this build")
+            code, output, errors = _eddy_ff_run("ffmpeg", args)
+            out.write(output.decode("utf-8", "replace"))
+            err.write(errors.decode("utf-8", "replace"))
         elif module == "js":
             # A script of Eddy's own (extractors::packed): its output.
             code, output, errors = _eddy_js_run(args[0])
@@ -641,7 +682,7 @@ def __eddy_run(out_fd, err_fd, status_fd, module, args):
         traceback.print_exc(file=err)
         code = 1
     finally:
-        _eddy.out = _eddy.err = None
+        _eddy.out = _eddy.err = _eddy.run_id = None
         for stream in (out, err):
             try:
                 stream.close()

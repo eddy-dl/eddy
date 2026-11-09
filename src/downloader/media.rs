@@ -617,14 +617,9 @@ async fn ffmpeg(job: u64, args: Vec<String>) -> Result<(), String> {
     });
     let (status, stderr) = tokio::task::spawn_blocking(move || {
         use std::io::Read;
-        let mut command = crate::platform::ffmpeg_command().ok_or_else(|| std::io::Error::other("ffmpeg isn't available"))?;
-        let mut child = crate::children::Running::process(
-            crate::children::own_group(&mut command)
-                .args(&args)
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::piped())
-                .spawn()?,
-        );
+        // In-process on iOS (children::spawn_tool). Its stdout isn't used.
+        let mut child = crate::children::spawn_tool(crate::children::Tool::Ffmpeg, &args)?;
+        drop(child.stdout.take());
         let mut err = child.stderr.take();
         let errors = std::thread::spawn(move || {
             let mut text = String::new();
