@@ -223,6 +223,8 @@ pub fn ios_main() {
     folders::install(&ui);
     cookies::install(&ui);
     cache::install(&ui);
+    // Downloads' ends, and their time in the background.
+    platform::background::install();
     if let Err(e) = ui.run() {
         log::error!("Eddy stopped: {:?}", e);
     }

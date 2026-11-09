@@ -60,9 +60,12 @@ where
 {
 }
 
-/// In-process, as on desktop (iOS has no download service to hand it to).
+/// In-process, as on desktop (iOS has no download service to hand it to),
+/// with time asked for in the background for the queue (see background).
 pub fn start_download(request: &crate::downloader::DownloadRequest) -> Result<(), String> {
-    crate::downloader::start(request)
+    crate::downloader::start(request)?;
+    super::background::download_started();
+    Ok(())
 }
 
 /// Opens a download (a file or a folder) in the Files app, which shows

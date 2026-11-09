@@ -92,11 +92,15 @@ slint = { version = "1.18.1", features = ["backend-android-activity-06"] }
 # iOS: Slint's winit backend, drawn with Skia on Metal (Slint's iOS guide).
 [target.'cfg(target_os = "ios")'.dependencies]
 slint = { version = "1.18.1", features = ["renderer-skia"] }
-# Opening links and files, the share sheet: the UIKit bindings Slint's winit
-# backend already uses (same versions).
+# UIKit (opening links and files, the share sheet) and BackgroundTasks
+# (downloads kept going in the background, platform/ios_background.rs), with
+# the objc2 versions Slint's winit backend already uses.
+block2 = "0.6"
+dispatch2 = { version = "0.3", default-features = false, features = ["std", "objc2"] }
 objc2 = "0.6"
+objc2-background-tasks = { version = "0.3.2", default-features = false, features = ["std", "bitflags", "block2", "dispatch2", "BGTask", "BGTaskRequest", "BGTaskScheduler"] }
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFCGTypes"] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSDictionary", "NSObject", "NSSet", "NSString", "NSURL"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSDictionary", "NSError", "NSObject", "NSProgress", "NSSet", "NSString", "NSURL"] }
 objc2-ui-kit = { version = "0.3.2", default-features = false, features = [
     "std",
     "block2",
