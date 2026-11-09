@@ -14,6 +14,11 @@ export struct HelperPackage {
 
 export global AppSettings {
     in-out property <bool> is_mobile: false;
+    // Short messages in the app's snackbar on a phone too (iOS has no
+    // toasts; desktop always uses it).
+    in property <bool> snackbar: false;
+    // iOS: its own look where it differs (the back button).
+    in property <bool> ios: false;
     // Desktop: Eddy can make itself what opens magnet links and .torrent
     // files (Linux, Windows), and does when asked (Settings → General).
     in property <bool> can_register_handlers: false;

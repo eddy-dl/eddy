@@ -211,6 +211,10 @@ pub fn ios_main() {
         }
     });
     app_settings.set_is_mobile(true);
+    // iOS has no toasts: messages go in the app's snackbar.
+    app_settings.set_snackbar(true);
+    // iOS's own look where it differs (the back button).
+    app_settings.set_ios(true);
     app_settings.set_app_version(VERSION.into());
     app_settings.set_slint_version(SLINT_VERSION.into());
     app_settings.on_open_url(|url| platform::open_url(&url));
@@ -229,6 +233,8 @@ pub fn ios_main() {
     platform::packages::install(&ui);
     // The browser for sites behind bot checks, built in this window.
     platform::webview::install(&ui);
+    // Back, from a swipe at the left edge (iOS has no Back key).
+    platform::back::install(&ui);
     if let Err(e) = ui.run() {
         log::error!("Eddy stopped: {:?}", e);
     }

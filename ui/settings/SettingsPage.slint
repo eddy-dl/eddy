@@ -20,6 +20,10 @@ export component SettingsPage inherits Rectangle {
 
     in property <bool> is_landscape;
     in property <bool> is_mobile_landscape;
+    // iOS's back swipe (BackGesture): the finger's distance, which an open
+    // page follows, and whether it's still being dragged (no animation then).
+    in property <length> back_offset: 0px;
+    in property <bool> back_dragging: false;
     in property <length> safe_area_top;
     in property <length> safe_area_left;
     in property <length> safe_area_right;
@@ -47,12 +51,25 @@ export component SettingsPage inherits Rectangle {
     in property <length> keyboard_height: 0px;
     // Inner pages of Downloads, which Back returns to.
     private property <bool> inner_download_page: root.packages_tab_is_active || root.books_tab_is_active || root.downloading_tab_is_active || root.cookies_tab_is_active;
+    // How far a back swipe moves the open page: none side by side
+    // (landscape), nor with a popup up (Back closes that).
+    private property <length> follow: root.is_landscape || appearance_page.popup_open || general_page.popup_open || packages_page.popup_open ? 0px : root.back_offset;
+    private property <duration> slide: root.back_dragging ? 0ms : 300ms;
     // Opening Advanced measures the download cache.
     changed advanced_tab_is_active => {
         if (self.advanced_tab_is_active) {
             AppSettings.cache_refresh();
         }
     }
+    // The open page's name ("Settings" on the list).
+    private property <string> page_title: root.general_tab_is_active ? @tr("General") : (
+        root.download_tab_is_active ? @tr("Downloads") : root.packages_tab_is_active ? root.packages_title
+        : root.advanced_tab_is_active ? @tr("Advanced") : root.about_tab_is_active ? @tr("About") : root.books_tab_is_active ? @tr("Books")
+        : root.downloading_tab_is_active ? @tr("Downloading") : root.cookies_tab_is_active ? @tr("Cookies")
+        : root.appearance_tab_is_active ? @tr("Appearance") : @tr("Settings"));
+    // iOS's back button says where it goes.
+    // Side by side (landscape) it leaves Settings: the page has its own.
+    private property <string> back_label: root.is_landscape || root.no_active_tab ? @tr("Back") : (root.inner_download_page ? @tr("Downloads") : @tr("Settings"));
     private property <string> packages_title: AppSettings.is_mobile ? @tr("External packages") : @tr("Media tools");
 
     callback back_pressed();
@@ -142,17 +159,6 @@ export component SettingsPage inherits Rectangle {
         z: 10;
     }
 
-    // Absolute positioned horizontal divider (landscape: portrait's header
-    // is set apart by its tint once scrolled)
-    Rectangle {
-        visible: root.is_landscape;
-        height: 1px;
-        width: root.is_landscape ? Math.max(12px, root.safe_area_left) + 260px : parent.width;
-        x: 0px;
-        y: Math.max(8px, root.safe_area_top) + 40px;
-        background: root.text_color.transparentize(85%);
-        z: 10;
-    }
 
     VerticalLayout {
         padding-top: Math.max(8px, root.safe_area_top);
@@ -175,7 +181,7 @@ export component SettingsPage inherits Rectangle {
                 padding-left: 4px;
                 padding-right: 4px;
 
-                Rectangle {
+                if !AppSettings.ios: Rectangle {
                     width: 40px;
                     height: 40px;
                     border-radius: 20px;
@@ -195,17 +201,64 @@ export component SettingsPage inherits Rectangle {
                     }
                 }
 
-                Text {
-                    text: root.is_landscape ? @tr("Settings") : (
-                        root.general_tab_is_active ? @tr("General") : (
-                        root.download_tab_is_active ? @tr("Downloads") : root.packages_tab_is_active ? root.packages_title
-                        : root.advanced_tab_is_active ? @tr("Advanced") : root.about_tab_is_active ? @tr("About") : root.books_tab_is_active ? @tr("Books")
-                        : root.downloading_tab_is_active ? @tr("Downloading") : root.cookies_tab_is_active ? @tr("Cookies")
-                        : root.appearance_tab_is_active ? @tr("Appearance") : @tr("Settings")));
+                if !AppSettings.ios: Text {
+                    text: root.is_landscape ? @tr("Settings") : root.page_title;
                     font-size: 22px;
                     font-weight: 700;
                     color: root.text_color;
                     vertical-alignment: center;
+                }
+
+                // iOS: an accent chevron and where Back goes, the title
+                // centred, as iOS's own bars have them.
+                if AppSettings.ios: Rectangle {
+                    // The whole row (its layout gives children only their own width).
+                    width: parent.width - 8px;
+                    height: 40px;
+
+                    ios_back_ta := TouchArea {
+                        x: 0px;
+                        width: ios_back.preferred-width + 8px;
+                        // Side by side, the page's bar has its own back: this
+                        // one leaves Settings.
+                        clicked => {
+                            if (root.is_landscape) {
+                                root.back_pressed();
+                            } else {
+                                root.navigate_back();
+                            }
+                        }
+                    }
+                    ios_back := HorizontalLayout {
+                        x: 0px;
+                        height: 100%;
+                        spacing: 2px;
+                        alignment: start;
+                        cross-axis-alignment: center;
+                        Image {
+                            width: 28px;
+                            height: 28px;
+                            source: @image-url("../icons/rounded/chevron_left.svg");
+                            colorize: root.accent_color.transparentize(ios_back_ta.pressed ? 60% : 0%);
+                        }
+                        Text {
+                            text: root.back_label;
+                            font-size: 17px;
+                            color: root.accent_color.transparentize(ios_back_ta.pressed ? 60% : 0%);
+                            vertical-alignment: center;
+                        }
+                    }
+                    Text {
+                        // Clear of the back button on a narrow screen.
+                        x: Math.max(ios_back.preferred-width + 12px, (parent.width - self.width) / 2);
+                        width: self.preferred-width;
+                        height: 100%;
+                        text: root.is_landscape ? @tr("Settings") : root.page_title;
+                        font-size: 17px;
+                        font-weight: 600;
+                        color: root.text_color;
+                        vertical-alignment: center;
+                    }
                 }
             }
 
@@ -215,7 +268,7 @@ export component SettingsPage inherits Rectangle {
                 horizontal-stretch: root.is_landscape ? 1 : 0;
                 height: 100%;
 
-                HorizontalLayout {
+                if !AppSettings.ios: HorizontalLayout {
                     width: 100%;
                     height: 100%;
                     alignment: start;
@@ -234,6 +287,50 @@ export component SettingsPage inherits Rectangle {
                         vertical-alignment: center;
                     }
                 }
+
+                // iOS: the page's own bar, as a split view's detail side has
+                // it: its title centred, and back to Downloads from its pages.
+                if AppSettings.ios: Rectangle {
+                    width: 100%;
+                    height: 100%;
+
+                    page_back_ta := TouchArea {
+                        x: 16px;
+                        width: page_back.preferred-width + 8px;
+                        enabled: root.inner_download_page;
+                        clicked => { root.active_tab = SettingsTab.Download; }
+                    }
+                    page_back := HorizontalLayout {
+                        x: 16px;
+                        height: 100%;
+                        spacing: 2px;
+                        alignment: start;
+                        cross-axis-alignment: center;
+                        visible: root.inner_download_page;
+                        Image {
+                            width: 28px;
+                            height: 28px;
+                            source: @image-url("../icons/rounded/chevron_left.svg");
+                            colorize: root.accent_color.transparentize(page_back_ta.pressed ? 60% : 0%);
+                        }
+                        Text {
+                            text: @tr("Downloads");
+                            font-size: 17px;
+                            color: root.accent_color.transparentize(page_back_ta.pressed ? 60% : 0%);
+                            vertical-alignment: center;
+                        }
+                    }
+                    Text {
+                        x: Math.max(root.inner_download_page ? page_back.preferred-width + 28px : 0px, (parent.width - self.width) / 2);
+                        width: self.preferred-width;
+                        height: 100%;
+                        text: root.no_active_tab ? "" : root.page_title;
+                        font-size: 17px;
+                        font-weight: 600;
+                        color: root.text_color;
+                        vertical-alignment: center;
+                    }
+                }
             }
         }
 
@@ -243,7 +340,8 @@ export component SettingsPage inherits Rectangle {
             clip: true;
 
             sidebar := Sidebar {
-                x: root.is_landscape ? 0px : (root.no_active_tab ? 0px : -parent.width);
+                // Back from a page: the list comes in under it, with the swipe.
+                x: root.is_landscape ? 0px : (root.no_active_tab ? 0px : -parent.width + (root.inner_download_page ? 0px : root.follow));
                 width: root.is_landscape ? 260px : parent.width;
                 height: 100%;
                 clip: true;
@@ -252,20 +350,20 @@ export component SettingsPage inherits Rectangle {
                 active_tab <=> root.active_tab;
 
                 animate x {
-                    duration: 300ms;
+                    duration: root.slide;
                     easing: ease-out;
                 }
             }
 
             // Right-side panel container
             Rectangle {
-                x: root.is_landscape ? 260px : (root.no_active_tab ? parent.width : 0px);
+                x: root.is_landscape ? 260px : (root.no_active_tab ? parent.width : (root.inner_download_page ? 0px : root.follow));
                 width: root.is_landscape ? Math.max(0px, parent.width - 260px) : parent.width;
                 height: 100%;
                 clip: true;
 
                 animate x {
-                    duration: 300ms;
+                    duration: root.slide;
                     easing: ease-out;
                 }
                 Rectangle {
@@ -276,7 +374,7 @@ export component SettingsPage inherits Rectangle {
                     opacity: root.appearance_tab_is_active ? 1.0 : 0.0;
 
                     animate x {
-                        duration: 300ms;
+                        duration: root.slide;
                         easing: ease-out;
                     }
                     animate opacity {
@@ -313,7 +411,7 @@ export component SettingsPage inherits Rectangle {
                     opacity: root.general_tab_is_active ? 1.0 : 0.0;
 
                     animate x {
-                        duration: 300ms;
+                        duration: root.slide;
                         easing: ease-out;
                     }
                     animate opacity {
@@ -344,11 +442,12 @@ export component SettingsPage inherits Rectangle {
                     height: 100%;
 
                     // Slides off to the left when its packages page opens.
-                    x: root.download_tab_is_active ? 0px : (root.inner_download_page ? -parent.width : parent.width);
-                    opacity: root.download_tab_is_active ? 1.0 : 0.0;
+                    x: root.download_tab_is_active ? 0px : (root.inner_download_page ? -parent.width + root.follow : parent.width);
+                    // Seen again under its inner page as that's swiped back.
+                    opacity: root.download_tab_is_active || (root.inner_download_page && root.follow > 0px) ? 1.0 : 0.0;
 
                     animate x {
-                        duration: 300ms;
+                        duration: root.slide;
                         easing: ease-out;
                     }
                     animate opacity {
@@ -379,11 +478,11 @@ export component SettingsPage inherits Rectangle {
                     width: 100%;
                     height: 100%;
 
-                    x: root.packages_tab_is_active ? 0px : parent.width;
+                    x: root.packages_tab_is_active ? root.follow : parent.width;
                     opacity: root.packages_tab_is_active ? 1.0 : 0.0;
 
                     animate x {
-                        duration: 300ms;
+                        duration: root.slide;
                         easing: ease-out;
                     }
                     animate opacity {
@@ -413,11 +512,11 @@ export component SettingsPage inherits Rectangle {
                     width: 100%;
                     height: 100%;
 
-                    x: root.books_tab_is_active ? 0px : parent.width;
+                    x: root.books_tab_is_active ? root.follow : parent.width;
                     opacity: root.books_tab_is_active ? 1.0 : 0.0;
 
                     animate x {
-                        duration: 300ms;
+                        duration: root.slide;
                         easing: ease-out;
                     }
                     animate opacity {
@@ -444,11 +543,11 @@ export component SettingsPage inherits Rectangle {
                     width: 100%;
                     height: 100%;
 
-                    x: root.downloading_tab_is_active ? 0px : parent.width;
+                    x: root.downloading_tab_is_active ? root.follow : parent.width;
                     opacity: root.downloading_tab_is_active ? 1.0 : 0.0;
 
                     animate x {
-                        duration: 300ms;
+                        duration: root.slide;
                         easing: ease-out;
                     }
                     animate opacity {
@@ -475,11 +574,11 @@ export component SettingsPage inherits Rectangle {
                     width: 100%;
                     height: 100%;
 
-                    x: root.cookies_tab_is_active ? 0px : parent.width;
+                    x: root.cookies_tab_is_active ? root.follow : parent.width;
                     opacity: root.cookies_tab_is_active ? 1.0 : 0.0;
 
                     animate x {
-                        duration: 300ms;
+                        duration: root.slide;
                         easing: ease-out;
                     }
                     animate opacity {
@@ -512,7 +611,7 @@ export component SettingsPage inherits Rectangle {
                     opacity: root.advanced_tab_is_active ? 1.0 : 0.0;
 
                     animate x {
-                        duration: 300ms;
+                        duration: root.slide;
                         easing: ease-out;
                     }
                     animate opacity {
@@ -543,7 +642,7 @@ export component SettingsPage inherits Rectangle {
                     opacity: root.about_tab_is_active ? 1.0 : 0.0;
 
                     animate x {
-                        duration: 300ms;
+                        duration: root.slide;
                         easing: ease-out;
                     }
                     animate opacity {

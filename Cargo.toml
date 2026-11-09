@@ -95,6 +95,8 @@ slint = { version = "1.18.1", features = ["backend-android-activity-06"] }
 slint = { version = "1.18.1", features = ["renderer-skia", "raw-window-handle-06"] }
 # The desktop helper's jobs for that browser, run in-process (webview/src/lib.rs).
 eddy-webview = { path = "webview", default-features = false }
+# The window's UIView, for the back swipe's recognizer (platform/ios_back.rs).
+raw-window-handle = "0.6"
 # UIKit (opening links and files, the share sheet) and BackgroundTasks
 # (downloads kept going in the background, platform/ios_background.rs), with
 # the objc2 versions Slint's winit backend already uses.
@@ -117,13 +119,16 @@ objc2-ui-kit = { version = "0.3.2", default-features = false, features = [
     "UIColor",
     "UIControl",
     "UIGeometry",
+    "UIGestureRecognizer",
     "UIImage",
     "UIInterface",
     "UIMenuElement",
+    "UIPanGestureRecognizer",
     "UIPopoverPresentationController",
     "UIPresentationController",
     "UIResponder",
     "UIScene",
+    "UIScreenEdgePanGestureRecognizer",
     "UIView",
     "UIViewController",
     "UIWindow",

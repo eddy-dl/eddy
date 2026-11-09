@@ -84,6 +84,10 @@ pub mod background;
 #[cfg(target_os = "ios")]
 #[path = "ios_webview.rs"]
 pub mod webview;
+// Back from the left edge's swipe (iOS has no Back key).
+#[cfg(target_os = "ios")]
+#[path = "ios_back.rs"]
+pub mod back;
 
 // Fallback for desktop (Windows, macOS, Linux)
 #[cfg(not(any(target_os = "android", target_os = "ios")))]

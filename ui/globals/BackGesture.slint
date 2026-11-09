@@ -1,0 +1,12 @@
+// iOS's back swipe from the left edge (platform::back), which has no Back
+// key. Set by the swipe as it goes; at progress 1, letting go is Back.
+export global BackGesture {
+    // How far it's gone, 0 to 1: at 1, letting go is Back.
+    in-out property <float> progress: 0;
+    // The finger's distance from the edge: what Back would close follows it.
+    in-out property <length> offset: 0px;
+    // A finger is on it: what follows it does without animating.
+    in-out property <bool> dragging: false;
+    // slint-viewer only: a drag from the left edge stands in for iOS's swipe.
+    in property <bool> simulate: false;
+}
