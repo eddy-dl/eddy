@@ -179,6 +179,8 @@ pub fn ios_main() {
     if let Err(e) = db::init(platform::get_app_data_dir()) {
         log::error!("Failed to initialize database: {e}");
     }
+    // Settings' System font, before Slint picks its font (as it starts).
+    platform::font::apply(preferences::system_font_wanted());
     let ui = match DownloaderApp::new() {
         Ok(ui) => ui,
         Err(e) => {
@@ -235,6 +237,8 @@ pub fn ios_main() {
     platform::webview::install(&ui);
     // Back, from a swipe at the left edge (iOS has no Back key).
     platform::back::install(&ui);
+    // Settings → Appearance → Font: any font, with Apple's picker.
+    platform::font::install(&ui);
     if let Err(e) = ui.run() {
         log::error!("Eddy stopped: {:?}", e);
     }

@@ -182,7 +182,7 @@ pub fn own_ytdlp() -> std::path::PathBuf {
 }
 
 /// UIKit, which wants the main thread (where Slint's event loop runs).
-mod uikit {
+pub(super) mod uikit {
     use objc2::rc::Retained;
     use objc2::runtime::AnyObject;
     use objc2::{MainThreadMarker, MainThreadOnly};
@@ -212,7 +212,7 @@ mod uikit {
     }
 
     /// The view controller showing now, to present over.
-    fn top_view_controller(mtm: MainThreadMarker) -> Option<Retained<UIViewController>> {
+    pub fn top_view_controller(mtm: MainThreadMarker) -> Option<Retained<UIViewController>> {
         let scenes = UIApplication::sharedApplication(mtm).connectedScenes().allObjects();
         let window = scenes
             .iter()

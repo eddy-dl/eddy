@@ -104,7 +104,9 @@ block2 = "0.6"
 dispatch2 = { version = "0.3", default-features = false, features = ["std", "objc2"] }
 objc2 = "0.6"
 objc2-background-tasks = { version = "0.3.2", default-features = false, features = ["std", "bitflags", "block2", "dispatch2", "BGTask", "BGTaskRequest", "BGTaskScheduler"] }
-objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFCGTypes"] }
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFCGTypes", "CFString", "CFURL"] }
+# The fonts' files, for Settings' System font and Font (platform/ios_font.rs).
+objc2-core-text = { version = "0.3.2", default-features = false, features = ["std", "CTFont", "CTFontDescriptor"] }
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSDictionary", "NSError", "NSObject", "NSProgress", "NSSet", "NSString", "NSURL"] }
 objc2-ui-kit = { version = "0.3.2", default-features = false, features = [
     "std",
@@ -118,6 +120,8 @@ objc2-ui-kit = { version = "0.3.2", default-features = false, features = [
     "UIButton",
     "UIColor",
     "UIControl",
+    "UIFontDescriptor",
+    "UIFontPickerViewController",
     "UIGeometry",
     "UIGestureRecognizer",
     "UIImage",

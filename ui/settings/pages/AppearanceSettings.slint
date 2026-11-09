@@ -683,7 +683,8 @@ export component AppearanceSettings inherits Rectangle {
                 }
             }
 
-            // Android only: desktop already draws with the system's font.
+            // Phones only (Android's font, or iOS's): desktop already draws
+            // with the system's font.
             if !SettingsLayout.desktop: SectionHeader { text: @tr("Font"); }
             if !SettingsLayout.desktop: SwitchRow {
                 title: @tr("System font");
@@ -692,6 +693,57 @@ export component AppearanceSettings inherits Rectangle {
                 text_color: root.text_color;
                 checked <=> AppSettings.system_font;
                 toggled => { AppSettings.preferences_changed(); }
+            }
+            // iOS: any font, with Apple's picker (it goes before the switch's).
+            if AppSettings.can_choose_font: SettingsCard {
+                first: true;
+                last: true;
+                highlighted: font_ta.has-hover;
+
+                font_ta := TouchArea {
+                    clicked => { AppSettings.choose_font(); }
+                }
+
+                HorizontalLayout {
+                    padding: 8px;
+                    padding-top: 12px;
+                    padding-bottom: 12px;
+                    padding-left: SettingsLayout.inset;
+                    padding-right: SettingsLayout.inset;
+                    spacing: 16px;
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        horizontal-stretch: 1;
+
+                        Text {
+                            text: @tr("Choose font");
+                            font-size: 18px;
+                            font-weight: 600;
+                            color: root.text_color;
+                        }
+
+                        Text {
+                            text: AppSettings.font_choice != "" ? AppSettings.font_choice
+                                : AppSettings.system_font ? @tr("None: the system font")
+                                : @tr("None: Eddy's own");
+                            font-size: 13px;
+                            color: ThemeSettings.primary_accent.transparentize(30%);
+                            overflow: elide;
+                        }
+                    }
+
+                    if AppSettings.font_choice != "": VerticalLayout {
+                        alignment: center;
+
+                        ActionButton {
+                            text: @tr("Reset");
+                            height: 40px;
+                            clicked => { AppSettings.reset_font(); }
+                        }
+                    }
+                }
             }
 
             SectionHeader { text: @tr("Navigation"); }

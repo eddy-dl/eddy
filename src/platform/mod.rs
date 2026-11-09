@@ -88,6 +88,10 @@ pub mod webview;
 #[cfg(target_os = "ios")]
 #[path = "ios_back.rs"]
 pub mod back;
+// Settings' System font (iOS's own) and Font (any other).
+#[cfg(target_os = "ios")]
+#[path = "ios_font.rs"]
+pub mod font;
 
 // Fallback for desktop (Windows, macOS, Linux)
 #[cfg(not(any(target_os = "android", target_os = "ios")))]

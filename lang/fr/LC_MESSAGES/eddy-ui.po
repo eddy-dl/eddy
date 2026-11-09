@@ -935,3 +935,12 @@ msgstr "Onglet « En cours » animé"
 
 msgid "Its icon moves while something downloads. Off saves battery: the screen isn't redrawn for it."
 msgstr "Son icône bouge pendant un téléchargement. Désactivé, cela économise la batterie : l’écran n’est pas redessiné pour elle."
+
+msgid "Choose font"
+msgstr "Choisir une police"
+
+msgid "None: the system font"
+msgstr "Aucune : la police du système"
+
+msgid "None: Eddy's own"
+msgstr "Aucune : celle d’Eddy"

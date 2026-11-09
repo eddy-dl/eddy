@@ -30,6 +30,12 @@ export global AppSettings {
     // What the font in use is: "" (Eddy's own), a file name, or why there's
     // none.
     in property <string> system_font_status;
+    // iOS: any font, picked with Apple's picker (Settings → Appearance →
+    // Font). It's the picked font's name, or "" for none.
+    in property <bool> can_choose_font: false;
+    in property <string> font_choice;
+    callback choose_font();
+    callback reset_font();
     // Settings → About.
     in property <string> app_version: "0.0.0";
     in property <string> slint_version: "1.18.1";
