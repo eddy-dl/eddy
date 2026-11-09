@@ -225,6 +225,8 @@ pub fn ios_main() {
     cache::install(&ui);
     // Downloads' ends, and their time in the background.
     platform::background::install();
+    // yt-dlp and gallery-dl updates (Settings → External packages).
+    platform::packages::install(&ui);
     if let Err(e) = ui.run() {
         log::error!("Eddy stopped: {:?}", e);
     }

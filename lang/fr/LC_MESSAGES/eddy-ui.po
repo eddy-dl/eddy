@@ -558,6 +558,9 @@ msgstr "Paquets de YTDLnis"
 msgid "Downloaders"
 msgstr "Téléchargeurs"
 
+msgid "They come with Eddy; newer versions are downloaded from PyPI and used from then on."
+msgstr "Ils sont fournis avec Eddy ; les versions plus récentes sont téléchargées depuis PyPI et utilisées dès lors."
+
 msgid "Needs Python: install it above"
 msgstr "Nécessite Python : installez-le ci-dessus"
 

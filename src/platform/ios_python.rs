@@ -95,7 +95,9 @@ fn init() -> Result<Api, String> {
         .map(|e| e.path())
         .find(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("python3")))
         .ok_or("Python's library isn't in this build")?;
-    let path = [stdlib.clone(), stdlib.join("lib-dynload"), bundle.join("app_packages")]
+    // Updated packages (platform::packages) before the app's own.
+    super::packages::prune();
+    let path = [stdlib.clone(), stdlib.join("lib-dynload"), super::packages::updates_dir(), bundle.join("app_packages")]
         .iter()
         .map(|p| p.to_string_lossy().into_owned())
         .collect::<Vec<_>>()
@@ -291,6 +293,21 @@ fn stop_shared(shared: &Shared) {
             (api.run_string)(call.as_ptr());
             (api.gil_release)(gil);
         }
+    }
+}
+
+/// A package was updated (platform::packages): Python sees it from the
+/// next run on.
+pub fn packages_changed() {
+    let Ok(api) = api() else {
+        return;
+    };
+    let call = CString::new("__eddy_packages_changed()").unwrap();
+    // SAFETY: the API from init; the GIL is held for the call.
+    unsafe {
+        let gil = (api.gil_ensure)();
+        (api.run_string)(call.as_ptr());
+        (api.gil_release)(gil);
     }
 }
 
@@ -635,6 +652,35 @@ class _EddyPopen:
 
 _eddy_patched = False
 
+# A package was updated: yt-dlp's modules are dropped once no yt-dlp run is
+# using them, so the next run imports the new ones (gallery-dl imports its
+# own in each run's subinterpreter).
+_eddy_reload = False
+_eddy_ytdlp_runs = 0
+_eddy_reload_lock = threading.Lock()
+
+def __eddy_packages_changed():
+    global _eddy_reload
+    import importlib
+    importlib.invalidate_caches()
+    with _eddy_reload_lock:
+        _eddy_reload = True
+
+def _eddy_ytdlp_enter():
+    global _eddy_reload, _eddy_ytdlp_runs, _eddy_patched
+    with _eddy_reload_lock:
+        if _eddy_reload and _eddy_ytdlp_runs == 0:
+            for name in [n for n in sys.modules if n.split(".")[0] in ("yt_dlp", "yt_dlp_ejs")]:
+                del sys.modules[name]
+            _eddy_patched = False
+            _eddy_reload = False
+        _eddy_ytdlp_runs += 1
+
+def _eddy_ytdlp_leave():
+    global _eddy_ytdlp_runs
+    with _eddy_reload_lock:
+        _eddy_ytdlp_runs -= 1
+
 def _eddy_patch_ytdlp():
     """yt-dlp's modules use their own name for Popen: each gets ours."""
     global _eddy_patched
@@ -784,8 +830,11 @@ def __eddy_run(run_id, out_fd, err_fd, status_fd, module, args):
         status.write(f"{threading.get_ident()}\n")
     _eddy.out, _eddy.err, _eddy.run_id = out, err, run_id
     code = 0
+    _eddy_counted = False
     try:
         if module == "yt_dlp":
+            _eddy_ytdlp_enter()
+            _eddy_counted = True
             import yt_dlp
             _eddy_patch_ytdlp()
             if _eddy_ff is not None and "--ffmpeg-location" not in args:
@@ -826,6 +875,8 @@ def __eddy_run(run_id, out_fd, err_fd, status_fd, module, args):
         code = 1
     finally:
         _eddy.out = _eddy.err = _eddy.run_id = None
+        if _eddy_counted:
+            _eddy_ytdlp_leave()
         with _eddy_subs_lock:
             _eddy_stopped.discard(run_id)
         for stream in (out, err):
