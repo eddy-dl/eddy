@@ -7,14 +7,18 @@ interface.
 Paste or share a link: Eddy works out what it is, shows a preview, and downloads it.
 
 <p>
-  <img src="docs/screenshots/mobile-downloads.png" alt="Downloads on a phone" width="240">
-  <img src="docs/screenshots/mobile-settings.png" alt="Settings on a phone" width="240">
+  <img src="docs/screenshots/mobile-downloads.png" alt="Downloads on a phone" width="200">
+  <img src="docs/screenshots/mobile-downloads-dark.png" alt="Downloads on a phone, dark theme" width="200">
+  <img src="docs/screenshots/mobile-settings.png" alt="Settings on a phone" width="200">
+  <img src="docs/screenshots/mobile-settings-dark.png" alt="Settings on a phone, dark theme" width="200">
 </p>
 <p>
-  <img src="docs/screenshots/desktop-downloads.png" alt="Downloads on desktop" width="720">
+  <img src="docs/screenshots/desktop-downloads.png" alt="Downloads on desktop" width="400">
+  <img src="docs/screenshots/desktop-downloads-dark.png" alt="Downloads on desktop, dark theme" width="400">
 </p>
 <p>
-  <img src="docs/screenshots/desktop-settings.png" alt="Settings on desktop" width="720">
+  <img src="docs/screenshots/desktop-settings.png" alt="Settings on desktop" width="400">
+  <img src="docs/screenshots/desktop-settings-dark.png" alt="Settings on desktop, dark theme" width="400">
 </p>
 
 ## What it downloads
