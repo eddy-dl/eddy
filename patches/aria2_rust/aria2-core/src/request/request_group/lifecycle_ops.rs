@@ -88,7 +88,16 @@ impl super::RequestGroup {
         let mut status = self.status.recover_mut();
 
         if matches!(*status, DownloadStatus::Paused) {
-            *status = DownloadStatus::Waiting;
+            // Eddy: unpaused before its task had stopped, the task carries
+            // on (the pause is cleared below), so the group is Active again.
+            // Waiting would stick: it's still in the active map, where
+            // promotion never looks. A task that does stop for the pause
+            // re-queues it as Waiting when it completes.
+            *status = if self.num_commands() > 0 {
+                DownloadStatus::Active
+            } else {
+                DownloadStatus::Waiting
+            };
             self.clear_command_failure();
             self.clear_pause();
             self.control_flags.clear_halt();
