@@ -404,6 +404,18 @@ jobs:
           curl -sSL https://github.com/quickjs-ng/quickjs/archive/refs/tags/v0.18.0.tar.gz | tar -xz -C platforms/ios/quickjs --strip-components=1
           ls platforms/ios/quickjs/quickjs.c
 
+      # The app icon: logo.svg square (iOS rounds it), 1024 px, without the
+      # alpha channel App Store rules forbid.
+      - name: App icon
+        run: |
+          brew install librsvg
+          cd platforms/ios
+          sed 's/ rx="24"//' ../../ui/icons/logo.svg > icon.svg
+          rsvg-convert -w 1024 -h 1024 icon.svg -o icon-alpha.png
+          sips -s format jpeg -s formatOptions 100 icon-alpha.png --out icon.jpg > /dev/null
+          sips -s format png icon.jpg --out Assets.xcassets/AppIcon.appiconset/icon-1024.png > /dev/null
+          rm icon.svg icon-alpha.png icon.jpg
+
       # Eddy.app from the Xcode project XcodeGen makes (cargo builds the
       # executable), not signed.
       - name: Build (release)

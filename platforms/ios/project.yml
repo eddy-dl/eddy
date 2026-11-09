@@ -13,6 +13,7 @@ targets:
     deploymentTarget: "15.0"
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: dev.pah.eddy
+      ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
       MARKETING_VERSION: "0.2.0"
       CURRENT_PROJECT_VERSION: "1"
     info:
@@ -34,7 +35,9 @@ targets:
             UIWindowSceneSessionRoleApplication:
               - UISceneConfigurationName: Slint
                 UISceneDelegateClassName: SlintWindowSceneDelegate
-    sources: []
+    # The app icon (its PNG rendered by CI from ui/icons/logo.svg).
+    sources:
+      - path: Assets.xcassets
     # Python (BeeWare's Python-Apple-support, fetched by CI into this
     # folder): embedded, not linked; Eddy loads it when yt-dlp first runs.
     dependencies:

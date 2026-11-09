@@ -92,6 +92,27 @@ slint = { version = "1.18.1", features = ["backend-android-activity-06"] }
 # iOS: Slint's winit backend, drawn with Skia on Metal (Slint's iOS guide).
 [target.'cfg(target_os = "ios")'.dependencies]
 slint = { version = "1.18.1", features = ["renderer-skia"] }
+# Opening links and files, the share sheet: the UIKit bindings Slint's winit
+# backend already uses (same versions).
+objc2 = "0.6"
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFCGTypes"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSDictionary", "NSObject", "NSSet", "NSString", "NSURL"] }
+objc2-ui-kit = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "block2",
+    "objc2-core-foundation",
+    "UIActivity",
+    "UIActivityViewController",
+    "UIApplication",
+    "UIPopoverPresentationController",
+    "UIPresentationController",
+    "UIResponder",
+    "UIScene",
+    "UIView",
+    "UIViewController",
+    "UIWindow",
+    "UIWindowScene",
+] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = "5"
