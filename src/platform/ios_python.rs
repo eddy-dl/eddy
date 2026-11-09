@@ -530,13 +530,19 @@ def _eddy_ff_run(tool, args):
     array = (ctypes.c_char_p * len(argv))(*argv)
     out = ctypes.create_string_buffer(16 << 20)
     err = ctypes.create_string_buffer(1 << 20)
-    with _eddy_ff_lock:
+    # Waited for in steps: a run stopped while it waits (its interrupt is
+    # only seen between steps) ends then, not when FFmpeg is free.
+    while not _eddy_ff_lock.acquire(timeout=0.2):
+        pass
+    try:
         _eddy_ff["clear"]()
         _eddy_ff_owner = getattr(_eddy, "run_id", None)
         try:
             code = _eddy_ff[tool](len(argv), array, out, len(out), err, len(err))
         finally:
             _eddy_ff_owner = None
+    finally:
+        _eddy_ff_lock.release()
     return code, out.value, err.value
 
 def __eddy_stop(run_id):

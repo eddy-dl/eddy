@@ -19,13 +19,18 @@ pub enum Tool {
 }
 
 impl Tool {
-    #[cfg(not(target_os = "ios"))]
     fn name(self) -> &'static str {
         match self {
             Tool::Ytdlp => "yt-dlp",
             Tool::GalleryDl => "gallery-dl",
             Tool::Ffmpeg => "ffmpeg",
         }
+    }
+}
+
+impl std::fmt::Display for Tool {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())
     }
 }
 

@@ -346,17 +346,31 @@ jobs:
         with:
           targets: aarch64-apple-ios
 
+      # Saved from the ios branch too, while iOS is built there only (there's
+      # no main cache of it to fall back on yet).
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: ios
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.head_ref == 'ios' }}
 
       - name: Set up sccache
         uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Install XcodeGen
         run: brew install xcodegen
+
+      # Python, FFmpeg and QuickJS for iOS, by version: fetched again only
+      # when one changes.
+      - name: Cache iOS downloads
+        id: ios-downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            platforms/ios/Python.xcframework
+            platforms/ios/SwiftFFmpeg-iOS
+            platforms/ios/quickjs
+          key: ios-downloads-py3.14-b14-ffmpeg1.2.0-qjs0.18.0
 
       # The app's own Python (yt-dlp and gallery-dl run in it: iOS starts no
       # processes), and those packages: pure-Python wheels only, as macOS
@@ -365,7 +379,7 @@ jobs:
       - name: Python and its packages
         run: |
           cd platforms/ios
-          curl -sSL https://github.com/beeware/Python-Apple-support/releases/download/3.14-b14/Python-3.14-iOS-support.b14.tar.gz | tar -xz
+          [ -d Python.xcframework ] || curl -sSL https://github.com/beeware/Python-Apple-support/releases/download/3.14-b14/Python-3.14-iOS-support.b14.tar.gz | tar -xz
           python3 -m pip install --quiet --target app_packages --no-deps \
             --only-binary=:all: --platform any --implementation py --abi none --python-version 3.14 \
             yt-dlp yt-dlp-ejs gallery-dl requests urllib3 idna charset-normalizer certifi
@@ -374,6 +388,7 @@ jobs:
       # ffmpeg and ffprobe as functions (tfourj/SwiftFFmpeg-iOS, GPL-3.0):
       # yt-dlp merges and converts through them.
       - name: FFmpeg
+        if: steps.ios-downloads.outputs.cache-hit != 'true'
         run: |
           cd platforms/ios
           curl -sSL -o ffmpeg.zip https://github.com/tfourj/SwiftFFmpeg-iOS/releases/download/1.2.0/SwiftFFmpeg-iOS.zip
@@ -383,6 +398,7 @@ jobs:
       # QuickJS-ng (MIT): runs yt-dlp's YouTube challenge solver when iOS's
       # JavaScriptCore can't.
       - name: QuickJS-ng
+        if: steps.ios-downloads.outputs.cache-hit != 'true'
         run: |
           mkdir -p platforms/ios/quickjs
           curl -sSL https://github.com/quickjs-ng/quickjs/archive/refs/tags/v0.18.0.tar.gz | tar -xz -C platforms/ios/quickjs --strip-components=1
@@ -397,6 +413,11 @@ jobs:
           xcodebuild -project Eddy.xcodeproj -scheme Eddy -configuration Release \
             -sdk iphoneos -destination generic/platform=iOS -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+
+      # Whether cargo's compiles came from the cache (through Xcode's script).
+      - name: Cache stats
+        if: always()
+        run: sccache --show-stats
 
       # An unsigned .ipa: AltStore, SideStore or Sideloadly sign it with the
       # installer's Apple ID.

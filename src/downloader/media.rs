@@ -609,6 +609,12 @@ pub(super) fn link_expired(error: &str) -> bool {
 /// Runs ffmpeg for `job`, which can stop it: it's the job's child while it
 /// runs (`cancel` kills it, like yt-dlp), so a pause doesn't leave it going.
 async fn ffmpeg(job: u64, args: Vec<String>) -> Result<(), String> {
+    run_tool(job, crate::children::Tool::Ffmpeg, args).await
+}
+
+/// Runs `tool` for `job` (see `ffmpeg`): Ok, or the last line it printed on
+/// stderr.
+async fn run_tool(job: u64, tool: crate::children::Tool, args: Vec<String>) -> Result<(), String> {
     let slot: Arc<Mutex<Option<crate::children::Running>>> = Arc::new(Mutex::new(None));
     with_jobs(|jobs| {
         if let Some((_, control)) = jobs.get_mut(&job) {
@@ -618,7 +624,7 @@ async fn ffmpeg(job: u64, args: Vec<String>) -> Result<(), String> {
     let (status, stderr) = tokio::task::spawn_blocking(move || {
         use std::io::Read;
         // In-process on iOS (children::spawn_tool). Its stdout isn't used.
-        let mut child = crate::children::spawn_tool(crate::children::Tool::Ffmpeg, &args)?;
+        let mut child = crate::children::spawn_tool(tool, &args)?;
         drop(child.stdout.take());
         let mut err = child.stderr.take();
         let errors = std::thread::spawn(move || {
@@ -644,7 +650,7 @@ async fn ffmpeg(job: u64, args: Vec<String>) -> Result<(), String> {
     })
     .await
     .map_err(|e| e.to_string())?
-    .map_err(|e| format!("Couldn't run ffmpeg: {e}"))?;
+    .map_err(|e| format!("Couldn't run {tool}: {e}"))?;
     with_jobs(|jobs| {
         if let Some((_, control)) = jobs.get_mut(&job) {
             control.child = None;
@@ -653,24 +659,42 @@ async fn ffmpeg(job: u64, args: Vec<String>) -> Result<(), String> {
     if status {
         Ok(())
     } else {
-        Err(stderr.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("ffmpeg failed").to_string())
+        let last = stderr.lines().rev().find(|l| !l.trim().is_empty()).map(str::to_string);
+        Err(last.unwrap_or_else(|| format!("{tool} failed")))
     }
 }
 
 /// Saves an HLS stream as one mp4 (stream copy, no re-encoding).
 async fn save_hls(job: u64, fetch: &Fetch, path: &Path) -> Result<(), String> {
-    let headers: String = fetch.headers.iter().map(|(k, v)| format!("{k}: {v}\r\n")).collect();
-    let mut args = vec!["-y".to_string()];
-    if !headers.is_empty() {
-        args.extend(["-headers".to_string(), headers]);
+    // iOS has one FFmpeg, run one job at a time: yt-dlp fetches the
+    // segments itself, so FFmpeg only remuxes (seconds) instead of holding
+    // it for the whole download.
+    #[cfg(target_os = "ios")]
+    {
+        let mut args: Vec<String> = ["--hls-prefer-native", "-N", "4", "--no-part", "--force-overwrites", "--no-playlist", "--no-warnings", "--quiet"]
+            .map(String::from)
+            .into();
+        for (name, value) in &fetch.headers {
+            args.extend(["--add-header".to_string(), format!("{name}:{value}")]);
+        }
+        args.extend(["-o".to_string(), path.to_string_lossy().into_owned(), fetch.url.clone()]);
+        run_tool(job, crate::children::Tool::Ytdlp, args).await
     }
-    args.extend(
-        ["-i", &fetch.url, "-c", "copy", "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart"]
-            .iter()
-            .map(|s| s.to_string()),
-    );
-    args.push(path.to_string_lossy().into_owned());
-    ffmpeg(job, args).await
+    #[cfg(not(target_os = "ios"))]
+    {
+        let headers: String = fetch.headers.iter().map(|(k, v)| format!("{k}: {v}\r\n")).collect();
+        let mut args = vec!["-y".to_string()];
+        if !headers.is_empty() {
+            args.extend(["-headers".to_string(), headers]);
+        }
+        args.extend(
+            ["-i", &fetch.url, "-c", "copy", "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart"]
+                .iter()
+                .map(|s| s.to_string()),
+        );
+        args.push(path.to_string_lossy().into_owned());
+        ffmpeg(job, args).await
+    }
 }
 
 /// Saves a video-only stream and its sound, then joins them into `path`
