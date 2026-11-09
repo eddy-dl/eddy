@@ -9,7 +9,8 @@
 //! shared, so the bootstrap below sends each thread's writes to its own run,
 //! and threads a run starts (yt-dlp's fragment downloads) inherit that.
 //! Stopping a run raises KeyboardInterrupt in its thread, which yt-dlp takes
-//! as "Interrupted by user".
+//! as "Interrupted by user". gallery-dl keeps its options in globals, so its
+//! runs each have a subinterpreter of their own, which stops its run itself.
 //!
 //! FFmpeg (tfourj/SwiftFFmpeg-iOS, linked in when the build has it:
 //! `eddy_ffmpeg`, see build.rs) is ffmpeg and ffprobe as functions: the
@@ -140,7 +141,7 @@ fn init() -> Result<Api, String> {
         for program in ["ffmpeg", "ffprobe", "qjs"] {
             let _ = std::fs::write(stand_ins.join(program), "");
         }
-        let mut setup = vec![format!("__eddy_setup({:?})", stand_ins.to_string_lossy())];
+        let mut setup = vec![format!("__eddy_setup({:?}, {})", stand_ins.to_string_lossy(), api.set_async_exc as usize)];
         #[cfg(eddy_ffmpeg)]
         setup.push(format!(
             "__eddy_ffmpeg_setup({}, {}, {}, {})",
@@ -384,9 +385,10 @@ _eddy_ff_lock = threading.Lock()
 # The stand-in programs' folder.
 _eddy_dir = None
 
-def __eddy_setup(stand_ins):
-    global _eddy_dir
+def __eddy_setup(stand_ins, set_async_exc):
+    global _eddy_dir, _eddy_set_async_exc
     _eddy_dir = stand_ins
+    _eddy_set_async_exc = set_async_exc
 
 def __eddy_ffmpeg_setup(run_ffmpeg, run_ffprobe, cancel, clear):
     global _eddy_ff
@@ -546,9 +548,16 @@ def _eddy_ff_run(tool, args):
     return code, out.value, err.value
 
 def __eddy_stop(run_id):
-    """Run `run_id` is being stopped: FFmpeg too, if it's that run's."""
+    """Run `run_id` is being stopped: FFmpeg too, if it's that run's, and
+    its subinterpreter if it's gallery-dl's (or it's kept from starting)."""
     if _eddy_ff is not None and run_id is not None and _eddy_ff_owner == run_id:
         _eddy_ff["cancel"]()
+    with _eddy_subs_lock:
+        stop_w = _eddy_subs.get(run_id)
+        if stop_w is None:
+            _eddy_stopped.add(run_id)
+        else:
+            os.write(stop_w, b"s")
 
 class _EddyPopen:
     """yt-dlp's Popen for ffmpeg and ffprobe, run in-process (iOS starts no
@@ -634,14 +643,127 @@ def _eddy_patch_ytdlp():
             module.Popen = _EddyPopen
     _eddy_patched = True
 
-# gallery-dl reads its command line from sys.argv: one at a time for now.
+# gallery-dl keeps its options (the -D folder too) in one global config and
+# reads sys.argv: each run has a subinterpreter of its own, with its own
+# gallery-dl, sys and GIL. Where there are none, runs wait for each other.
 _eddy_argv = threading.Lock()
+# PyThreadState_SetAsyncExc, from __eddy_setup: a subinterpreter stops its
+# run with it, as Eddy's interrupt only reaches this interpreter's threads.
+_eddy_set_async_exc = None
+# The stop pipe's write end of each gallery-dl run, and the runs stopped
+# before they had one.
+_eddy_subs = {}
+_eddy_stopped = set()
+_eddy_subs_lock = threading.Lock()
+
+# Run in the subinterpreter: the run's output to its pipes (descriptors of
+# its own), and a thread that stops the run when the stop pipe says so ("s";
+# "d" is the run saying it's done). The exit code goes back on `result`.
+_EDDY_GALLERY_DL = r'''
+import ctypes, os, sys, threading
+_set = ctypes.PYFUNCTYPE(ctypes.c_int, ctypes.c_ulong, ctypes.c_void_p)(set_async_exc)
+sys.stdout = open(out_fd, "w", encoding="utf-8", errors="replace", buffering=1)
+sys.stderr = open(err_fd, "w", encoding="utf-8", errors="replace", buffering=1)
+sys.argv = ["gallery-dl", *args]
+ident = threading.get_ident()
+guard = threading.Lock()
+done = False
+def watch():
+    while True:
+        said = os.read(stop_r, 1)
+        with guard:
+            if done or not said:
+                return
+            if said == b"s":
+                _set(ident, id(KeyboardInterrupt))
+                return
+watcher = threading.Thread(target=watch)
+watcher.start()
+code = 0
+try:
+    import gallery_dl
+    code = gallery_dl.main() or 0
+except SystemExit as e:
+    if e.code is None:
+        code = 0
+    elif isinstance(e.code, int):
+        code = e.code
+    else:
+        sys.stderr.write(f"{e.code}\n")
+        code = 1
+except KeyboardInterrupt:
+    code = 130
+except BaseException:
+    import traceback
+    traceback.print_exc()
+    code = 1
+# No stop from here on, and none left pending (a NULL exception clears it).
+while True:
+    try:
+        with guard:
+            done = True
+        _set(ident, None)
+        break
+    except KeyboardInterrupt:
+        pass
+os.write(stop_w, b"d")
+watcher.join()
+for stream in (sys.stdout, sys.stderr):
+    try:
+        stream.close()
+    except Exception:
+        pass
+result.put(code)
+'''
+
+def _eddy_gallery_dl(run_id, out_fd, err_fd, status, args):
+    """Runs gallery-dl in a subinterpreter of its own: its exit code."""
+    try:
+        from concurrent import interpreters
+    except ImportError:
+        interpreters = None
+    if interpreters is None or _eddy_set_async_exc is None:
+        import gallery_dl
+        status.write(f"{threading.get_ident()}\n")
+        with _eddy_argv:
+            sys.argv = ["gallery-dl", *args]
+            return gallery_dl.main() or 0
+    stop_r, stop_w = os.pipe()
+    with _eddy_subs_lock:
+        if run_id in _eddy_stopped:
+            _eddy_stopped.discard(run_id)
+            os.close(stop_r)
+            os.close(stop_w)
+            return 130
+        _eddy_subs[run_id] = stop_w
+    interp = None
+    try:
+        interp = interpreters.create()
+        result = interpreters.create_queue()
+        # Python's own pipes are closed by this thread: the subinterpreter's
+        # are copies.
+        interp.prepare_main(out_fd=os.dup(out_fd), err_fd=os.dup(err_fd), stop_r=stop_r,
+                            stop_w=stop_w, args=tuple(args), result=result,
+                            set_async_exc=_eddy_set_async_exc)
+        interp.exec(_EDDY_GALLERY_DL)
+        return result.get_nowait()
+    finally:
+        with _eddy_subs_lock:
+            _eddy_subs.pop(run_id, None)
+        # Closing the write end ends the watcher if the run didn't get to.
+        os.close(stop_w)
+        if interp is not None:
+            interp.close()
+        os.close(stop_r)
 
 def __eddy_run(run_id, out_fd, err_fd, status_fd, module, args):
     out = open(out_fd, "w", encoding="utf-8", errors="replace", buffering=1)
     err = open(err_fd, "w", encoding="utf-8", errors="replace", buffering=1)
     status = open(status_fd, "w", buffering=1)
-    status.write(f"{threading.get_ident()}\n")
+    # A gallery-dl run's thread is in its subinterpreter, which Eddy's
+    # interrupt doesn't reach: __eddy_stop stops it (_eddy_gallery_dl).
+    if module != "gallery_dl":
+        status.write(f"{threading.get_ident()}\n")
     _eddy.out, _eddy.err, _eddy.run_id = out, err, run_id
     code = 0
     try:
@@ -667,10 +789,7 @@ def __eddy_run(run_id, out_fd, err_fd, status_fd, module, args):
             out.write(output.decode("utf-8", "replace"))
             err.write(errors.decode("utf-8", "replace"))
         elif module == "gallery_dl":
-            import gallery_dl
-            with _eddy_argv:
-                sys.argv = ["gallery-dl", *args]
-                code = gallery_dl.main() or 0
+            code = _eddy_gallery_dl(run_id, out_fd, err_fd, status, args)
         else:
             raise ValueError(f"no such tool: {module}")
     except SystemExit as e:
@@ -689,6 +808,8 @@ def __eddy_run(run_id, out_fd, err_fd, status_fd, module, args):
         code = 1
     finally:
         _eddy.out = _eddy.err = _eddy.run_id = None
+        with _eddy_subs_lock:
+            _eddy_stopped.discard(run_id)
         for stream in (out, err):
             try:
                 stream.close()
