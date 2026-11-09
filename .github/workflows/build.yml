@@ -336,6 +336,8 @@ jobs:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
       # FFmpeg linked into the app (build.rs; fetched below).
       EDDY_FFMPEG_IOS: ${{ github.workspace }}/platforms/ios/SwiftFFmpeg-iOS
+      # QuickJS-ng's source, the JavaScript fallback (build.rs; fetched below).
+      EDDY_QUICKJS_IOS: ${{ github.workspace }}/platforms/ios/quickjs
     steps:
       - uses: actions/checkout@v6
 
@@ -358,14 +360,15 @@ jobs:
 
       # The app's own Python (yt-dlp and gallery-dl run in it: iOS starts no
       # processes), and those packages: pure-Python wheels only, as macOS
-      # binary wheels wouldn't load on iOS.
+      # binary wheels wouldn't load on iOS. yt-dlp-ejs has the YouTube
+      # challenge solver for QuickJS (yt-dlp's own copy is Deno's and Bun's).
       - name: Python and its packages
         run: |
           cd platforms/ios
           curl -sSL https://github.com/beeware/Python-Apple-support/releases/download/3.14-b14/Python-3.14-iOS-support.b14.tar.gz | tar -xz
           python3 -m pip install --quiet --target app_packages --no-deps \
             --only-binary=:all: --platform any --implementation py --abi none --python-version 3.14 \
-            yt-dlp gallery-dl requests urllib3 idna charset-normalizer certifi
+            yt-dlp yt-dlp-ejs gallery-dl requests urllib3 idna charset-normalizer certifi
           ls app_packages
 
       # ffmpeg and ffprobe as functions (tfourj/SwiftFFmpeg-iOS, GPL-3.0):
@@ -376,6 +379,14 @@ jobs:
           curl -sSL -o ffmpeg.zip https://github.com/tfourj/SwiftFFmpeg-iOS/releases/download/1.2.0/SwiftFFmpeg-iOS.zip
           unzip -q ffmpeg.zip && rm ffmpeg.zip
           ls SwiftFFmpeg-iOS SwiftFFmpeg-iOS/FFmpeg.xcframework
+
+      # QuickJS-ng (MIT): runs yt-dlp's YouTube challenge solver when iOS's
+      # JavaScriptCore can't.
+      - name: QuickJS-ng
+        run: |
+          mkdir -p platforms/ios/quickjs
+          curl -sSL https://github.com/quickjs-ng/quickjs/archive/refs/tags/v0.18.0.tar.gz | tar -xz -C platforms/ios/quickjs --strip-components=1
+          ls platforms/ios/quickjs/quickjs.c
 
       # Eddy.app from the Xcode project XcodeGen makes (cargo builds the
       # executable), not signed.

@@ -14,6 +14,9 @@
 //! FFmpeg (tfourj/SwiftFFmpeg-iOS, linked in when the build has it:
 //! `eddy_ffmpeg`, see build.rs) is ffmpeg and ffprobe as functions: the
 //! bootstrap gives yt-dlp a Popen that calls them for those two programs.
+//! It runs JavaScript (yt-dlp's YouTube challenge solver, as its QuickJS
+//! runtime, `qjs`) in iOS's own JavaScriptCore, or QuickJS-ng (compiled in
+//! when the build has it: `eddy_quickjs`) when that fails.
 
 use std::collections::HashMap;
 use std::ffi::{CString, c_char, c_int, c_ulong, c_void};
@@ -24,7 +27,6 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
-/// The C API Eddy uses, from the framework.
 // SwiftFFmpeg-iOS's wrapper: a run with its stdout and stderr captured, and
 // cancelling the one running.
 #[cfg(eddy_ffmpeg)]
@@ -35,6 +37,14 @@ unsafe extern "C" {
     fn ffmpeg_clear_cancel();
 }
 
+// platforms/ios/quickjs_eval.c, with QuickJS-ng.
+#[cfg(eddy_quickjs)]
+unsafe extern "C" {
+    fn eddy_qjs_eval(source: *const c_char, length: usize, out: *mut *mut c_char, err: *mut *mut c_char) -> c_int;
+    fn eddy_qjs_free(text: *mut c_char);
+}
+
+/// The C API Eddy uses, from the framework.
 struct Api {
     gil_ensure: unsafe extern "C" fn() -> c_int,
     gil_release: unsafe extern "C" fn(c_int),
@@ -116,26 +126,29 @@ fn init() -> Result<Api, String> {
         if (api.run_string)(bootstrap.as_ptr()) != 0 {
             return Err("Python's bootstrap failed".to_string());
         }
+        // yt-dlp looks for the programs before running them: empty
+        // stand-ins, in a folder it's told about (--ffmpeg-location,
+        // --js-runtimes).
+        let stand_ins = PathBuf::from(super::get_app_data_dir()).join("programs");
+        let _ = std::fs::create_dir_all(&stand_ins);
+        for program in ["ffmpeg", "ffprobe", "qjs"] {
+            let _ = std::fs::write(stand_ins.join(program), "");
+        }
+        let mut setup = vec![format!("__eddy_setup({:?})", stand_ins.to_string_lossy())];
         #[cfg(eddy_ffmpeg)]
-        {
-            // yt-dlp looks for the programs before running them: empty
-            // stand-ins, in a folder it's told about (--ffmpeg-location).
-            let stand_ins = PathBuf::from(super::get_app_data_dir()).join("ffmpeg");
-            let _ = std::fs::create_dir_all(&stand_ins);
-            for program in ["ffmpeg", "ffprobe"] {
-                let _ = std::fs::write(stand_ins.join(program), "");
-            }
-            let setup = format!(
-                "__eddy_ffmpeg_setup({}, {}, {}, {}, {:?})",
-                ffmpeg_execute_with_output as usize,
-                ffprobe_execute_with_output as usize,
-                ffmpeg_request_cancel as usize,
-                ffmpeg_clear_cancel as usize,
-                stand_ins.to_string_lossy()
-            );
-            let setup = CString::new(setup).unwrap();
-            if (api.run_string)(setup.as_ptr()) != 0 {
-                log::warn!(target: "ytdlp", "FFmpeg didn't set up; yt-dlp runs without it");
+        setup.push(format!(
+            "__eddy_ffmpeg_setup({}, {}, {}, {})",
+            ffmpeg_execute_with_output as *const () as usize,
+            ffprobe_execute_with_output as *const () as usize,
+            ffmpeg_request_cancel as *const () as usize,
+            ffmpeg_clear_cancel as *const () as usize
+        ));
+        #[cfg(eddy_quickjs)]
+        setup.push(format!("__eddy_quickjs_setup({}, {})", eddy_qjs_eval as *const () as usize, eddy_qjs_free as *const () as usize));
+        for line in setup {
+            let line = CString::new(line).unwrap();
+            if (api.run_string)(line.as_ptr()) != 0 {
+                log::warn!(target: "ytdlp", "setting up {} failed", line.to_string_lossy());
             }
         }
         // The GIL goes to whichever run needs it.
@@ -347,15 +360,143 @@ threading.Thread.start = _eddy_inherit
 # its command-line code keeps global state.
 _eddy_ff = None
 _eddy_ff_lock = threading.Lock()
+# The stand-in programs' folder.
+_eddy_dir = None
 
-def __eddy_ffmpeg_setup(run_ffmpeg, run_ffprobe, cancel, clear, stand_ins):
+def __eddy_setup(stand_ins):
+    global _eddy_dir
+    _eddy_dir = stand_ins
+
+def __eddy_ffmpeg_setup(run_ffmpeg, run_ffprobe, cancel, clear):
     global _eddy_ff
     import ctypes
     run = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_char_p),
                            ctypes.c_char_p, ctypes.c_size_t, ctypes.c_char_p, ctypes.c_size_t)
     void = ctypes.CFUNCTYPE(None)
     _eddy_ff = {"ffmpeg": run(run_ffmpeg), "ffprobe": run(run_ffprobe),
-                "cancel": void(cancel), "clear": void(clear), "dir": stand_ins}
+                "cancel": void(cancel), "clear": void(clear)}
+
+# JavaScript: iOS's JavaScriptCore first, QuickJS-ng (when the app has it)
+# if that fails. Both get console.log as their output.
+_eddy_qjs = None
+
+def __eddy_quickjs_setup(evaluate, free):
+    global _eddy_qjs
+    import ctypes
+    _eddy_qjs = (
+        ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_char_p, ctypes.c_size_t,
+                         ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_void_p))(evaluate),
+        ctypes.CFUNCTYPE(None, ctypes.c_void_p)(free),
+    )
+
+_EDDY_CONSOLE = """
+var __eddyOut = [], __eddyErr = [];
+(function () {
+  function line(args) { return Array.prototype.map.call(args, String).join(' '); }
+  var out = function () { __eddyOut.push(line(arguments)); };
+  var err = function () { __eddyErr.push(line(arguments)); };
+  globalThis.console = { log: out, info: out, debug: out, warn: err, error: err };
+})();
+"""
+
+def _eddy_jsc(source):
+    """Runs `source` in JavaScriptCore: (output, errors), or raises."""
+    import ctypes
+    P = ctypes.c_void_p
+    jsc = ctypes.CDLL("/System/Library/Frameworks/JavaScriptCore.framework/JavaScriptCore")
+    jsc.JSGlobalContextCreate.restype, jsc.JSGlobalContextCreate.argtypes = P, [P]
+    jsc.JSGlobalContextRelease.argtypes = [P]
+    jsc.JSStringCreateWithUTF8CString.restype = P
+    jsc.JSStringCreateWithUTF8CString.argtypes = [ctypes.c_char_p]
+    jsc.JSStringRelease.argtypes = [P]
+    jsc.JSEvaluateScript.restype = P
+    jsc.JSEvaluateScript.argtypes = [P, P, P, P, ctypes.c_int, ctypes.POINTER(P)]
+    jsc.JSValueToStringCopy.restype = P
+    jsc.JSValueToStringCopy.argtypes = [P, P, ctypes.POINTER(P)]
+    jsc.JSStringGetMaximumUTF8CStringSize.restype = ctypes.c_size_t
+    jsc.JSStringGetMaximumUTF8CStringSize.argtypes = [P]
+    jsc.JSStringGetUTF8CString.restype = ctypes.c_size_t
+    jsc.JSStringGetUTF8CString.argtypes = [P, ctypes.c_char_p, ctypes.c_size_t]
+    ctx = jsc.JSGlobalContextCreate(None)
+    def text(value):
+        exception = P()
+        string = jsc.JSValueToStringCopy(ctx, value, ctypes.byref(exception))
+        if not string:
+            return ""
+        size = jsc.JSStringGetMaximumUTF8CStringSize(string)
+        buffer = ctypes.create_string_buffer(size)
+        jsc.JSStringGetUTF8CString(string, buffer, size)
+        jsc.JSStringRelease(string)
+        return buffer.value.decode("utf-8", "replace")
+    def evaluate(code):
+        script = jsc.JSStringCreateWithUTF8CString(code.encode("utf-8"))
+        exception = P()
+        value = jsc.JSEvaluateScript(ctx, script, None, None, 1, ctypes.byref(exception))
+        jsc.JSStringRelease(script)
+        if exception.value:
+            raise RuntimeError(text(exception))
+        return value
+    try:
+        evaluate(_EDDY_CONSOLE)
+        evaluate(source)
+        return text(evaluate("__eddyOut.join('\\n')")), text(evaluate("__eddyErr.join('\\n')"))
+    finally:
+        jsc.JSGlobalContextRelease(ctx)
+
+def _eddy_quickjs(source):
+    """Runs `source` in QuickJS-ng: (output, errors), or raises."""
+    import ctypes
+    evaluate, free = _eddy_qjs
+    data = source.encode("utf-8")
+    out, err = ctypes.c_void_p(), ctypes.c_void_p()
+    status = evaluate(data, len(data), ctypes.byref(out), ctypes.byref(err))
+    try:
+        output = ctypes.string_at(out.value).decode("utf-8", "replace") if out.value else ""
+        errors = ctypes.string_at(err.value).decode("utf-8", "replace") if err.value else ""
+    finally:
+        free(out); free(err)
+    if status:
+        raise RuntimeError(errors.strip() or f"QuickJS failed ({status})")
+    return output, errors
+
+_eddy_stack_lock = threading.Lock()
+
+def _eddy_big_stack(function, *args):
+    """Runs `function` on a thread with a big stack: the solver recurses
+    deeply, and iOS gives threads 512 KB."""
+    result = {}
+    def go():
+        try:
+            result["value"] = function(*args)
+        except BaseException as e:
+            result["error"] = e
+    with _eddy_stack_lock:
+        before = threading.stack_size(64 << 20)
+        try:
+            thread = threading.Thread(target=go, daemon=True)
+            thread.start()
+        finally:
+            threading.stack_size(before)
+    thread.join()
+    if "error" in result:
+        raise result["error"]
+    return result["value"]
+
+def _eddy_js_run(source):
+    """Runs a script: (exit code, output, errors) as bytes."""
+    engines = [("JavaScriptCore", _eddy_jsc)]
+    if _eddy_qjs is not None:
+        engines.append(("QuickJS", _eddy_quickjs))
+    failures = []
+    for name, engine in engines:
+        try:
+            out, err = _eddy_big_stack(engine, source)
+            if failures:
+                sys.stderr.write(f"[eddy] ran the script in {name} after: {'; '.join(failures)}\n")
+            return 0, (out + "\n" if out else "").encode(), (err + "\n" if err else "").encode()
+        except Exception as e:
+            failures.append(f"{name}: {str(e).strip()[:300]}")
+    return 1, b"", ("\n".join(failures) + "\n").encode()
 
 def _eddy_ff_run(tool, args):
     """Runs ffmpeg or ffprobe: (exit code, stdout, stderr) as bytes."""
@@ -377,7 +518,7 @@ class _EddyPopen:
         import shlex, subprocess
         argv = shlex.split(args) if isinstance(args, str) else [os.fsdecode(a) for a in args]
         tool = os.path.basename(argv[0]) if argv else ""
-        if _eddy_ff is None or tool not in ("ffmpeg", "ffprobe"):
+        if not (tool == "qjs" or (_eddy_ff is not None and tool in ("ffmpeg", "ffprobe"))):
             raise FileNotFoundError(2, "iOS runs no programs", argv[0] if argv else "")
         self.args, self.pid, self.returncode = args, 0, None
         self.stdin = self.stdout = self.stderr = None
@@ -389,7 +530,10 @@ class _EddyPopen:
         self._tool, self._argv = tool, argv[1:]
     def _finish(self):
         if self._result is None:
-            code, out, err = _eddy_ff_run(self._tool, self._argv)
+            if self._tool == "qjs":
+                code, out, err = self._qjs()
+            else:
+                code, out, err = _eddy_ff_run(self._tool, self._argv)
             self.returncode = code
             if self._merge:
                 out, err = out + err, b""
@@ -405,6 +549,15 @@ class _EddyPopen:
             self._result = (out if (self._pipe_out or self._merge) else None,
                             err if self._pipe_err else None)
         return self._result
+    def _qjs(self):
+        # yt-dlp asks QuickJS for --help (its version), then runs --script.
+        if "--help" in self._argv:
+            return 1, b"QuickJS-ng version 0.18.0\n", b""
+        if "--script" in self._argv:
+            path = self._argv[self._argv.index("--script") + 1]
+            with open(path, encoding="utf-8") as script:
+                return _eddy_js_run(script.read())
+        return 1, b"", b"Eddy's qjs runs --script only\n"
     def communicate(self, input=None, timeout=None):
         return self._finish()
     def communicate_or_kill(self, *args, **kwargs):
@@ -432,7 +585,7 @@ _eddy_patched = False
 def _eddy_patch_ytdlp():
     """yt-dlp's modules use their own name for Popen: each gets ours."""
     global _eddy_patched
-    if _eddy_patched or _eddy_ff is None:
+    if _eddy_patched:
         return
     import yt_dlp.utils
     original = yt_dlp.utils.Popen
@@ -454,11 +607,18 @@ def __eddy_run(out_fd, err_fd, status_fd, module, args):
     try:
         if module == "yt_dlp":
             import yt_dlp
-            if _eddy_ff is not None:
-                _eddy_patch_ytdlp()
-                if "--ffmpeg-location" not in args:
-                    args = ["--ffmpeg-location", _eddy_ff["dir"], *args]
+            _eddy_patch_ytdlp()
+            if _eddy_ff is not None and "--ffmpeg-location" not in args:
+                args = ["--ffmpeg-location", _eddy_dir, *args]
+            # YouTube's challenges: the in-app engines, as yt-dlp's QuickJS.
+            if "--js-runtimes" not in args:
+                args = ["--js-runtimes", f"quickjs:{os.path.join(_eddy_dir, 'qjs')}", *args]
             yt_dlp.main(args)
+        elif module == "js":
+            # A script of Eddy's own (extractors::packed): its output.
+            code, output, errors = _eddy_js_run(args[0])
+            out.write(output.decode("utf-8", "replace"))
+            err.write(errors.decode("utf-8", "replace"))
         elif module == "gallery_dl":
             import gallery_dl
             with _eddy_argv:

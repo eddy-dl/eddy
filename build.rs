@@ -18,11 +18,18 @@ fn main() {
 
     // iOS: FFmpeg's command-line tools, linked into the app, when CI has
     // fetched them (tfourj/SwiftFFmpeg-iOS's release, named by EDDY_FFMPEG_IOS).
+    // And QuickJS-ng, the JavaScript fallback for iOS's own engine, from
+    // its source (EDDY_QUICKJS_IOS).
     println!("cargo::rustc-check-cfg=cfg(eddy_ffmpeg)");
+    println!("cargo::rustc-check-cfg=cfg(eddy_quickjs)");
     println!("cargo:rerun-if-env-changed=EDDY_FFMPEG_IOS");
+    println!("cargo:rerun-if-env-changed=EDDY_QUICKJS_IOS");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("ios") {
         if let Ok(root) = std::env::var("EDDY_FFMPEG_IOS") {
             link_ffmpeg(Path::new(&root));
+        }
+        if let Ok(source) = std::env::var("EDDY_QUICKJS_IOS") {
+            build_quickjs(Path::new(&source));
         }
     }
 
@@ -59,4 +66,17 @@ fn link_ffmpeg(root: &Path) {
     }
     println!("cargo:rustc-cfg=eddy_ffmpeg");
     println!("cargo:rerun-if-changed={}", wrapper.join("ffmpeg_wrapper.c").display());
+}
+
+/// Compiles QuickJS-ng's library and Eddy's runner for it
+/// (platforms/ios/quickjs_eval.c).
+fn build_quickjs(source: &Path) {
+    let runner = Path::new("platforms/ios/quickjs_eval.c");
+    let mut build = cc::Build::new();
+    for file in ["quickjs.c", "libregexp.c", "libunicode.c", "dtoa.c"] {
+        build.file(source.join(file));
+    }
+    build.file(runner).include(source).define("_GNU_SOURCE", None).warnings(false).compile("eddy_quickjs");
+    println!("cargo:rustc-cfg=eddy_quickjs");
+    println!("cargo:rerun-if-changed={}", runner.display());
 }
