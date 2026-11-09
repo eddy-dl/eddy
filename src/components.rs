@@ -35,6 +35,9 @@ struct Release {
 
 /// What GitHub said: releases per package key, or why it couldn't say.
 static RELEASES: Mutex<Option<Result<HashMap<String, Release>, String>>> = Mutex::new(None);
+/// What PyPI said about gallery-dl, apart from GitHub: one failing doesn't
+/// hide the other's.
+static GALLERYDL: Mutex<Option<Result<Release, String>>> = Mutex::new(None);
 /// Downloads in progress: key → fraction done.
 static DOWNLOADING: Mutex<Option<HashMap<String, f32>>> = Mutex::new(None);
 
@@ -180,14 +183,12 @@ fn refresh() {
         );
         // gallery-dl, which runs on the same Python.
         let version = crate::gallerydl::installed_version();
-        let release = match &releases {
-            Some(Ok(map)) => map.get("gallerydl").cloned(),
-            _ => None,
-        };
+        let checked = GALLERYDL.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let release = checked.as_ref().and_then(|r| r.as_ref().ok()).cloned();
         let state = match (in_progress.get("gallerydl"), &version, &release) {
             (Some(p), ..) => (4, *p),
             (None, None, Some(_)) => (1, 0.0),
-            (None, None, None) if matches!(releases, Some(Err(_))) => (7, 0.0),
+            (None, None, None) if matches!(checked, Some(Err(_))) => (7, 0.0),
             (None, None, None) => (0, 0.0),
             (None, Some(v), Some(r)) if newer(&r.version, v) => (3, 0.0),
             (None, Some(_), _) => (2, 0.0),
@@ -222,7 +223,8 @@ static CHECKED_AT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
 fn check() {
     {
         let mut at = CHECKED_AT.lock().unwrap_or_else(|e| e.into_inner());
-        let ok = matches!(*RELEASES.lock().unwrap_or_else(|e| e.into_inner()), Some(Ok(_)));
+        let ok = matches!(*RELEASES.lock().unwrap_or_else(|e| e.into_inner()), Some(Ok(_)))
+            && matches!(*GALLERYDL.lock().unwrap_or_else(|e| e.into_inner()), Some(Ok(_)));
         if ok && at.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(600)) {
             refresh();
             return;
@@ -246,6 +248,15 @@ fn check() {
             log::warn!("couldn't check the external packages: {e}");
         }
         *RELEASES.lock().unwrap_or_else(|e| e.into_inner()) = Some(result);
+        let _ = slint::invoke_from_event_loop(refresh);
+    });
+    // gallery-dl's newest wheel on PyPI (with what it needs, a little more).
+    crate::downloader::runtime().spawn(async {
+        let result = crate::gallerydl::latest().await.map(|(version, size)| Release { version, url: String::new(), size });
+        if let Err(e) = &result {
+            log::warn!("couldn't check gallery-dl's version: {e}");
+        }
+        *GALLERYDL.lock().unwrap_or_else(|e| e.into_inner()) = Some(result);
         let _ = slint::invoke_from_event_loop(refresh);
     });
 }
@@ -308,10 +319,6 @@ async fn fetch_releases(abi: &str) -> Result<HashMap<String, Release>, String> {
                 );
             }
         }
-    }
-    // gallery-dl's newest wheel on PyPI (with what it needs, a little more).
-    if let Ok((version, size)) = crate::gallerydl::latest().await {
-        found.insert("gallerydl".to_string(), Release { version, url: String::new(), size });
     }
     Ok(found)
 }
@@ -381,6 +388,11 @@ fn install_gallerydl() {
 
 /// Downloads a package's APK (the user confirmed), then opens the installer.
 fn download(key: String) {
+    // From PyPI, whatever GitHub said.
+    if key == "gallerydl" {
+        install_gallerydl();
+        return;
+    }
     let release = match RELEASES.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         Some(Ok(map)) => map.get(&key).cloned(),
         _ => None,
@@ -390,10 +402,6 @@ fn download(key: String) {
     };
     if key == "ytdlp" {
         update_ytdlp(release);
-        return;
-    }
-    if key == "gallerydl" {
-        install_gallerydl();
         return;
     }
     if is_cached(&key, &release) {
