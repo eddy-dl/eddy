@@ -42,9 +42,11 @@ Paste or share a link: Eddy works out what it is, shows a preview, and downloads
   browser check. See [docs/novel-extractors.md](docs/novel-extractors.md).
 - **Pages whose file only comes from a click**, in Eddy's own browser.
 
-On iOS (a first build, sideloaded with AltStore, SideStore or Sideloadly; not on the App Store),
-yt-dlp and gallery-dl run in the app's own Python, with ffmpeg and a JavaScript engine built in,
-as iOS lets an app start no other programs.
+On iOS (a first build, sideloaded with AltStore, SideStore or Sideloadly), yt-dlp and gallery-dl
+run in the app's own Python, with ffmpeg and a JavaScript engine built in, as iOS lets an app
+start no other programs. It can't be on the App Store: Apple's review guidelines don't allow
+torrent clients or saving media from sites like YouTube (5.2.3), nor an app downloading code,
+as updating yt-dlp does (2.5.2).
 
 Downloads go to `Download/Eddy` (by type, if you like) or a folder you pick.
 English and French. The French translation was written by an AI model, not a translator, and
