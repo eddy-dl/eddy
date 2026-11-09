@@ -131,6 +131,8 @@ copy once a fix is released.
 didn't compile. It's `target_vendor = "apple"` now. Still so in v0.3.12
 (`receive_socket.rs`).
 
+Upstream issue: <https://github.com/balovess/aria2_rust/issues/92>.
+
 ## Warnings
 
 `aria2-core/src/lib.rs` allows upstream's warnings (unused imports, a
