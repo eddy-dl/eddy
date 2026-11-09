@@ -1,8 +1,15 @@
 import { AppSettings } from "../../globals/AppSettings.slint";
 import { DownloadOptionsEditor } from "../../components/DownloadOptionsEditor.slint";
-import { Chip, SectionLabel } from "../../components/Chips.slint";
+import { Chip } from "../../components/Chips.slint";
 import { Note } from "../../components/Note.slint";
 import { SwitchRow } from "../../components/SwitchRow.slint";
+import { SectionHeader, SettingsCard, SettingsLayout } from "../SettingsCard.slint";
+
+// A setting's name at the top of its card.
+component CardTitle inherits Text {
+    font-size: 16px;
+    font-weight: 600;
+}
 
 // Settings → Downloads → Downloading: every download's defaults (a
 // download's preview or options sheet can change them for it).
@@ -36,89 +43,137 @@ export component DownloadingSettings inherits Rectangle {
         }
 
         downloading_layout := VerticalLayout {
+            spacing: SettingsLayout.spacing;
             alignment: start;
-            padding-left: 4px;
-            padding-right: 4px;
+            padding-left: SettingsLayout.side;
+            padding-right: SettingsLayout.side;
             padding-top: 8px;
+            // Room under the last item, so it doesn't end at the edge.
             padding-bottom: 24px;
-            spacing: 10px;
 
             // All downloads together, so not in the editor (which a single
             // download's options use too).
-            SectionLabel { text: @tr("Downloads at once"); }
-            HorizontalLayout {
-                spacing: 8px;
-                for n in [1, 2, 3, 5, 0]: Chip {
-                    text: n == 0 ? "∞" : n;
-                    selected: AppSettings.dl_max_concurrent == n;
-                    clicked => {
-                        AppSettings.dl_max_concurrent = n;
-                        AppSettings.preferences_changed();
+            SectionHeader {
+                text: @tr("Queue");
+                first: true;
+            }
+            SettingsCard {
+                first: true;
+                last: false;
+                text_color: root.text_color;
+                VerticalLayout {
+                    padding: 16px;
+                    padding-left: SettingsLayout.inset;
+                    padding-right: SettingsLayout.inset;
+                    spacing: 10px;
+                    CardTitle { text: @tr("Downloads at once"); color: root.text_color; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        for n in [1, 2, 3, 5, 0]: Chip {
+                            text: n == 0 ? "∞" : n;
+                            selected: AppSettings.dl_max_concurrent == n;
+                            clicked => {
+                                AppSettings.dl_max_concurrent = n;
+                                AppSettings.preferences_changed();
+                            }
+                        }
+                    }
+                    Note {
+                        text: AppSettings.dl_max_concurrent == 0
+                            ? @tr("Every download starts straight away.")
+                            : @tr("Others wait in Queued and start, oldest first, as these finish.");
+                        font_size: 13px;
+                        text_color: root.text_color;
                     }
                 }
             }
-            Note {
-                text: AppSettings.dl_max_concurrent == 0
-                    ? @tr("Every download starts straight away.")
-                    : @tr("Others wait in Queued and start, oldest first, as these finish.");
-                font_size: 13px;
+            SettingsCard {
+                first: false;
+                last: true;
                 text_color: root.text_color;
+                VerticalLayout {
+                    padding: 16px;
+                    padding-left: SettingsLayout.inset;
+                    padding-right: SettingsLayout.inset;
+                    spacing: 10px;
+                    CardTitle { text: @tr("If a file already exists"); color: root.text_color; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Chip {
+                            text: @tr("Keep both");
+                            selected: !AppSettings.dl_replace_existing;
+                            clicked => {
+                                AppSettings.dl_replace_existing = false;
+                                AppSettings.preferences_changed();
+                            }
+                        }
+                        Chip {
+                            text: @tr("Replace");
+                            selected: AppSettings.dl_replace_existing;
+                            clicked => {
+                                AppSettings.dl_replace_existing = true;
+                                AppSettings.preferences_changed();
+                            }
+                        }
+                    }
+                    Note {
+                        text: AppSettings.dl_replace_existing
+                            ? @tr("The old one is replaced by the new download.")
+                            : @tr("The new one gets a number: \"name (1)\".");
+                        font_size: 13px;
+                        text_color: root.text_color;
+                    }
+                }
             }
 
-            SectionLabel { text: @tr("If a file already exists"); }
-            HorizontalLayout {
-                spacing: 8px;
-                Chip {
-                    text: @tr("Keep both");
-                    selected: !AppSettings.dl_replace_existing;
-                    clicked => {
-                        AppSettings.dl_replace_existing = false;
-                        AppSettings.preferences_changed();
-                    }
-                }
-                Chip {
-                    text: @tr("Replace");
-                    selected: AppSettings.dl_replace_existing;
-                    clicked => {
-                        AppSettings.dl_replace_existing = true;
-                        AppSettings.preferences_changed();
+            // The defaults a download's preview or options sheet starts from.
+            SectionHeader { text: @tr("Each download"); }
+            SettingsCard {
+                text_color: root.text_color;
+                VerticalLayout {
+                    padding: 16px;
+                    padding-left: SettingsLayout.inset;
+                    padding-right: SettingsLayout.inset;
+                    DownloadOptionsEditor {
+                        text_color: root.text_color;
+                        speed_kbps <=> AppSettings.dl_speed_kbps;
+                        connections <=> AppSettings.dl_connections;
+                        ua_mode <=> AppSettings.dl_ua_mode;
+                        ua_custom <=> AppSettings.dl_ua_custom;
+                        category <=> AppSettings.dl_category_folders;
+                        changed => { AppSettings.preferences_changed(); }
                     }
                 }
             }
-            Note {
-                text: AppSettings.dl_replace_existing
-                    ? @tr("The old one is replaced by the new download.")
-                    : @tr("The new one gets a number: \"name (1)\".");
-                font_size: 13px;
-                text_color: root.text_color;
+            // Lined up with the rows' text.
+            VerticalLayout {
+                padding-left: SettingsLayout.inset;
+                padding-right: SettingsLayout.inset;
+                padding-top: 12px;
+                Note {
+                    text: @tr("A download's own options can change these for it.");
+                    text_color: root.text_color;
+                }
             }
 
+            SectionHeader { text: @tr("Links and app"); }
             SwitchRow {
-                flush: true;
+                first: true;
+                last: !AppSettings.is_mobile;
                 title: @tr("Links with spaces");
                 subtitle: @tr("A pasted link runs on through spaces, up to the next link or the end of its line");
                 text_color: root.text_color;
                 checked <=> AppSettings.links_with_spaces;
                 toggled => { AppSettings.preferences_changed(); }
             }
-
             if AppSettings.is_mobile: SwitchRow {
-                flush: true;
+                first: false;
+                last: true;
                 title: @tr("Quit when done");
                 subtitle: @tr("Eddy closes once its downloads are finished, if it's in the background");
                 text_color: root.text_color;
                 checked <=> AppSettings.quit_when_done;
                 toggled => { AppSettings.preferences_changed(); }
-            }
-
-            DownloadOptionsEditor {
-                text_color: root.text_color;
-                speed_kbps <=> AppSettings.dl_speed_kbps;
-                connections <=> AppSettings.dl_connections;
-                ua_mode <=> AppSettings.dl_ua_mode;
-                ua_custom <=> AppSettings.dl_ua_custom;
-                category <=> AppSettings.dl_category_folders;
-                changed => { AppSettings.preferences_changed(); }
             }
         }
     }

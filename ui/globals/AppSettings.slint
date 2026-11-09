@@ -6,7 +6,8 @@ export struct HelperPackage {
     size: string, // the newest release's download size
     // 0 checking, 1 not installed, 2 installed, 3 update available,
     // 4 downloading, 5 downloaded (ready to install, Android), 6 no build
-    // for this device, 7 couldn't check, 8 installing (desktop: unpacking)
+    // for this device, 7 couldn't check, 8 installing (desktop: unpacking),
+    // 9 needs Python (Android: yt-dlp, gallery-dl)
     state: int,
     progress: float, // while downloading, 0..1
 }
@@ -125,6 +126,10 @@ export global AppSettings {
     // and opens Android's installer. Desktop ("ytdlp", "ffmpeg", "deno"):
     // installed into Eddy's own folder, also only once confirmed.
     in property <[HelperPackage]> helper_packages;
+    // Android: yt-dlp and gallery-dl, which run on Python (state 9 until
+    // it's installed), shown as a group of their own; helper_packages then
+    // has YTDLnis's packages.
+    in property <[HelperPackage]> python_tools;
     // Look for newer releases (the Downloads settings opened).
     callback helpers_check();
     // Download a package's APK, then open the installer.

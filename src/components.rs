@@ -154,61 +154,58 @@ fn refresh() {
         })
         .collect();
 
-    let mut rows = rows;
-    // yt-dlp's own row, once Python's there to run it.
-    if installed.contains_key("python") {
-        let version = YTDLP_VERSION.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        let release = match &releases {
-            Some(Ok(map)) => map.get("ytdlp").cloned(),
-            _ => None,
-        };
-        let state = match (in_progress.get("ytdlp"), &version, &release, &releases) {
-            (Some(p), ..) => (4, *p),
-            (None, None, ..) | (None, _, None, None) => (0, 0.0),
-            // None yet (newer Python packages don't carry it): Get.
-            (None, Some(v), _, _) if v.is_empty() => (1, 0.0),
-            (None, Some(v), Some(r), _) if r.version.as_str() > v.as_str() => (3, 0.0),
-            (None, Some(_), _, _) => (2, 0.0),
-        };
-        rows.insert(
-            1,
-            HelperPackage {
-                key: "ytdlp".into(),
-                installed: version.unwrap_or_default().into(),
-                latest: release.as_ref().map(|r| r.version.clone()).unwrap_or_default().into(),
-                size: release.as_ref().map(|r| crate::links::format_size(r.size)).unwrap_or_default().into(),
-                state: state.0,
-                progress: state.1,
-            },
-        );
-        // gallery-dl, which runs on the same Python.
-        let version = crate::gallerydl::installed_version();
-        let checked = GALLERYDL.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        let release = checked.as_ref().and_then(|r| r.as_ref().ok()).cloned();
-        let state = match (in_progress.get("gallerydl"), &version, &release) {
-            (Some(p), ..) => (4, *p),
-            (None, None, Some(_)) => (1, 0.0),
-            (None, None, None) if matches!(checked, Some(Err(_))) => (7, 0.0),
-            (None, None, None) => (0, 0.0),
-            (None, Some(v), Some(r)) if newer(&r.version, v) => (3, 0.0),
-            (None, Some(_), _) => (2, 0.0),
-        };
-        rows.insert(
-            2,
-            HelperPackage {
-                key: "gallerydl".into(),
-                installed: version.unwrap_or_default().into(),
-                latest: release.as_ref().map(|r| r.version.clone()).unwrap_or_default().into(),
-                size: release.as_ref().map(|r| crate::links::format_size(r.size)).unwrap_or_default().into(),
-                state: state.0,
-                progress: state.1,
-            },
-        );
-    }
+    // yt-dlp and gallery-dl, a group of their own: they run on Python, and
+    // can't be had without it (greyed out, "Needs Python").
+    let python = installed.contains_key("python");
+    let mut tools = Vec::new();
+    let version = YTDLP_VERSION.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let release = match &releases {
+        Some(Ok(map)) => map.get("ytdlp").cloned(),
+        _ => None,
+    };
+    let state = match (in_progress.get("ytdlp"), &version, &release, &releases) {
+        _ if !python => (9, 0.0),
+        (Some(p), ..) => (4, *p),
+        (None, None, ..) | (None, _, None, None) => (0, 0.0),
+        // None yet (newer Python packages don't carry it): Get.
+        (None, Some(v), _, _) if v.is_empty() => (1, 0.0),
+        (None, Some(v), Some(r), _) if r.version.as_str() > v.as_str() => (3, 0.0),
+        (None, Some(_), _, _) => (2, 0.0),
+    };
+    tools.push(HelperPackage {
+        key: "ytdlp".into(),
+        installed: version.unwrap_or_default().into(),
+        latest: release.as_ref().map(|r| r.version.clone()).unwrap_or_default().into(),
+        size: release.as_ref().map(|r| crate::links::format_size(r.size)).unwrap_or_default().into(),
+        state: state.0,
+        progress: state.1,
+    });
+    // gallery-dl, which runs on the same Python.
+    let version = crate::gallerydl::installed_version();
+    let checked = GALLERYDL.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let release = checked.as_ref().and_then(|r| r.as_ref().ok()).cloned();
+    let state = match (in_progress.get("gallerydl"), &version, &release) {
+        _ if !python => (9, 0.0),
+        (Some(p), ..) => (4, *p),
+        (None, None, Some(_)) => (1, 0.0),
+        (None, None, None) if matches!(checked, Some(Err(_))) => (7, 0.0),
+        (None, None, None) => (0, 0.0),
+        (None, Some(v), Some(r)) if newer(&r.version, v) => (3, 0.0),
+        (None, Some(_), _) => (2, 0.0),
+    };
+    tools.push(HelperPackage {
+        key: "gallerydl".into(),
+        installed: version.unwrap_or_default().into(),
+        latest: release.as_ref().map(|r| r.version.clone()).unwrap_or_default().into(),
+        size: release.as_ref().map(|r| crate::links::format_size(r.size)).unwrap_or_default().into(),
+        state: state.0,
+        progress: state.1,
+    });
 
     UI.with(|u| {
         if let Some(ui) = u.borrow().as_ref().and_then(|w| w.upgrade()) {
             ui.global::<AppSettings>().set_helper_packages(ModelRc::new(VecModel::from(rows)));
+            ui.global::<AppSettings>().set_python_tools(ModelRc::new(VecModel::from(tools)));
             // yt-dlp may have just arrived (or gone).
             ui.global::<crate::Links>().set_ytdlp_available(crate::platform::ytdlp_ready());
         }

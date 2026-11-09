@@ -4,7 +4,7 @@ import { AppSettings, HelperPackage } from "../../globals/AppSettings.slint";
 import { ThemeSettings } from "../../themes/theme.slint";
 import { ActionButton } from "../../components/Buttons.slint";
 import { AnimatedPopup } from "../../components/AnimatedPopup.slint";
-import { SettingsCard, SettingsLayout } from "../SettingsCard.slint";
+import { SectionHeader, SettingsCard, SettingsLayout } from "../SettingsCard.slint";
 
 // One yt-dlp helper app: what it is, its state, and what tapping does.
 component HelperRow inherits SettingsCard {
@@ -19,7 +19,9 @@ component HelperRow inherits SettingsCard {
         : root.package.state == 3 ? @tr("Update")
         : root.package.state == 5 ? @tr("Install") : "";
 
-    highlighted: ta.has-hover;
+    // yt-dlp or gallery-dl without Python: there, but out of reach.
+    opacity: root.package.state == 9 ? 0.5 : 1;
+    highlighted: ta.has-hover && root.package.state != 9;
 
     ta := TouchArea {
         clicked => { root.clicked(); }
@@ -60,6 +62,7 @@ component HelperRow inherits SettingsCard {
                     : root.package.state == 5 ? @tr("Downloaded · tap to install")
                     : root.package.state == 6 ? @tr("Not available for this device")
                     : root.package.state == 8 ? @tr("Installing…")
+                    : root.package.state == 9 ? @tr("Needs Python: install it above")
                     : @tr("Couldn't check for packages");
                 font-size: 13px;
                 color: root.package.state == 2 ? ThemeSettings.primary_accent.transparentize(30%) : root.text_color.transparentize(40%);
@@ -214,6 +217,11 @@ export component PackageSettings inherits Rectangle {
             // Room under the last item, so it doesn't end at the edge.
             padding-bottom: 24px;
 
+            // Android: YTDLnis's packages, then what runs on their Python.
+            if AppSettings.python_tools.length > 0: SectionHeader {
+                text: @tr("YTDLnis's packages");
+                first: true;
+            }
             for package[i] in AppSettings.helper_packages: HelperRow {
                 first: i == 0;
                 last: i == AppSettings.helper_packages.length - 1;
@@ -233,6 +241,18 @@ export component PackageSettings inherits Rectangle {
                         : @tr("Media from most sites needs these. Eddy can install them in its own folder; copies you already have are used too.");
                     text_color: root.text_color;
                 }
+            }
+
+            // yt-dlp and gallery-dl: greyed out until Python's installed.
+            if AppSettings.python_tools.length > 0: SectionHeader {
+                text: @tr("Downloaders");
+            }
+            for package[i] in AppSettings.python_tools: HelperRow {
+                first: i == 0;
+                last: i == AppSettings.python_tools.length - 1;
+                package: package;
+                text_color: root.text_color;
+                clicked => { root.helper_tapped(package); }
             }
         }
     }

@@ -552,6 +552,27 @@ msgstr "Options de téléchargement des romans web"
 msgid "Manage external packages"
 msgstr "Gérer les paquets externes"
 
+msgid "YTDLnis's packages"
+msgstr "Paquets de YTDLnis"
+
+msgid "Downloaders"
+msgstr "Téléchargeurs"
+
+msgid "Needs Python: install it above"
+msgstr "Nécessite Python : installez-le ci-dessus"
+
+msgid "Queue"
+msgstr "File d’attente"
+
+msgid "Each download"
+msgstr "Chaque téléchargement"
+
+msgid "A download's own options can change these for it."
+msgstr "Les options d’un téléchargement peuvent les changer pour lui."
+
+msgid "Links and app"
+msgstr "Liens et application"
+
 msgid "Manage media tools"
 msgstr "Gérer les outils média"
 
