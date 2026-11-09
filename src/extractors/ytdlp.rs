@@ -75,14 +75,10 @@ pub async fn get_info(url: &str) -> Result<MediaInfo, String> {
         // --no-quiet: yt-dlp says what it's doing (on stdout, before the
         // JSON, which comes last on a line of its own). A playlist takes a
         // while, reading each entry, so that's shown as it goes.
-        let mut command = crate::platform::ytdlp_command().ok_or_else(|| std::io::Error::other("yt-dlp isn't available"))?;
-        let mut child = crate::children::own_group(&mut command)
-            .args(["--dump-single-json", "--no-quiet", "--skip-download", "--no-warnings", "--socket-timeout", "15"])
-            .args(cookie_args())
-            .arg(&link)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()?;
+        let mut args: Vec<String> = ["--dump-single-json", "--no-quiet", "--skip-download", "--no-warnings", "--socket-timeout", "15"].map(String::from).into();
+        args.extend(cookie_args());
+        args.push(link.clone());
+        let mut child = crate::children::spawn_tool(crate::children::Tool::Ytdlp, &args)?;
         // Stopped if nobody's waiting for it any more (children::stop_checks).
         crate::children::checking(child.id());
         let mut stderr = child.stderr.take();
@@ -109,10 +105,10 @@ pub async fn get_info(url: &str) -> Result<MediaInfo, String> {
                 }
             }
         }
-        let status = child.wait();
+        let success = child.wait();
         crate::children::checked(child.id());
-        let status = status?;
-        Ok::<_, std::io::Error>((status.success(), json, errors.join().unwrap_or_default()))
+        let success = success?;
+        Ok::<_, std::io::Error>((success, json, errors.join().unwrap_or_default()))
     })
     .await
     .map_err(|e| e.to_string())?

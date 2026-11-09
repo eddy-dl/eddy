@@ -61,7 +61,12 @@ pub fn available() -> bool {
     {
         lib_dir().join("gallery_dl").is_dir() && crate::platform::python_ready()
     }
-    #[cfg(not(target_os = "android"))]
+    // In the app's own Python.
+    #[cfg(target_os = "ios")]
+    {
+        crate::children::available(crate::children::Tool::GalleryDl)
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         command().is_some()
     }
@@ -78,14 +83,10 @@ pub async fn probe(url: &str) -> Result<Gallery, String> {
     let link = url.to_string();
     let (success, json, stderr) = tokio::task::spawn_blocking(move || {
         use std::io::Read;
-        let mut command = command().ok_or_else(|| std::io::Error::other("gallery-dl isn't available"))?;
-        let mut child = crate::children::own_group(&mut command)
-            .args(["-j", "--range", &format!("1-{CHECK_LIMIT}"), "-o", "extractor.timeout=15"])
-            .args(cookie_args())
-            .arg(&link)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()?;
+        let mut args: Vec<String> = ["-j", "--range", &format!("1-{CHECK_LIMIT}"), "-o", "extractor.timeout=15"].map(String::from).into();
+        args.extend(cookie_args());
+        args.push(link.clone());
+        let mut child = crate::children::spawn_tool(crate::children::Tool::GalleryDl, &args)?;
         // Stopped if nobody's waiting for it any more (children::stop_checks).
         crate::children::checking(child.id());
         let mut stderr = child.stderr.take();
@@ -100,10 +101,10 @@ pub async fn probe(url: &str) -> Result<Gallery, String> {
         if let Some(mut stdout) = child.stdout.take() {
             let _ = stdout.read_to_string(&mut json);
         }
-        let status = child.wait();
+        let success = child.wait();
         crate::children::checked(child.id());
-        let status = status?;
-        Ok::<_, std::io::Error>((status.success(), json, errors.join().unwrap_or_default()))
+        let success = success?;
+        Ok::<_, std::io::Error>((success, json, errors.join().unwrap_or_default()))
     })
     .await
     .map_err(|e| e.to_string())?

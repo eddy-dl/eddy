@@ -1,0 +1,834 @@
+//! The app's own Python (iOS): yt-dlp and gallery-dl run in it, as iOS
+//! starts no processes. Python.framework (BeeWare's Python-Apple-support)
+//! is embedded in the app with its standard library in `python/` and the
+//! packages in `app_packages/` (platforms/ios); it's loaded when first
+//! needed, so cargo doesn't need it to build.
+//!
+//! Each run is a thread in the one interpreter, its stdout and stderr going
+//! to pipes read as a process's would be (children::Running). sys.stdout is
+//! shared, so the bootstrap below sends each thread's writes to its own run,
+//! and threads a run starts (yt-dlp's fragment downloads) inherit that.
+//! Stopping a run raises KeyboardInterrupt in its thread, which yt-dlp takes
+//! as "Interrupted by user". gallery-dl keeps its options in globals, so its
+//! runs each have a subinterpreter of their own, which stops its run itself.
+//!
+//! FFmpeg (tfourj/SwiftFFmpeg-iOS, linked in when the build has it:
+//! `eddy_ffmpeg`, see build.rs) is ffmpeg and ffprobe as functions: the
+//! bootstrap gives yt-dlp a Popen that calls them for those two programs.
+//! It runs JavaScript (yt-dlp's YouTube challenge solver, as its QuickJS
+//! runtime, `qjs`) in iOS's own JavaScriptCore, or QuickJS-ng (compiled in
+//! when the build has it: `eddy_quickjs`) when that fails.
+
+use std::collections::HashMap;
+use std::ffi::{CString, c_char, c_int, c_ulong, c_void};
+use std::fs::File;
+use std::io::{BufRead, BufReader};
+use std::os::fd::FromRawFd;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
+
+// SwiftFFmpeg-iOS's wrapper: a run with its stdout and stderr captured, and
+// cancelling the one running.
+#[cfg(eddy_ffmpeg)]
+unsafe extern "C" {
+    fn ffmpeg_execute_with_output(argc: c_int, argv: *mut *mut c_char, out: *mut c_char, out_size: usize, err: *mut c_char, err_size: usize) -> c_int;
+    fn ffprobe_execute_with_output(argc: c_int, argv: *mut *mut c_char, out: *mut c_char, out_size: usize, err: *mut c_char, err_size: usize) -> c_int;
+    fn ffmpeg_request_cancel();
+    fn ffmpeg_clear_cancel();
+}
+
+// platforms/ios/quickjs_eval.c, with QuickJS-ng.
+#[cfg(eddy_quickjs)]
+unsafe extern "C" {
+    fn eddy_qjs_eval(source: *const c_char, length: usize, out: *mut *mut c_char, err: *mut *mut c_char) -> c_int;
+    fn eddy_qjs_free(text: *mut c_char);
+}
+
+/// The C API Eddy uses, from the framework.
+struct Api {
+    gil_ensure: unsafe extern "C" fn() -> c_int,
+    gil_release: unsafe extern "C" fn(c_int),
+    run_string: unsafe extern "C" fn(*const c_char) -> c_int,
+    set_async_exc: unsafe extern "C" fn(c_ulong, *mut c_void) -> c_int,
+    keyboard_interrupt: *mut c_void,
+}
+
+// SAFETY: the pointers are the framework's functions and a type object that
+// lives as long as the interpreter (the whole app); calls take the GIL.
+unsafe impl Send for Api {}
+unsafe impl Sync for Api {}
+
+static API: OnceLock<Result<Api, String>> = OnceLock::new();
+
+/// The app bundle (Eddy.app), where the executable is.
+fn bundle() -> PathBuf {
+    std::env::current_exe().ok().and_then(|exe| exe.parent().map(PathBuf::from)).unwrap_or_default()
+}
+
+/// Whether `module` (yt_dlp, gallery_dl) is in this build.
+pub fn has(module: &str) -> bool {
+    let bundle = bundle();
+    bundle.join("Frameworks/Python.framework/Python").is_file() && bundle.join("app_packages").join(module).is_dir()
+}
+
+/// Whether ffmpeg can run: linked into this build, with the Python that
+/// runs it (children::Tool::Ffmpeg).
+pub fn has_ffmpeg() -> bool {
+    cfg!(eddy_ffmpeg) && bundle().join("Frameworks/Python.framework/Python").is_file()
+}
+
+/// Sets up Python once: the bundle's home and search path, as Python's iOS
+/// guide has them, then the bootstrap.
+fn init() -> Result<Api, String> {
+    let bundle = bundle();
+    let library = bundle.join("Frameworks/Python.framework/Python");
+    let home = bundle.join("python");
+    // python/lib/python3.X
+    let stdlib = std::fs::read_dir(home.join("lib"))
+        .map_err(|e| format!("Python's library isn't in this build: {e}"))?
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .find(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("python3")))
+        .ok_or("Python's library isn't in this build")?;
+    let path = [stdlib.clone(), stdlib.join("lib-dynload"), bundle.join("app_packages")]
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join(":");
+    // SAFETY: set before Python starts, which reads them; nothing else in
+    // Eddy reads these.
+    unsafe {
+        std::env::set_var("PYTHONHOME", &home);
+        std::env::set_var("PYTHONPATH", path);
+        std::env::set_var("PYTHONUTF8", "1");
+        std::env::set_var("PYTHONUNBUFFERED", "1");
+        std::env::set_var("PYTHONDONTWRITEBYTECODE", "1");
+    }
+    let name = CString::new(library.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
+    // SAFETY: dlopen/dlsym on the embedded framework; each symbol is cast to
+    // its C API signature.
+    unsafe {
+        let handle = libc::dlopen(name.as_ptr(), libc::RTLD_NOW | libc::RTLD_GLOBAL);
+        if handle.is_null() {
+            return Err(format!("couldn't load Python: {}", std::ffi::CStr::from_ptr(libc::dlerror()).to_string_lossy()));
+        }
+        let symbol = |name: &str| -> Result<*mut c_void, String> {
+            let c = CString::new(name).unwrap();
+            let found = libc::dlsym(handle, c.as_ptr());
+            if found.is_null() { Err(format!("Python has no {name}")) } else { Ok(found) }
+        };
+        let initialize: unsafe extern "C" fn(c_int) = std::mem::transmute(symbol("Py_InitializeEx")?);
+        let save_thread: unsafe extern "C" fn() -> *mut c_void = std::mem::transmute(symbol("PyEval_SaveThread")?);
+        let api = Api {
+            gil_ensure: std::mem::transmute(symbol("PyGILState_Ensure")?),
+            gil_release: std::mem::transmute(symbol("PyGILState_Release")?),
+            run_string: std::mem::transmute(symbol("PyRun_SimpleString")?),
+            set_async_exc: std::mem::transmute(symbol("PyThreadState_SetAsyncExc")?),
+            keyboard_interrupt: *(symbol("PyExc_KeyboardInterrupt")? as *const *mut c_void),
+        };
+        // No signal handlers: they're the app's.
+        initialize(0);
+        let bootstrap = CString::new(BOOTSTRAP).unwrap();
+        if (api.run_string)(bootstrap.as_ptr()) != 0 {
+            return Err("Python's bootstrap failed".to_string());
+        }
+        // yt-dlp looks for the programs before running them: empty
+        // stand-ins, in a folder it's told about (--ffmpeg-location,
+        // --js-runtimes).
+        let stand_ins = PathBuf::from(super::get_app_data_dir()).join("programs");
+        let _ = std::fs::create_dir_all(&stand_ins);
+        for program in ["ffmpeg", "ffprobe", "qjs"] {
+            let _ = std::fs::write(stand_ins.join(program), "");
+        }
+        let mut setup = vec![format!("__eddy_setup({:?}, {})", stand_ins.to_string_lossy(), api.set_async_exc as usize)];
+        #[cfg(eddy_ffmpeg)]
+        setup.push(format!(
+            "__eddy_ffmpeg_setup({}, {}, {}, {})",
+            ffmpeg_execute_with_output as *const () as usize,
+            ffprobe_execute_with_output as *const () as usize,
+            ffmpeg_request_cancel as *const () as usize,
+            ffmpeg_clear_cancel as *const () as usize
+        ));
+        #[cfg(eddy_quickjs)]
+        setup.push(format!("__eddy_quickjs_setup({}, {})", eddy_qjs_eval as *const () as usize, eddy_qjs_free as *const () as usize));
+        for line in setup {
+            let line = CString::new(line).unwrap();
+            if (api.run_string)(line.as_ptr()) != 0 {
+                log::warn!(target: "ytdlp", "setting up {} failed", line.to_string_lossy());
+            }
+        }
+        // The GIL goes to whichever run needs it.
+        save_thread();
+        log::info!(target: "ytdlp", "Python started from {}", stdlib.display());
+        Ok(api)
+    }
+}
+
+fn api() -> std::io::Result<&'static Api> {
+    API.get_or_init(init).as_ref().map_err(|e| std::io::Error::other(e.clone()))
+}
+
+/// What a run's status pipe has said: its thread, and how it ended.
+#[derive(Default)]
+struct State {
+    thread: Option<c_ulong>,
+    exit: Option<i32>,
+    stop: bool,
+}
+
+struct Shared {
+    id: u32,
+    state: Mutex<State>,
+    changed: Condvar,
+}
+
+/// A run in progress (children::Running's iOS half).
+pub struct Run {
+    id: u32,
+    shared: Arc<Shared>,
+}
+
+static NEXT: AtomicU32 = AtomicU32::new(1);
+/// Runs by id, for `stop` (children::stop_checks knows them by id).
+static RUNS: Mutex<Option<HashMap<u32, Arc<Shared>>>> = Mutex::new(None);
+
+fn pipe() -> std::io::Result<(c_int, c_int)> {
+    let mut fds = [0 as c_int; 2];
+    // SAFETY: pipe(2) with room for its two descriptors.
+    if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok((fds[0], fds[1]))
+}
+
+/// Starts `module` (yt_dlp, gallery_dl) with `args`, as its command line
+/// would.
+pub fn run(module: &str, args: &[String]) -> std::io::Result<crate::children::Running> {
+    let api = api()?;
+    let (out_r, out_w) = pipe()?;
+    let (err_r, err_w) = pipe()?;
+    let (status_r, status_w) = pipe()?;
+    let id = NEXT.fetch_add(1, Ordering::SeqCst);
+    let shared = Arc::new(Shared { id, state: Mutex::new(State::default()), changed: Condvar::new() });
+    RUNS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).insert(id, Arc::clone(&shared));
+    // A JSON list of strings is a Python list literal too.
+    let call = format!(
+        "__eddy_run({id}, {out_w}, {err_w}, {status_w}, {module:?}, {})",
+        serde_json::to_string(args).map_err(std::io::Error::other)?
+    );
+    let call = CString::new(call).map_err(std::io::Error::other)?;
+    // The write ends are Python's from here (it closes them).
+    std::thread::spawn(move || {
+        // SAFETY: the API from init; the GIL is held for the call.
+        unsafe {
+            let gil = (api.gil_ensure)();
+            (api.run_string)(call.as_ptr());
+            (api.gil_release)(gil);
+        }
+    });
+    // The status pipe: the run's thread, then how it ended.
+    // SAFETY: our own read end, owned by this File from here.
+    let status = unsafe { File::from_raw_fd(status_r) };
+    let watched = Arc::clone(&shared);
+    std::thread::spawn(move || {
+        for line in BufReader::new(status).lines().map_while(Result::ok) {
+            let mut state = watched.state.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(code) = line.strip_prefix("exit ") {
+                state.exit = Some(code.trim().parse().unwrap_or(1));
+            } else if let Ok(thread) = line.trim().parse() {
+                state.thread = Some(thread);
+                // Stopped before it had started.
+                if state.stop {
+                    interrupt(thread);
+                }
+            }
+            watched.changed.notify_all();
+        }
+        let mut state = watched.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.exit.get_or_insert(1);
+        watched.changed.notify_all();
+    });
+    // SAFETY: our own read ends, owned by these Files from here.
+    let (stdout, stderr) = unsafe { (File::from_raw_fd(out_r), File::from_raw_fd(err_r)) };
+    Ok(crate::children::Running::python(Run { id, shared }, stdout, stderr))
+}
+
+fn interrupt(thread: c_ulong) {
+    if let Ok(api) = api() {
+        // SAFETY: the API from init; the GIL is held for the call.
+        unsafe {
+            let gil = (api.gil_ensure)();
+            (api.set_async_exc)(thread, api.keyboard_interrupt);
+            (api.gil_release)(gil);
+        }
+    }
+}
+
+fn stop_shared(shared: &Shared) {
+    let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
+    if state.exit.is_some() {
+        return;
+    }
+    state.stop = true;
+    let thread = state.thread;
+    drop(state);
+    if let Some(thread) = thread {
+        interrupt(thread);
+    }
+    // A merge in FFmpeg's C code doesn't see the interrupt until it ends:
+    // FFmpeg is asked to stop too, if this run is the one using it.
+    if let Ok(api) = api() {
+        let call = CString::new(format!("__eddy_stop({})", shared.id)).unwrap();
+        // SAFETY: the API from init; the GIL is held for the call (FFmpeg's
+        // run released it, so this doesn't wait for the merge).
+        unsafe {
+            let gil = (api.gil_ensure)();
+            (api.run_string)(call.as_ptr());
+            (api.gil_release)(gil);
+        }
+    }
+}
+
+/// Stops the run with this id (a link check nobody waits for any more).
+pub fn stop(id: u32) {
+    let shared = RUNS.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|runs| runs.get(&id).cloned());
+    if let Some(shared) = shared {
+        stop_shared(&shared);
+    }
+}
+
+impl Run {
+    pub fn id(&self) -> u32 {
+        self.id
+    }
+
+    /// Whether it succeeded, if it has ended.
+    pub fn try_wait(&mut self) -> Option<bool> {
+        self.shared.state.lock().unwrap_or_else(|e| e.into_inner()).exit.map(|code| code == 0)
+    }
+
+    /// Waits for it to end: whether it succeeded.
+    pub fn wait(&mut self) -> bool {
+        let mut state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        while state.exit.is_none() {
+            state = self.shared.changed.wait(state).unwrap_or_else(|e| e.into_inner());
+        }
+        state.exit == Some(0)
+    }
+
+    pub fn stop(&mut self) {
+        stop_shared(&self.shared);
+    }
+}
+
+impl Drop for Run {
+    fn drop(&mut self) {
+        if let Some(runs) = RUNS.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+            runs.remove(&self.id);
+        }
+    }
+}
+
+/// Run once, in __main__: per-thread stdout/stderr, inherited by the threads
+/// a run starts, and `__eddy_run`, which runs a module's command line with
+/// its output to the run's pipes and its thread and exit status to the
+/// status pipe.
+const BOOTSTRAP: &str = r#"
+import io, os, sys, threading
+
+_eddy = threading.local()
+
+class _EddyStream(io.TextIOBase):
+    """Writes to the stream of the run this thread belongs to."""
+    def __init__(self, which, fallback):
+        self._which, self._fallback = which, fallback
+    def _target(self):
+        return getattr(_eddy, self._which, None) or self._fallback
+    def write(self, text):
+        return self._target().write(text)
+    def flush(self):
+        self._target().flush()
+    def isatty(self):
+        return False
+    def fileno(self):
+        return self._target().fileno()
+    @property
+    def encoding(self):
+        return "utf-8"
+    @property
+    def errors(self):
+        return "replace"
+    @property
+    def buffer(self):
+        return self._target().buffer
+
+sys.stdout = _EddyStream("out", sys.stdout)
+sys.stderr = _EddyStream("err", sys.stderr)
+
+_eddy_start = threading.Thread.start
+def _eddy_inherit(self, *args, **kwargs):
+    out, err = getattr(_eddy, "out", None), getattr(_eddy, "err", None)
+    run_id = getattr(_eddy, "run_id", None)
+    run = self.run
+    def run_in_its_run():
+        _eddy.out, _eddy.err, _eddy.run_id = out, err, run_id
+        run()
+    self.run = run_in_its_run
+    return _eddy_start(self, *args, **kwargs)
+threading.Thread.start = _eddy_inherit
+
+# FFmpeg, as functions (set up when the app has it): one run at a time, as
+# its command-line code keeps global state.
+_eddy_ff = None
+_eddy_ff_lock = threading.Lock()
+# The stand-in programs' folder.
+_eddy_dir = None
+
+def __eddy_setup(stand_ins, set_async_exc):
+    global _eddy_dir, _eddy_set_async_exc
+    _eddy_dir = stand_ins
+    _eddy_set_async_exc = set_async_exc
+
+def __eddy_ffmpeg_setup(run_ffmpeg, run_ffprobe, cancel, clear):
+    global _eddy_ff
+    import ctypes
+    run = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_char_p),
+                           ctypes.c_char_p, ctypes.c_size_t, ctypes.c_char_p, ctypes.c_size_t)
+    void = ctypes.CFUNCTYPE(None)
+    _eddy_ff = {"ffmpeg": run(run_ffmpeg), "ffprobe": run(run_ffprobe),
+                "cancel": void(cancel), "clear": void(clear)}
+
+# JavaScript: iOS's JavaScriptCore first, QuickJS-ng (when the app has it)
+# if that fails. Both get console.log as their output.
+_eddy_qjs = None
+
+def __eddy_quickjs_setup(evaluate, free):
+    global _eddy_qjs
+    import ctypes
+    _eddy_qjs = (
+        ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_char_p, ctypes.c_size_t,
+                         ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_void_p))(evaluate),
+        ctypes.CFUNCTYPE(None, ctypes.c_void_p)(free),
+    )
+
+_EDDY_CONSOLE = """
+var __eddyOut = [], __eddyErr = [];
+(function () {
+  function line(args) { return Array.prototype.map.call(args, String).join(' '); }
+  var out = function () { __eddyOut.push(line(arguments)); };
+  var err = function () { __eddyErr.push(line(arguments)); };
+  globalThis.console = { log: out, info: out, debug: out, warn: err, error: err };
+})();
+"""
+
+def _eddy_jsc(source):
+    """Runs `source` in JavaScriptCore: (output, errors), or raises."""
+    import ctypes
+    P = ctypes.c_void_p
+    jsc = ctypes.CDLL("/System/Library/Frameworks/JavaScriptCore.framework/JavaScriptCore")
+    jsc.JSGlobalContextCreate.restype, jsc.JSGlobalContextCreate.argtypes = P, [P]
+    jsc.JSGlobalContextRelease.argtypes = [P]
+    jsc.JSStringCreateWithUTF8CString.restype = P
+    jsc.JSStringCreateWithUTF8CString.argtypes = [ctypes.c_char_p]
+    jsc.JSStringRelease.argtypes = [P]
+    jsc.JSEvaluateScript.restype = P
+    jsc.JSEvaluateScript.argtypes = [P, P, P, P, ctypes.c_int, ctypes.POINTER(P)]
+    jsc.JSValueToStringCopy.restype = P
+    jsc.JSValueToStringCopy.argtypes = [P, P, ctypes.POINTER(P)]
+    jsc.JSStringGetMaximumUTF8CStringSize.restype = ctypes.c_size_t
+    jsc.JSStringGetMaximumUTF8CStringSize.argtypes = [P]
+    jsc.JSStringGetUTF8CString.restype = ctypes.c_size_t
+    jsc.JSStringGetUTF8CString.argtypes = [P, ctypes.c_char_p, ctypes.c_size_t]
+    ctx = jsc.JSGlobalContextCreate(None)
+    def text(value):
+        exception = P()
+        string = jsc.JSValueToStringCopy(ctx, value, ctypes.byref(exception))
+        if not string:
+            return ""
+        size = jsc.JSStringGetMaximumUTF8CStringSize(string)
+        buffer = ctypes.create_string_buffer(size)
+        jsc.JSStringGetUTF8CString(string, buffer, size)
+        jsc.JSStringRelease(string)
+        return buffer.value.decode("utf-8", "replace")
+    def evaluate(code):
+        script = jsc.JSStringCreateWithUTF8CString(code.encode("utf-8"))
+        exception = P()
+        value = jsc.JSEvaluateScript(ctx, script, None, None, 1, ctypes.byref(exception))
+        jsc.JSStringRelease(script)
+        if exception.value:
+            raise RuntimeError(text(exception))
+        return value
+    try:
+        evaluate(_EDDY_CONSOLE)
+        evaluate(source)
+        return text(evaluate("__eddyOut.join('\\n')")), text(evaluate("__eddyErr.join('\\n')"))
+    finally:
+        jsc.JSGlobalContextRelease(ctx)
+
+def _eddy_quickjs(source):
+    """Runs `source` in QuickJS-ng: (output, errors), or raises."""
+    import ctypes
+    evaluate, free = _eddy_qjs
+    data = source.encode("utf-8")
+    out, err = ctypes.c_void_p(), ctypes.c_void_p()
+    status = evaluate(data, len(data), ctypes.byref(out), ctypes.byref(err))
+    try:
+        output = ctypes.string_at(out.value).decode("utf-8", "replace") if out.value else ""
+        errors = ctypes.string_at(err.value).decode("utf-8", "replace") if err.value else ""
+    finally:
+        free(out); free(err)
+    if status:
+        raise RuntimeError(errors.strip() or f"QuickJS failed ({status})")
+    return output, errors
+
+_eddy_stack_lock = threading.Lock()
+
+def _eddy_big_stack(function, *args):
+    """Runs `function` on a thread with a big stack: the solver recurses
+    deeply, and iOS gives threads 512 KB."""
+    result = {}
+    def go():
+        try:
+            result["value"] = function(*args)
+        except BaseException as e:
+            result["error"] = e
+    with _eddy_stack_lock:
+        before = threading.stack_size(64 << 20)
+        try:
+            thread = threading.Thread(target=go, daemon=True)
+            thread.start()
+        finally:
+            threading.stack_size(before)
+    thread.join()
+    if "error" in result:
+        raise result["error"]
+    return result["value"]
+
+def _eddy_js_run(source):
+    """Runs a script: (exit code, output, errors) as bytes."""
+    engines = [("JavaScriptCore", _eddy_jsc)]
+    if _eddy_qjs is not None:
+        engines.append(("QuickJS", _eddy_quickjs))
+    failures = []
+    for name, engine in engines:
+        try:
+            out, err = _eddy_big_stack(engine, source)
+            if failures:
+                sys.stderr.write(f"[eddy] ran the script in {name} after: {'; '.join(failures)}\n")
+            return 0, (out + "\n" if out else "").encode(), (err + "\n" if err else "").encode()
+        except Exception as e:
+            failures.append(f"{name}: {str(e).strip()[:300]}")
+    return 1, b"", ("\n".join(failures) + "\n").encode()
+
+# The run using FFmpeg now (its id), for __eddy_stop.
+_eddy_ff_owner = None
+
+def _eddy_ff_run(tool, args):
+    """Runs ffmpeg or ffprobe: (exit code, stdout, stderr) as bytes."""
+    global _eddy_ff_owner
+    import ctypes
+    argv = [tool.encode()] + [os.fsencode(a) if isinstance(a, str) else bytes(a) for a in args]
+    array = (ctypes.c_char_p * len(argv))(*argv)
+    out = ctypes.create_string_buffer(16 << 20)
+    err = ctypes.create_string_buffer(1 << 20)
+    # Waited for in steps: a run stopped while it waits (its interrupt is
+    # only seen between steps) ends then, not when FFmpeg is free.
+    while not _eddy_ff_lock.acquire(timeout=0.2):
+        pass
+    try:
+        _eddy_ff["clear"]()
+        _eddy_ff_owner = getattr(_eddy, "run_id", None)
+        try:
+            code = _eddy_ff[tool](len(argv), array, out, len(out), err, len(err))
+        finally:
+            _eddy_ff_owner = None
+    finally:
+        _eddy_ff_lock.release()
+    return code, out.value, err.value
+
+def __eddy_stop(run_id):
+    """Run `run_id` is being stopped: FFmpeg too, if it's that run's, and
+    its subinterpreter if it's gallery-dl's (or it's kept from starting)."""
+    if _eddy_ff is not None and run_id is not None and _eddy_ff_owner == run_id:
+        _eddy_ff["cancel"]()
+    with _eddy_subs_lock:
+        stop_w = _eddy_subs.get(run_id)
+        if stop_w is None:
+            _eddy_stopped.add(run_id)
+        else:
+            os.write(stop_w, b"s")
+
+class _EddyPopen:
+    """yt-dlp's Popen for ffmpeg and ffprobe, run in-process (iOS starts no
+    programs: anything else isn't found)."""
+    def __init__(self, args, *_, stdout=None, stderr=None, text=False,
+                 universal_newlines=False, **__):
+        import shlex, subprocess
+        argv = shlex.split(args) if isinstance(args, str) else [os.fsdecode(a) for a in args]
+        tool = os.path.basename(argv[0]) if argv else ""
+        if not (tool == "qjs" or (_eddy_ff is not None and tool in ("ffmpeg", "ffprobe"))):
+            raise FileNotFoundError(2, "iOS runs no programs", argv[0] if argv else "")
+        self.args, self.pid, self.returncode = args, 0, None
+        self.stdin = self.stdout = self.stderr = None
+        self._pipe_out = stdout == subprocess.PIPE
+        self._pipe_err = stderr == subprocess.PIPE
+        self._merge = stderr == subprocess.STDOUT
+        self._text = text or universal_newlines
+        self._result = None
+        self._tool, self._argv = tool, argv[1:]
+    def _finish(self):
+        if self._result is None:
+            if self._tool == "qjs":
+                code, out, err = self._qjs()
+            else:
+                code, out, err = _eddy_ff_run(self._tool, self._argv)
+            self.returncode = code
+            if self._merge:
+                out, err = out + err, b""
+            if self._text:
+                out, err = out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
+            # Not piped: the run's own output, as a program's would be.
+            if not self._pipe_out and not self._merge and out:
+                sys.stdout.write(out if self._text else out.decode("utf-8", "replace"))
+                out = None
+            if not self._pipe_err and not self._merge and err:
+                sys.stderr.write(err if self._text else err.decode("utf-8", "replace"))
+                err = None
+            self._result = (out if (self._pipe_out or self._merge) else None,
+                            err if self._pipe_err else None)
+        return self._result
+    def _qjs(self):
+        # yt-dlp asks QuickJS for --help (its version), then runs --script.
+        if "--help" in self._argv:
+            return 1, b"QuickJS-ng version 0.18.0\n", b""
+        if "--script" in self._argv:
+            path = self._argv[self._argv.index("--script") + 1]
+            with open(path, encoding="utf-8") as script:
+                return _eddy_js_run(script.read())
+        return 1, b"", b"Eddy's qjs runs --script only\n"
+    def communicate(self, input=None, timeout=None):
+        return self._finish()
+    def communicate_or_kill(self, *args, **kwargs):
+        return self._finish()
+    def wait(self, timeout=None):
+        self._finish()
+        return self.returncode
+    def poll(self):
+        return self.returncode
+    def kill(self):
+        _eddy_ff["cancel"]()
+    terminate = kill
+    def __enter__(self):
+        return self
+    def __exit__(self, *_):
+        self.wait()
+    @classmethod
+    def run(cls, *args, timeout=None, **kwargs):
+        with cls(*args, **kwargs) as proc:
+            stdout, stderr = proc.communicate_or_kill(timeout=timeout)
+            return stdout or "", stderr or "", proc.returncode
+
+_eddy_patched = False
+
+def _eddy_patch_ytdlp():
+    """yt-dlp's modules use their own name for Popen: each gets ours."""
+    global _eddy_patched
+    if _eddy_patched:
+        return
+    import yt_dlp.utils
+    original = yt_dlp.utils.Popen
+    for name, module in list(sys.modules.items()):
+        if (name == "yt_dlp" or name.startswith("yt_dlp.")) and getattr(module, "Popen", None) is original:
+            module.Popen = _EddyPopen
+    _eddy_patched = True
+
+# gallery-dl keeps its options (the -D folder too) in one global config and
+# reads sys.argv: each run has a subinterpreter of its own, with its own
+# gallery-dl, sys and GIL. Where there are none, runs wait for each other.
+_eddy_argv = threading.Lock()
+# PyThreadState_SetAsyncExc, from __eddy_setup: a subinterpreter stops its
+# run with it, as Eddy's interrupt only reaches this interpreter's threads.
+_eddy_set_async_exc = None
+# The stop pipe's write end of each gallery-dl run, and the runs stopped
+# before they had one.
+_eddy_subs = {}
+_eddy_stopped = set()
+_eddy_subs_lock = threading.Lock()
+
+# Run in the subinterpreter: the run's output to its pipes (descriptors of
+# its own), and a thread that stops the run when the stop pipe says so ("s";
+# "d" is the run saying it's done). The exit code goes back on `result`.
+_EDDY_GALLERY_DL = r'''
+import ctypes, os, sys, threading
+_set = ctypes.PYFUNCTYPE(ctypes.c_int, ctypes.c_ulong, ctypes.c_void_p)(set_async_exc)
+sys.stdout = open(out_fd, "w", encoding="utf-8", errors="replace", buffering=1)
+sys.stderr = open(err_fd, "w", encoding="utf-8", errors="replace", buffering=1)
+sys.argv = ["gallery-dl", *args]
+ident = threading.get_ident()
+guard = threading.Lock()
+done = False
+def watch():
+    while True:
+        said = os.read(stop_r, 1)
+        with guard:
+            if done or not said:
+                return
+            if said == b"s":
+                _set(ident, id(KeyboardInterrupt))
+                return
+watcher = threading.Thread(target=watch)
+watcher.start()
+code = 0
+try:
+    import gallery_dl
+    code = gallery_dl.main() or 0
+except SystemExit as e:
+    if e.code is None:
+        code = 0
+    elif isinstance(e.code, int):
+        code = e.code
+    else:
+        sys.stderr.write(f"{e.code}\n")
+        code = 1
+except KeyboardInterrupt:
+    code = 130
+except BaseException:
+    import traceback
+    traceback.print_exc()
+    code = 1
+# No stop from here on, and none left pending (a NULL exception clears it).
+while True:
+    try:
+        with guard:
+            done = True
+        _set(ident, None)
+        break
+    except KeyboardInterrupt:
+        pass
+os.write(stop_w, b"d")
+watcher.join()
+for stream in (sys.stdout, sys.stderr):
+    try:
+        stream.close()
+    except Exception:
+        pass
+result.put(code)
+'''
+
+_eddy_interpreters_checked = None
+
+def _eddy_interpreters():
+    """concurrent.interpreters, if a subinterpreter starts (tried once), or
+    None."""
+    global _eddy_interpreters_checked
+    with _eddy_subs_lock:
+        if _eddy_interpreters_checked is None:
+            try:
+                from concurrent import interpreters
+                interpreters.create().close()
+                _eddy_interpreters_checked = interpreters
+            except Exception as e:
+                sys.__stderr__.write(f"[eddy] no subinterpreters: {e}\n")
+                _eddy_interpreters_checked = False
+        return _eddy_interpreters_checked or None
+
+def _eddy_gallery_dl(run_id, out_fd, err_fd, status, args):
+    """Runs gallery-dl in a subinterpreter of its own: its exit code."""
+    interpreters = _eddy_interpreters() if _eddy_set_async_exc is not None else None
+    if interpreters is None:
+        import gallery_dl
+        status.write(f"{threading.get_ident()}\n")
+        with _eddy_argv:
+            sys.argv = ["gallery-dl", *args]
+            return gallery_dl.main() or 0
+    stop_r, stop_w = os.pipe()
+    with _eddy_subs_lock:
+        if run_id in _eddy_stopped:
+            _eddy_stopped.discard(run_id)
+            os.close(stop_r)
+            os.close(stop_w)
+            return 130
+        _eddy_subs[run_id] = stop_w
+    interp = None
+    try:
+        interp = interpreters.create()
+        result = interpreters.create_queue()
+        # Python's own pipes are closed by this thread: the subinterpreter's
+        # are copies.
+        interp.prepare_main(out_fd=os.dup(out_fd), err_fd=os.dup(err_fd), stop_r=stop_r,
+                            stop_w=stop_w, args=tuple(args), result=result,
+                            set_async_exc=_eddy_set_async_exc)
+        interp.exec(_EDDY_GALLERY_DL)
+        return result.get_nowait()
+    finally:
+        with _eddy_subs_lock:
+            _eddy_subs.pop(run_id, None)
+        # Closing the write end ends the watcher if the run didn't get to.
+        os.close(stop_w)
+        if interp is not None:
+            interp.close()
+        os.close(stop_r)
+
+def __eddy_run(run_id, out_fd, err_fd, status_fd, module, args):
+    out = open(out_fd, "w", encoding="utf-8", errors="replace", buffering=1)
+    err = open(err_fd, "w", encoding="utf-8", errors="replace", buffering=1)
+    status = open(status_fd, "w", buffering=1)
+    # A gallery-dl run's thread is in its subinterpreter, which Eddy's
+    # interrupt doesn't reach: __eddy_stop stops it (_eddy_gallery_dl).
+    if module != "gallery_dl":
+        status.write(f"{threading.get_ident()}\n")
+    _eddy.out, _eddy.err, _eddy.run_id = out, err, run_id
+    code = 0
+    try:
+        if module == "yt_dlp":
+            import yt_dlp
+            _eddy_patch_ytdlp()
+            if _eddy_ff is not None and "--ffmpeg-location" not in args:
+                args = ["--ffmpeg-location", _eddy_dir, *args]
+            # YouTube's challenges: the in-app engines, as yt-dlp's QuickJS.
+            if "--js-runtimes" not in args:
+                args = ["--js-runtimes", f"quickjs:{os.path.join(_eddy_dir, 'qjs')}", *args]
+            yt_dlp.main(args)
+        elif module == "ffmpeg":
+            # Eddy's own ffmpeg runs (downloader::media): as the program.
+            if _eddy_ff is None:
+                raise RuntimeError("FFmpeg isn't in this build")
+            code, output, errors = _eddy_ff_run("ffmpeg", args)
+            out.write(output.decode("utf-8", "replace"))
+            err.write(errors.decode("utf-8", "replace"))
+        elif module == "js":
+            # A script of Eddy's own (extractors::packed): its output.
+            code, output, errors = _eddy_js_run(args[0])
+            out.write(output.decode("utf-8", "replace"))
+            err.write(errors.decode("utf-8", "replace"))
+        elif module == "gallery_dl":
+            code = _eddy_gallery_dl(run_id, out_fd, err_fd, status, args)
+        else:
+            raise ValueError(f"no such tool: {module}")
+    except SystemExit as e:
+        if e.code is None:
+            code = 0
+        elif isinstance(e.code, int):
+            code = e.code
+        else:
+            err.write(f"{e.code}\n")
+            code = 1
+    except KeyboardInterrupt:
+        code = 130
+    except BaseException:
+        import traceback
+        traceback.print_exc(file=err)
+        code = 1
+    finally:
+        _eddy.out = _eddy.err = _eddy.run_id = None
+        with _eddy_subs_lock:
+            _eddy_stopped.discard(run_id)
+        for stream in (out, err):
+            try:
+                stream.close()
+            except Exception:
+                pass
+        status.write(f"exit {code}\n")
+        status.close()
+"#;

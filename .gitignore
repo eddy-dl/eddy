@@ -18,3 +18,11 @@
 # Local editor / assistant settings
 /.claude/
 /.helix/
+/platforms/ios/Eddy.xcodeproj/
+/platforms/ios/build/
+/platforms/ios/Info.plist
+/platforms/ios/Python.xcframework/
+/platforms/ios/app_packages/
+/platforms/ios/SwiftFFmpeg-iOS/
+/platforms/ios/quickjs/
+/platforms/ios/Assets.xcassets/AppIcon.appiconset/icon-1024.png

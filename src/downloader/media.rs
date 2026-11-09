@@ -55,7 +55,7 @@ impl Job {
 struct Control {
     cancelled: Arc<AtomicBool>,
     abort: Option<tokio::task::AbortHandle>,
-    child: Option<Arc<Mutex<Option<std::process::Child>>>>,
+    child: Option<Arc<Mutex<Option<crate::children::Running>>>>,
     /// The aria2 download fetching a native extractor's file right now.
     aria: Option<String>,
 }
@@ -148,7 +148,7 @@ pub fn cancel(id: u64) {
         if let Some(child) = control.child {
             if let Some(child) = child.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
                 // With the ffmpeg it may be running.
-                crate::children::kill_tree(child);
+                child.kill_tree();
             }
         }
         // Its file and .aria2 stay, for carrying on.
@@ -233,12 +233,12 @@ fn start_ytdlp(
     let runs = extractors::ytdlp::download_args(url, media, dir, name.as_deref(), settings);
     // A playlist's files, for "3 of 12" (yt-dlp says when each starts).
     let count = if media.playlist { if media.items.is_empty() { media.entries } else { media.items.len() } } else { 0 };
-    if crate::platform::ytdlp_command().is_none() {
+    if !crate::children::available(crate::children::Tool::Ytdlp) {
         return Err("yt-dlp isn't available".to_string());
     }
     let (job, cancelled) = begin(&label);
     // The running yt-dlp, shared with cancel(), which kills it.
-    let child: Arc<Mutex<Option<std::process::Child>>> = Arc::new(Mutex::new(None));
+    let child: Arc<Mutex<Option<crate::children::Running>>> = Arc::new(Mutex::new(None));
     with_jobs(|jobs| {
         if let Some((_, control)) = jobs.get_mut(&job) {
             control.child = Some(Arc::clone(&child));
@@ -248,13 +248,7 @@ fn start_ytdlp(
         let mut files = Vec::new();
         let mut failure = None;
         for args in runs {
-            let spawned = crate::platform::ytdlp_command().ok_or_else(|| std::io::Error::other("yt-dlp isn't available")).and_then(|mut c| {
-                crate::children::own_group(&mut c)
-                    .args(&args)
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::piped())
-                    .spawn()
-            });
+            let spawned = crate::children::spawn_tool(crate::children::Tool::Ytdlp, &args);
             let mut running = match spawned {
                 Ok(running) => running,
                 Err(e) => {
@@ -267,7 +261,7 @@ fn start_ytdlp(
             if cancelled.load(Ordering::SeqCst) {
                 // Cancelled between two runs: this one goes too.
                 if let Some(mut c) = child.lock().unwrap_or_else(|e| e.into_inner()).take() {
-                    crate::children::kill_tree(&mut c);
+                    c.kill_tree();
                 }
                 break;
             }
@@ -292,7 +286,7 @@ fn start_ytdlp(
                 break;
             };
             match taken.wait_with_output() {
-                Ok(output) if output.status.success() => {}
+                Ok(output) if output.success => {}
                 Ok(output) => {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     log_stderr(&label, &stderr);
@@ -324,7 +318,7 @@ fn start_ytdlp(
 pub(super) fn start_gallery(request: &DownloadRequest, dir: &str, name: Option<String>, deliver: Option<Deliver>) -> Result<u64, String> {
     use std::io::BufRead;
     let gallery: crate::gallerydl::GalleryRequest = serde_json::from_str(&request.format).unwrap_or_default();
-    if crate::gallerydl::command().is_none() {
+    if !crate::children::available(crate::children::Tool::GalleryDl) {
         return Err("gallery-dl isn't available".to_string());
     }
     let count = if gallery.items.is_empty() { gallery.count } else { gallery.items.len() };
@@ -343,20 +337,14 @@ pub(super) fn start_gallery(request: &DownloadRequest, dir: &str, name: Option<S
     };
     let args = crate::gallerydl::download_args(&request.url, &gallery, &folder.to_string_lossy());
     let (record, (job, cancelled)) = (request.id, begin(&label));
-    let child: Arc<Mutex<Option<std::process::Child>>> = Arc::new(Mutex::new(None));
+    let child: Arc<Mutex<Option<crate::children::Running>>> = Arc::new(Mutex::new(None));
     with_jobs(|jobs| {
         if let Some((_, control)) = jobs.get_mut(&job) {
             control.child = Some(Arc::clone(&child));
         }
     });
     std::thread::spawn(move || {
-        let spawned = crate::gallerydl::command().ok_or_else(|| std::io::Error::other("gallery-dl isn't available")).and_then(|mut c| {
-            crate::children::own_group(&mut c)
-                .args(&args)
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .spawn()
-        });
+        let spawned = crate::children::spawn_tool(crate::children::Tool::GalleryDl, &args);
         let mut running = match spawned {
             Ok(running) => running,
             Err(e) => {
@@ -390,7 +378,7 @@ pub(super) fn start_gallery(request: &DownloadRequest, dir: &str, name: Option<S
         // gallery-dl's exit status says something failed, even when most
         // files came: a failure only when nothing did.
         let failure = match output {
-            Some(Ok(output)) if !output.status.success() && files.is_empty() => {
+            Some(Ok(output)) if !output.success && files.is_empty() => {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 log_stderr(&label, &stderr);
                 let last = stderr.lines().rev().map(str::trim).find(|l| !l.is_empty()).unwrap_or("gallery-dl failed");
@@ -621,7 +609,13 @@ pub(super) fn link_expired(error: &str) -> bool {
 /// Runs ffmpeg for `job`, which can stop it: it's the job's child while it
 /// runs (`cancel` kills it, like yt-dlp), so a pause doesn't leave it going.
 async fn ffmpeg(job: u64, args: Vec<String>) -> Result<(), String> {
-    let slot: Arc<Mutex<Option<std::process::Child>>> = Arc::new(Mutex::new(None));
+    run_tool(job, crate::children::Tool::Ffmpeg, args).await
+}
+
+/// Runs `tool` for `job` (see `ffmpeg`): Ok, or the last line it printed on
+/// stderr.
+async fn run_tool(job: u64, tool: crate::children::Tool, args: Vec<String>) -> Result<(), String> {
+    let slot: Arc<Mutex<Option<crate::children::Running>>> = Arc::new(Mutex::new(None));
     with_jobs(|jobs| {
         if let Some((_, control)) = jobs.get_mut(&job) {
             control.child = Some(Arc::clone(&slot));
@@ -629,12 +623,9 @@ async fn ffmpeg(job: u64, args: Vec<String>) -> Result<(), String> {
     });
     let (status, stderr) = tokio::task::spawn_blocking(move || {
         use std::io::Read;
-        let mut command = crate::platform::ffmpeg_command().ok_or_else(|| std::io::Error::other("ffmpeg isn't available"))?;
-        let mut child = crate::children::own_group(&mut command)
-            .args(&args)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::piped())
-            .spawn()?;
+        // In-process on iOS (children::spawn_tool). Its stdout isn't used.
+        let mut child = crate::children::spawn_tool(tool, &args)?;
+        drop(child.stdout.take());
         let mut err = child.stderr.take();
         let errors = std::thread::spawn(move || {
             let mut text = String::new();
@@ -659,33 +650,51 @@ async fn ffmpeg(job: u64, args: Vec<String>) -> Result<(), String> {
     })
     .await
     .map_err(|e| e.to_string())?
-    .map_err(|e| format!("Couldn't run ffmpeg: {e}"))?;
+    .map_err(|e| format!("Couldn't run {tool}: {e}"))?;
     with_jobs(|jobs| {
         if let Some((_, control)) = jobs.get_mut(&job) {
             control.child = None;
         }
     });
-    if status.success() {
+    if status {
         Ok(())
     } else {
-        Err(stderr.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("ffmpeg failed").to_string())
+        let last = stderr.lines().rev().find(|l| !l.trim().is_empty()).map(str::to_string);
+        Err(last.unwrap_or_else(|| format!("{tool} failed")))
     }
 }
 
 /// Saves an HLS stream as one mp4 (stream copy, no re-encoding).
 async fn save_hls(job: u64, fetch: &Fetch, path: &Path) -> Result<(), String> {
-    let headers: String = fetch.headers.iter().map(|(k, v)| format!("{k}: {v}\r\n")).collect();
-    let mut args = vec!["-y".to_string()];
-    if !headers.is_empty() {
-        args.extend(["-headers".to_string(), headers]);
+    // iOS has one FFmpeg, run one job at a time: yt-dlp fetches the
+    // segments itself, so FFmpeg only remuxes (seconds) instead of holding
+    // it for the whole download.
+    #[cfg(target_os = "ios")]
+    {
+        let mut args: Vec<String> = ["--hls-prefer-native", "-N", "4", "--no-part", "--force-overwrites", "--no-playlist", "--no-warnings", "--quiet"]
+            .map(String::from)
+            .into();
+        for (name, value) in &fetch.headers {
+            args.extend(["--add-header".to_string(), format!("{name}:{value}")]);
+        }
+        args.extend(["-o".to_string(), path.to_string_lossy().into_owned(), fetch.url.clone()]);
+        run_tool(job, crate::children::Tool::Ytdlp, args).await
     }
-    args.extend(
-        ["-i", &fetch.url, "-c", "copy", "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart"]
-            .iter()
-            .map(|s| s.to_string()),
-    );
-    args.push(path.to_string_lossy().into_owned());
-    ffmpeg(job, args).await
+    #[cfg(not(target_os = "ios"))]
+    {
+        let headers: String = fetch.headers.iter().map(|(k, v)| format!("{k}: {v}\r\n")).collect();
+        let mut args = vec!["-y".to_string()];
+        if !headers.is_empty() {
+            args.extend(["-headers".to_string(), headers]);
+        }
+        args.extend(
+            ["-i", &fetch.url, "-c", "copy", "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart"]
+                .iter()
+                .map(|s| s.to_string()),
+        );
+        args.push(path.to_string_lossy().into_owned());
+        ffmpeg(job, args).await
+    }
 }
 
 /// Saves a video-only stream and its sound, then joins them into `path`

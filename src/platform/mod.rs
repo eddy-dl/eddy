@@ -68,6 +68,14 @@ pub use android::*;
 pub mod ios;
 #[cfg(target_os = "ios")]
 pub use ios::*;
+// yt-dlp and gallery-dl in the app's own Python (iOS starts no processes).
+#[cfg(target_os = "ios")]
+#[path = "ios_python.rs"]
+pub mod python;
+// Downloads kept going while the app's in the background.
+#[cfg(target_os = "ios")]
+#[path = "ios_background.rs"]
+pub mod background;
 
 // Fallback for desktop (Windows, macOS, Linux)
 #[cfg(not(any(target_os = "android", target_os = "ios")))]

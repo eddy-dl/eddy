@@ -326,6 +326,126 @@ jobs:
           path: eddy-macos-${{ matrix.arch }}.zip
           retention-days: 1
 
+  build-ios:
+    name: Build (iOS)
+    runs-on: macos-latest
+    env:
+      SLINT_STYLE: material
+      # Cargo's output where the cache below finds it (Xcode's own folder
+      # otherwise; see platforms/ios/build_for_ios_with_cargo.bash).
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      # FFmpeg linked into the app (build.rs; fetched below).
+      EDDY_FFMPEG_IOS: ${{ github.workspace }}/platforms/ios/SwiftFFmpeg-iOS
+      # QuickJS-ng's source, the JavaScript fallback (build.rs; fetched below).
+      EDDY_QUICKJS_IOS: ${{ github.workspace }}/platforms/ios/quickjs
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      # Saved from the ios branch too, while iOS is built there only (there's
+      # no main cache of it to fall back on yet).
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ios
+          save-if: ${{ github.ref == 'refs/heads/main' || github.head_ref == 'ios' }}
+
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      # Python, FFmpeg and QuickJS for iOS, by version: fetched again only
+      # when one changes.
+      - name: Cache iOS downloads
+        id: ios-downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            platforms/ios/Python.xcframework
+            platforms/ios/SwiftFFmpeg-iOS
+            platforms/ios/quickjs
+          key: ios-downloads-py3.14-b14-ffmpeg1.2.0-qjs0.18.0
+
+      # The app's own Python (yt-dlp and gallery-dl run in it: iOS starts no
+      # processes), and those packages: pure-Python wheels only, as macOS
+      # binary wheels wouldn't load on iOS. yt-dlp-ejs has the YouTube
+      # challenge solver for QuickJS (yt-dlp's own copy is Deno's and Bun's).
+      - name: Python and its packages
+        run: |
+          cd platforms/ios
+          [ -d Python.xcframework ] || curl -sSL https://github.com/beeware/Python-Apple-support/releases/download/3.14-b14/Python-3.14-iOS-support.b14.tar.gz | tar -xz
+          python3 -m pip install --quiet --target app_packages --no-deps \
+            --only-binary=:all: --platform any --implementation py --abi none --python-version 3.14 \
+            yt-dlp yt-dlp-ejs gallery-dl requests urllib3 idna charset-normalizer certifi
+          ls app_packages
+
+      # ffmpeg and ffprobe as functions (tfourj/SwiftFFmpeg-iOS, GPL-3.0):
+      # yt-dlp merges and converts through them.
+      - name: FFmpeg
+        if: steps.ios-downloads.outputs.cache-hit != 'true'
+        run: |
+          cd platforms/ios
+          curl -sSL -o ffmpeg.zip https://github.com/tfourj/SwiftFFmpeg-iOS/releases/download/1.2.0/SwiftFFmpeg-iOS.zip
+          unzip -q ffmpeg.zip && rm ffmpeg.zip
+          ls SwiftFFmpeg-iOS SwiftFFmpeg-iOS/FFmpeg.xcframework
+
+      # QuickJS-ng (MIT): runs yt-dlp's YouTube challenge solver when iOS's
+      # JavaScriptCore can't.
+      - name: QuickJS-ng
+        if: steps.ios-downloads.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p platforms/ios/quickjs
+          curl -sSL https://github.com/quickjs-ng/quickjs/archive/refs/tags/v0.18.0.tar.gz | tar -xz -C platforms/ios/quickjs --strip-components=1
+          ls platforms/ios/quickjs/quickjs.c
+
+      # The app icon: logo.svg square (iOS rounds it), 1024 px, without the
+      # alpha channel App Store rules forbid.
+      - name: App icon
+        run: |
+          brew install librsvg
+          cd platforms/ios
+          sed 's/ rx="24"//' ../../ui/icons/logo.svg > icon.svg
+          rsvg-convert -w 1024 -h 1024 icon.svg -o icon-alpha.png
+          sips -s format jpeg -s formatOptions 100 icon-alpha.png --out icon.jpg > /dev/null
+          sips -s format png icon.jpg --out Assets.xcassets/AppIcon.appiconset/icon-1024.png > /dev/null
+          rm icon.svg icon-alpha.png icon.jpg
+
+      # Eddy.app from the Xcode project XcodeGen makes (cargo builds the
+      # executable), not signed.
+      - name: Build (release)
+        run: |
+          cd platforms/ios
+          xcodegen
+          xcodebuild -project Eddy.xcodeproj -scheme Eddy -configuration Release \
+            -sdk iphoneos -destination generic/platform=iOS -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+
+      # Whether cargo's compiles came from the cache (through Xcode's script).
+      - name: Cache stats
+        if: always()
+        run: sccache --show-stats
+
+      # An unsigned .ipa: AltStore, SideStore or Sideloadly sign it with the
+      # installer's Apple ID.
+      - name: Package
+        run: |
+          mkdir Payload
+          cp -R platforms/ios/build/Build/Products/Release-iphoneos/Eddy.app Payload/
+          zip -qry eddy-ios-unsigned.ipa Payload
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: eddy-ios-unsigned
+          path: eddy-ios-unsigned.ipa
+          retention-days: 1
+
   build-android:
     name: Build (Android)
     runs-on: ubuntu-latest
@@ -441,7 +561,7 @@ jobs:
   release:
     name: Draft GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-windows-x86_64, build-windows-arm64, build-linux-x86_64, build-linux-arm64, build-macos, build-android]
+    needs: [build-windows-x86_64, build-windows-arm64, build-linux-x86_64, build-linux-arm64, build-macos, build-ios, build-android]
     if: github.event_name == 'workflow_dispatch'
     
     permissions:
@@ -471,6 +591,7 @@ jobs:
           LINUX_ARM_SHA=$(sha256sum eddy-linux-arm64 | awk '{print $1}')
           MAC_ARM_SHA=$(sha256sum eddy-macos-arm64.zip | awk '{print $1}')
           MAC_X64_SHA=$(sha256sum eddy-macos-x86_64.zip | awk '{print $1}')
+          IOS_SHA=$(sha256sum eddy-ios-unsigned.ipa | awk '{print $1}')
           
           APK_ARM64_SHA=$(sha256sum eddy-android-arm64.apk | awk '{print $1}')
           APK_ARMV7_SHA=$(sha256sum eddy-android-armv7.apk | awk '{print $1}')
@@ -488,6 +609,7 @@ jobs:
           echo "| Linux arm64 | $LINUX_ARM_SHA |" >> $GITHUB_ENV
           echo "| macOS arm64 | $MAC_ARM_SHA |" >> $GITHUB_ENV
           echo "| macOS x86_64 | $MAC_X64_SHA |" >> $GITHUB_ENV
+          echo "| iOS (unsigned) | $IOS_SHA |" >> $GITHUB_ENV
           echo "| Android arm64-v8a | $APK_ARM64_SHA |" >> $GITHUB_ENV
           echo "| Android armv7 | $APK_ARMV7_SHA |" >> $GITHUB_ENV
           echo "| Android Universal | $APK_UNIV_SHA |" >> $GITHUB_ENV
@@ -506,6 +628,7 @@ jobs:
             release-artifacts/eddy-linux-x86_64
             release-artifacts/eddy-linux-arm64
             release-artifacts/eddy-macos-*.zip
+            release-artifacts/eddy-ios-unsigned.ipa
             release-artifacts/*.apk
 
       - name: Delete Artifacts

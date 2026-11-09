@@ -89,6 +89,35 @@ slint = { version = "1.18.1", features = ["backend-android-activity-06"] }
 
 # Taskbar progress: the Unity launcher entry signal (KDE, Dash to Dock),
 # over the D-Bus library Slint already uses.
+# iOS: Slint's winit backend, drawn with Skia on Metal (Slint's iOS guide).
+[target.'cfg(target_os = "ios")'.dependencies]
+slint = { version = "1.18.1", features = ["renderer-skia"] }
+# UIKit (opening links and files, the share sheet) and BackgroundTasks
+# (downloads kept going in the background, platform/ios_background.rs), with
+# the objc2 versions Slint's winit backend already uses.
+block2 = "0.6"
+dispatch2 = { version = "0.3", default-features = false, features = ["std", "objc2"] }
+objc2 = "0.6"
+objc2-background-tasks = { version = "0.3.2", default-features = false, features = ["std", "bitflags", "block2", "dispatch2", "BGTask", "BGTaskRequest", "BGTaskScheduler"] }
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFCGTypes"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSDictionary", "NSError", "NSObject", "NSProgress", "NSSet", "NSString", "NSURL"] }
+objc2-ui-kit = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "block2",
+    "objc2-core-foundation",
+    "UIActivity",
+    "UIActivityViewController",
+    "UIApplication",
+    "UIPopoverPresentationController",
+    "UIPresentationController",
+    "UIResponder",
+    "UIScene",
+    "UIView",
+    "UIViewController",
+    "UIWindow",
+    "UIWindowScene",
+] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = "5"
 
@@ -99,6 +128,10 @@ windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com"
 # Process groups for the programs Eddy starts (children.rs).
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+# iOS: compiles SwiftFFmpeg-iOS's C wrapper, linked with its FFmpeg (build.rs).
+[build-dependencies]
+cc = "1"
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
 winres = "0.1"
