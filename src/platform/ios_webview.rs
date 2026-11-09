@@ -17,6 +17,7 @@ use objc2::MainThreadMarker;
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::NSString;
 use objc2_ui_kit::{UIAction, UIButton, UIColor, UIView, UIViewAutoresizing};
+use slint::ComponentHandle;
 use std::cell::RefCell;
 use std::ptr::NonNull;
 
