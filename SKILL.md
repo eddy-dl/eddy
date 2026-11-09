@@ -43,10 +43,9 @@ browser (`BrowserActivity`). Kotlin talks to Rust through `EddyNative` (JNI, in
   ones in material at 412×915, desktop ones in fluent at 1280×760 with `SettingsLayout.desktop`
   and `AppSettings.top_navigation_bar` defaulted to true for the shot (what the desktop app
   sets at start), each in the light theme and the dark one (`-dark.png`: `ThemeSettings.mode`
-  defaulted to `Dark`). For the Downloads shots, `AppSettings.animate_downloading_tab` is
-  defaulted to false (the tab icon's frame varies per render) and the Downloading icon's dots
-  (zero-length round-capped strokes, which the viewer's renderer drops) are drawn as filled
-  circles. All of it is put back after: none of it goes into the app.
+  defaulted to `Dark`). `AppSettings.animate_downloading_tab` is defaulted to false, so the
+  Downloading tab's icon isn't caught mid-animation. All of it is put back after: none of it
+  goes into the app.
 - **Kotlin:** only Gradle builds it (`platforms/android`, `./gradlew assembleRelease`).
 
 ## Conventions
