@@ -477,6 +477,35 @@ where
     }
 }
 
+/// Lets the user pick a backup to restore (the same picker, on zips).
+/// `on_picked` gets a readable copy's path, which it removes when done.
+pub fn pick_backup_file<F>(on_picked: F)
+where
+    F: FnOnce(String, String) + Send + 'static,
+{
+    if let Ok(mut guard) = FILE_PICKER_CALLBACK.lock() {
+        *guard = Some(Box::new(on_picked));
+    }
+    let result = with_env(|env, activity| {
+        env.call_method(activity, jni_str!("openBackupPicker"), jni_sig!("()V"), &[])?;
+        Ok(())
+    });
+    if let Err(e) = result {
+        log::warn!("couldn't open the backup picker: {e}");
+    }
+}
+
+/// Every setting (a backup's), read by the activity as JSON.
+pub fn all_prefs() -> std::collections::HashMap<String, String> {
+    with_env(|env, activity| {
+        let json = env.call_method(activity, jni_str!("allPrefs"), jni_sig!("()Ljava/lang/String;"), &[])?.l()?;
+        rust_string(env, json)
+    })
+    .ok()
+    .and_then(|json| serde_json::from_str(&json).ok())
+    .unwrap_or_default()
+}
+
 /// Lets the user pick a cookies.txt (same picker). The picker's copy in the
 /// cache goes once `on_picked` has read it: cookies are private.
 pub fn pick_cookies_file<F>(on_picked: F)

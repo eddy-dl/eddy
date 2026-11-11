@@ -1,3 +1,4 @@
+pub mod backup;
 pub mod browser;
 pub mod cache;
 pub mod children;
@@ -168,6 +169,7 @@ fn android_main(app: AndroidApp) {
     components::install(&ui);
     cookies::install(&ui);
     cache::install(&ui);
+    backup::install(&ui);
     ui.run().expect("Failed to run Slint app");
     platform::deinit();
 }
@@ -231,6 +233,7 @@ pub fn ios_main() {
     folders::install(&ui);
     cookies::install(&ui);
     cache::install(&ui);
+    backup::install(&ui);
     // Downloads' ends, and their time in the background.
     platform::background::install();
     // yt-dlp and gallery-dl updates (Settings → External packages).

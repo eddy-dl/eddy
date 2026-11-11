@@ -51,6 +51,9 @@ torrent clients or saving media from sites like YouTube (5.2.3), nor an app down
 as updating yt-dlp does (2.5.2).
 
 Downloads go to `Download/Eddy` (by type, if you like) or a folder you pick.
+Settings → General can back up your settings and download list to a file (in the download
+folder's `Backups`; not the files themselves, nor cookies) and restore one, on the same device
+or another: what's already there is kept.
 English and French. The French translation was written by an AI model, not a translator, and
 hasn't been checked by a native speaker: corrections are welcome.
 

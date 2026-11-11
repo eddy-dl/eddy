@@ -54,6 +54,33 @@ where
 {
 }
 
+/// Every setting (a backup's).
+pub fn all_prefs() -> HashMap<String, String> {
+    read_all_prefs()
+}
+
+/// No file picker here yet: the newest backup in Eddy's Backups folder
+/// (put there with the Files app, if it's from another device).
+pub fn pick_backup_file<F>(on_picked: F)
+where
+    F: FnOnce(String, String) + Send + 'static,
+{
+    let newest = std::fs::read_dir(crate::backup::backups_dir())
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip")))
+        .max_by_key(|path| std::fs::metadata(path).and_then(|m| m.modified()).ok());
+    match newest {
+        Some(path) => {
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            on_picked(path.to_string_lossy().into_owned(), name);
+        }
+        None => show_toast("No backup in Eddy's Backups folder: put one there with the Files app"),
+    }
+}
+
 pub fn pick_cookies_file<F>(_on_picked: F)
 where
     F: FnOnce(String, String) + Send + 'static,
