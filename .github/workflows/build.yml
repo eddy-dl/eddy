@@ -28,7 +28,7 @@ env:
   # a release; PRs and main's pushes, which only check it builds and its
   # tests pass, skip LTO and split codegen. Both are the same, so a PR finds
   # main's cache. Only main's pushes save that cache: a set of archives is
-  # over 4 GB of GitHub's 10, so a second set (a PR's own, a release's with
+  # over 6 GB of GitHub's 10, so a second set (a PR's own, a release's with
   # its other settings) would push main's out.
   CARGO_PROFILE_RELEASE_LTO: ${{ github.event_name == 'workflow_dispatch' && 'fat' || 'off' }}
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ github.event_name == 'workflow_dispatch' && '1' || '16' }}
@@ -106,9 +106,16 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      # No cargo cache here: this target isn't built for PRs, and its archive
-      # (most of a gigabyte) would crowd the ones PRs do use out of GitHub's
-      # 10 GB. It builds from scratch, on main and for releases.
+      # Dependencies only (Eddy's own crates are left out), restored from
+      # main's cache and saved only on main, so PRs don't fill the store.
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: windows-arm64
+          workspaces: |
+            .
+            webview
+          save-if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
 
       # Each crate's compiled output, found again by its inputs (unlike
       # Cargo's own reuse, this survives a fresh checkout): a PR that leaves
@@ -223,9 +230,16 @@ jobs:
           # and WebKitGTK for eddy-webview (only the helper links it).
           bash tools/ci-apt.sh libfontconfig1-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libgtk-3-dev libdbus-1-dev libwebkit2gtk-4.1-dev
 
-      # No cargo cache here: this target isn't built for PRs, and its archive
-      # (most of a gigabyte) would crowd the ones PRs do use out of GitHub's
-      # 10 GB. It builds from scratch, on main and for releases.
+      # Dependencies only (Eddy's own crates are left out), restored from
+      # main's cache and saved only on main, so PRs don't fill the store.
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-arm64
+          workspaces: |
+            .
+            webview
+          save-if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
 
       # Each crate's compiled output, found again by its inputs (unlike
       # Cargo's own reuse, this survives a fresh checkout): a PR that leaves
@@ -277,9 +291,7 @@ jobs:
 
       # Dependencies only (Eddy's own crates are left out), restored from
       # main's cache and saved only on main, so PRs don't fill the store.
-      # (Apple silicon only: the Intel build, not run for PRs, goes without.)
       - name: Cache cargo
-        if: matrix.arch == 'arm64'
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: macos-${{ matrix.arch }}
