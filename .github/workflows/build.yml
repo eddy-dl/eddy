@@ -20,6 +20,13 @@ env:
   # Warnings are errors in Eddy's crates and its patched copies (registry
   # crates are exempt): a new one fails the PR instead of piling up.
   RUSTFLAGS: "-C debuginfo=0 -D warnings"
+  # Cargo.toml's release profile (fat LTO, one codegen unit: small and
+  # fast, but the whole program is optimised again at every link) only for
+  # a release; PRs and main's pushes, which only check it builds and its
+  # tests pass, skip LTO and split codegen. Both are the same, so a PR finds
+  # main's cache (a PR's own is only its own).
+  CARGO_PROFILE_RELEASE_LTO: ${{ github.event_name == 'workflow_dispatch' && 'fat' || 'off' }}
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ github.event_name == 'workflow_dispatch' && '1' || '16' }}
 
 jobs:
   build-windows-x86_64:
