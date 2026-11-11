@@ -85,9 +85,11 @@ pub fn open_site_check(url: &str, result: &str) -> bool {
     super::webview::send("check", url, result)
 }
 
-/// No browser to catch a page's download in (as on desktop).
-pub fn open_browser(_page: &str, _result: &str) -> bool {
-    false
+/// Opens `page` in the browser over the app, where the user clicks its
+/// download: the file's link and what came with it are written to
+/// `result`, as Android's BrowserActivity does (see crate::browser).
+pub fn open_browser(page: &str, result: &str) -> bool {
+    super::webview::send("browse", page, result)
 }
 
 /// A page read in the browser, unseen, for a site that turns Eddy's own

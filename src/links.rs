@@ -1608,6 +1608,9 @@ struct HeadInfo {
     content_type: Option<String>,
     length: Option<u64>,
     disposition_name: Option<String>,
+    /// What the site said with an error status, when it's short text of
+    /// its own (not a page).
+    message: Option<String>,
 }
 
 impl HeadInfo {
@@ -1615,10 +1618,19 @@ impl HeadInfo {
         matches!(self.content_type.as_deref(), Some("text/html") | Some("application/xhtml+xml"))
     }
     fn status_text(&self) -> String {
-        match self.reason {
+        let mut text = match self.reason {
             Some(reason) => format!("{} {}", self.status, reason),
             None => format!("Server replied {}", self.status),
+        };
+        if let Some(message) = &self.message {
+            text += &format!(": “{message}”");
         }
+        // Turned away: a file that only comes from a visit to its page
+        // (cookies, a click) may still come through Eddy's browser.
+        if matches!(self.status, 401 | 403) {
+            text += ". Open in browser may get it";
+        }
+        text
     }
 }
 
@@ -1669,14 +1681,45 @@ async fn http_head(url: &str) -> Result<HeadInfo, String> {
         header("content-length").and_then(|v| v.parse().ok())
     };
 
+    let status = response.status();
+    let final_url = response.url().to_string();
+    let disposition = header("content-disposition").and_then(|v| disposition_name(&v));
+    // A HEAD has no body; an error's GET may say why.
+    let message = if ranged && status.as_u16() >= 400 {
+        response.text().await.ok().and_then(|body| site_message(&body, content_type.as_deref()))
+    } else {
+        None
+    };
     Ok(HeadInfo {
-        status: response.status().as_u16(),
-        reason: response.status().canonical_reason(),
-        final_url: response.url().to_string(),
+        status: status.as_u16(),
+        reason: status.canonical_reason(),
+        final_url,
         content_type,
         length: length.filter(|&l| l > 1 || !ranged),
-        disposition_name: header("content-disposition").and_then(|v| disposition_name(&v)),
+        disposition_name: disposition,
+        message,
     })
+}
+
+/// An error response's own words: a JSON body's "error" or "message" (as
+/// `{"error":"Automated downloading isn't allowed."}`), or a line of plain
+/// text. Not a page's HTML, nor anything long.
+fn site_message(body: &str, content_type: Option<&str>) -> Option<String> {
+    let body = body.trim();
+    let text = if content_type.is_some_and(|t| t.contains("json")) || body.starts_with('{') {
+        let json: serde_json::Value = serde_json::from_str(body).ok()?;
+        ["error", "message", "detail", "msg"].iter().find_map(|key| match json.get(key)? {
+            serde_json::Value::String(text) => Some(text.clone()),
+            serde_json::Value::Object(inner) => inner.get("message")?.as_str().map(str::to_string),
+            _ => None,
+        })?
+    } else if content_type.is_none_or(|t| t == "text/plain") && !body.contains('<') && !body.contains('\n') {
+        body.to_string()
+    } else {
+        return None;
+    };
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!text.is_empty() && text.chars().count() <= 200).then_some(text)
 }
 
 fn describe_error(error: reqwest::Error) -> String {

@@ -1,8 +1,10 @@
 //! Files that only come from a page's download button (a countdown, a
 //! captcha, a link made when it's clicked): the page opens in Eddy's
-//! browser (Android's BrowserActivity), the user clicks through it, and the
-//! download it starts is caught there and handed to Eddy's downloader, with
-//! the browser's cookies, user agent and the page it was on.
+//! browser (Android's BrowserActivity; on desktop the webview helper's
+//! window, on iOS the browser over the app), the user clicks through it,
+//! and the download it starts is caught there and handed to Eddy's
+//! downloader, with the browser's cookies, user agent and the page it was
+//! on.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -52,7 +54,7 @@ pub async fn catch(page: &str) -> Result<Caught, String> {
         let _ = std::fs::create_dir_all(dir);
     }
     if !crate::platform::open_browser(page, &file.to_string_lossy()) {
-        return Err("Eddy's browser is only on Android for now".to_string());
+        return Err("Eddy's browser didn't open".to_string());
     }
     let began = Instant::now();
     while began.elapsed() < TIMEOUT {

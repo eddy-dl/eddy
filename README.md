@@ -40,7 +40,11 @@ Paste or share a link: Eddy works out what it is, shows a preview, and downloads
   FanFiction.net, FictionPress, Wuxiaworld, NovelPing, NovelBin and Ranobes. Pick chapters, keep
   author notes and images or not, and check for new chapters later. Sites behind Cloudflare or Anubis are passed in a
   browser check. See [docs/novel-extractors.md](docs/novel-extractors.md).
-- **Pages whose file only comes from a click**, in Eddy's own browser.
+- **Pages whose file only comes from a click**, in Eddy's own browser (Open in browser, in the
+  link's preview): click its download there, and Eddy downloads the file with the browser's
+  cookies. On desktop the browser is a helper program, eddy-webview: it comes with Eddy on macOS,
+  and on Windows and Linux Eddy downloads it in Settings → Downloads → External packages (it
+  needs WebView2 on Windows, WebKitGTK on Linux).
 
 On iOS (a first build, sideloaded with AltStore, SideStore or Sideloadly), yt-dlp and gallery-dl
 run in the app's own Python, with ffmpeg and a JavaScript engine built in, as iOS lets an app

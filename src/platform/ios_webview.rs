@@ -1,8 +1,9 @@
 //! The browser for sites behind bot checks (iOS), as the desktop helper is
 //! (eddy-webview, whose jobs these are: webview/src/lib.rs) and Android's
-//! WebView (PageFetcher, CloudflareActivity). A WKWebView in Eddy's own
-//! window: hidden while it reads pages, over the whole app with a bar to
-//! close it while the user passes a check. Built the first time a site
+//! WebView (PageFetcher, CloudflareActivity, BrowserActivity). A WKWebView
+//! in Eddy's own window: hidden while it reads pages, over the whole app
+//! with a bar to close it while the user passes a check or clicks a page's
+//! download. Built the first time a site
 //! needs it, and polled by a timer while it has a job.
 //!
 //! All of it on the main thread (UIKit's and WebKit's), which is Slint's
@@ -10,7 +11,7 @@
 
 use crate::DownloaderApp;
 use block2::RcBlock;
-use eddy_webview::wry::{WebView, WebViewBuilder, WebViewExtIOS};
+use eddy_webview::wry::{NewWindowResponse, WebView, WebViewBuilder, WebViewExtIOS};
 use eddy_webview::{Answered, Host, Job, Jobs, POLL};
 use objc2::rc::Retained;
 use objc2::MainThreadMarker;
@@ -117,7 +118,20 @@ fn run_later() {
 fn build(mtm: MainThreadMarker) -> Result<Jobs<Ios>, String> {
     let ui = APP.with(|app| app.borrow().as_ref().and_then(|app| app.upgrade())).ok_or("the app's window has gone")?;
     let handle = ui.window().window_handle();
-    let webview = WebViewBuilder::new().with_visible(false).build_as_child(&handle).map_err(|e| e.to_string())?;
+    let webview = WebViewBuilder::new()
+        .with_visible(false)
+        // Not saved here: Eddy downloads it (a browse job's file).
+        .with_download_started_handler(|url, path| {
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let _ = slint::invoke_from_event_loop(move || with_jobs(move |jobs| jobs.download_started(url, name)));
+            false
+        })
+        .with_new_window_req_handler(|url, _features| {
+            let _ = slint::invoke_from_event_loop(move || with_jobs(move |jobs| jobs.new_window(url)));
+            NewWindowResponse::Deny
+        })
+        .build_as_child(&handle)
+        .map_err(|e| e.to_string())?;
     let view = webview.webview();
     let parent = view.superview().ok_or("the webview isn't in the app's window")?;
     let (bar, close) = close_bar(mtm);

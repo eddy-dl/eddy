@@ -14,7 +14,8 @@ component HelperRow inherits SettingsCard {
     property <string> name: root.package.key == "python" ? "Python"
         : root.package.key == "ytdlp" ? "yt-dlp"
         : root.package.key == "gallerydl" ? "gallery-dl"
-        : root.package.key == "ffmpeg" ? "FFmpeg" : "Deno";
+        : root.package.key == "ffmpeg" ? "FFmpeg"
+        : root.package.key == "webview" ? @tr("Eddy's browser") : "Deno";
     property <string> action: root.package.state == 1 ? @tr("Get")
         : root.package.state == 3 ? @tr("Update")
         : root.package.state == 5 ? @tr("Install") : "";
@@ -49,6 +50,7 @@ component HelperRow inherits SettingsCard {
                     : root.package.key == "ytdlp" ? @tr("Downloads media from most sites")
                     : root.package.key == "gallerydl" ? @tr("Downloads galleries: image boards, art and photo sites")
                     : root.package.key == "ffmpeg" ? @tr("Joins video and audio, converts to audio, saves streams")
+                    : root.package.key == "webview" ? @tr("Opens pages behind bot checks, and pages whose file comes from a click")
                     : @tr("Optional: helps with YouTube and Instagram");
                 font-size: 13px;
                 color: root.text_color.transparentize(40%);
@@ -115,7 +117,8 @@ export component PackageSettings inherits Rectangle {
     private property <string> confirming_name: root.confirming.key == "python" ? "Python"
         : root.confirming.key == "ytdlp" ? "yt-dlp"
         : root.confirming.key == "gallerydl" ? "gallery-dl"
-        : root.confirming.key == "ffmpeg" ? "FFmpeg" : "Deno";
+        : root.confirming.key == "ffmpeg" ? "FFmpeg"
+        : root.confirming.key == "webview" ? @tr("Eddy's browser") : "Deno";
 
     function helper_tapped(package: HelperPackage) {
         if (package.state == 1 || package.state == 3) {
@@ -132,7 +135,7 @@ export component PackageSettings inherits Rectangle {
 
     // yt-dlp or gallery-dl already there with a newer one out (state 3, the
     // row's "Update"): the sheet just says it's updating it.
-    private property <bool> updates_own: (root.confirming.key == "ytdlp" || root.confirming.key == "gallerydl") && root.confirming.state == 3;
+    private property <bool> updates_own: (root.confirming.key == "ytdlp" || root.confirming.key == "gallerydl" || root.confirming.key == "webview") && root.confirming.state == 3;
 
     confirm_popup := PopupWindow {
         // Spans the whole window (popup coordinates are relative to this page).
