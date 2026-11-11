@@ -200,6 +200,12 @@ pub fn take_slot(request: &DownloadRequest) -> bool {
                     // Saved again (a book's update): back in Downloading.
                     entry.saved.message.clear();
                     entry.saved.ended = 0;
+                    // Its counts were its file's bytes; a book's are in
+                    // chapters while it's made (the cards say so).
+                    if request.backend == Backend::Book {
+                        entry.saved.done = 0;
+                        entry.saved.total = request.picked().len() as u64;
+                    }
                 }
                 entry.saved.state = state;
                 entry.saved.request = request.clone();
@@ -1423,53 +1429,59 @@ fn restart_with(id: i64, change: impl FnOnce(&mut Saved, Option<std::path::PathB
 /// now (ChooseFilesSheet).
 fn show_choices(id: i64) {
     let found = with_entries(|entries| entries.iter().find(|e| e.id == id).map(|e| e.saved.clone()));
-    // A book's chapters as they are now on the site: shown as soon as
-    // they're read, over the ones kept (a book saved before its chapters
-    // were kept waits for them).
-    if let Some(saved) = found.as_ref().filter(|s| s.request.backend == Backend::Book) {
-        let kept = !saved.request.choices.is_empty();
-        if !kept {
-            crate::platform::show_toast("Reading the chapter list…");
-        }
-        let url = saved.request.url.clone();
-        downloader::runtime().spawn(async move {
-            let result = crate::novels::book(&url).await;
-            let _ = slint::invoke_from_event_loop(move || match result {
-                Ok(book) => {
-                    with_entries(|entries| {
-                        if let Some(entry) = entries.iter_mut().find(|e| e.id == id) {
-                            entry.saved.request.choices = book_choices(&book);
-                            if let Some(saved) = entry.saved.book.as_mut() {
-                                saved.title = book.title.clone();
-                            }
-                            save(entry);
-                        }
-                    });
-                    // Still open on it (closed, it's read again next time).
-                    let open = APP.with(|app| app.borrow().as_ref().and_then(|w| w.upgrade())).is_some_and(|ui| {
-                        let sheet = ui.global::<ChooseFiles>();
-                        let open = sheet.get_open() && sheet.get_id() == id as i32;
-                        if open {
-                            sheet.set_site_title(book.title.as_str().into());
-                            if sheet.get_book_title().is_empty() {
-                                sheet.set_book_title(book.title.as_str().into());
-                            }
-                        }
-                        open
-                    });
-                    if !kept || open {
-                        list_choices(id, kept);
-                    }
-                }
-                Err(e) if kept => log::warn!("couldn't refresh the chapters of download {id}: {e}"),
-                Err(e) => crate::platform::show_toast(&format!("Couldn't read the chapters: {e}")),
-            });
-        });
-        if !kept {
-            return;
-        }
+    // A book saved before its chapters were kept: read from its site first.
+    // One with them opens on those, read again only when asked (Refresh).
+    if let Some(saved) = found.filter(|s| s.request.backend == Backend::Book && s.request.choices.is_empty()) {
+        crate::platform::show_toast("Reading the chapter list…");
+        read_chapters(id, saved.request.url, false);
+        return;
     }
     list_choices(id, false);
+}
+
+/// Reads a book's chapter list from its site, keeps it, and lists it in
+/// Choose files. `refreshing`: the sheet's Refresh, with the sheet open on
+/// it (its ticks stay; closed meanwhile, the list is only kept).
+fn read_chapters(id: i64, url: String, refreshing: bool) {
+    downloader::runtime().spawn(async move {
+        let result = crate::novels::book(&url).await;
+        let _ = slint::invoke_from_event_loop(move || {
+            let ui = APP.with(|app| app.borrow().as_ref().and_then(|w| w.upgrade()));
+            if let Some(ui) = &ui {
+                ui.global::<ChooseFiles>().set_refreshing(false);
+            }
+            let book = match result {
+                Ok(book) => book,
+                Err(e) => return crate::platform::show_toast(&format!("Couldn't read the chapters: {e}")),
+            };
+            with_entries(|entries| {
+                if let Some(entry) = entries.iter_mut().find(|e| e.id == id) {
+                    entry.saved.request.choices = book_choices(&book);
+                    if let Some(saved) = entry.saved.book.as_mut() {
+                        saved.title = book.title.clone();
+                    }
+                    save(entry);
+                }
+            });
+            if !refreshing {
+                return list_choices(id, false);
+            }
+            let open = ui.is_some_and(|ui| {
+                let sheet = ui.global::<ChooseFiles>();
+                let open = sheet.get_open() && sheet.get_id() == id as i32;
+                if open {
+                    sheet.set_site_title(book.title.as_str().into());
+                    if sheet.get_book_title().is_empty() {
+                        sheet.set_book_title(book.title.as_str().into());
+                    }
+                }
+                open
+            });
+            if open {
+                list_choices(id, true);
+            }
+        });
+    });
 }
 
 /// Opens Choose files on a download's choices; `keep_ticks`: the sheet is
@@ -1538,6 +1550,7 @@ fn list_choices(id: i64, keep_ticks: bool) {
         sheet.set_groups(groups as i32);
         sheet.set_book(saved.request.backend == Backend::Book);
         if !keep_ticks {
+            sheet.set_refreshing(false);
             // A book's title: its own, else the site's (known once read).
             let site_title = saved.book.as_ref().map(|b| b.title.clone()).unwrap_or_default();
             let own = serde_json::from_str::<crate::novels::NovelOptions>(&saved.request.format).map(|o| o.title).unwrap_or_default();
@@ -2039,6 +2052,16 @@ pub fn install(ui: &DownloaderApp) {
         };
         change_choices(|file| if file.index == index { file.selected = !file.selected });
     });
+    ui.global::<ChooseFiles>().on_refresh(|id| {
+        let url = with_entries(|entries| entries.iter().find(|e| e.id == id as i64).map(|e| e.saved.request.url.clone()));
+        let Some(url) = url else {
+            return;
+        };
+        if let Some(ui) = APP.with(|app| app.borrow().as_ref().and_then(|w| w.upgrade())) {
+            ui.global::<ChooseFiles>().set_refreshing(true);
+        }
+        read_chapters(id as i64, url, true);
+    });
     ui.global::<ChooseFiles>().on_apply(|id| {
         let Some(ui) = APP.with(|app| app.borrow().as_ref().and_then(|w| w.upgrade())) else {
             return;
@@ -2106,6 +2129,12 @@ pub fn install(ui: &DownloaderApp) {
                         SortKey::Name => a.item.filename.to_lowercase().cmp(&b.item.filename.to_lowercase()),
                         SortKey::Size => a.size.cmp(&b.size),
                         SortKey::Progress => a.item.progress.total_cmp(&b.item.progress),
+                        // Finished ones by when they finished (those from
+                        // before it was kept, by when they were added).
+                        _ if *state == DownloadState::Completed => {
+                            let when = |r: &Row| if r.ended > 0 { r.ended } else { r.added };
+                            when(a).cmp(&when(b)).then(a.added.cmp(&b.added))
+                        }
                         _ => a.added.cmp(&b.added),
                     };
                     if options.ascending { order } else { order.reverse() }
@@ -2339,8 +2368,9 @@ fn sync(model: &VecModel<DownloadItem>, items: Vec<DownloadItem>) {
 /// A list row, with what it's sorted by.
 struct Row {
     item: DownloadItem,
-    /// When it was added (unix seconds).
+    /// When it was added, and when it ended (unix seconds; 0 not yet).
     added: u64,
+    ended: u64,
     /// Its size in bytes, 0 when unknown.
     size: u64,
 }
@@ -2361,10 +2391,10 @@ fn save_list_options(tab: i32, options: &TabListOptions) {
     // The types shown, as bits (1 << the old single filter's number), and
     // a 4th part saying so: three parts were one filter.
     let f = &options.filters;
-    let mask = [f.video, f.audio, f.image, f.document, f.archive, f.folder, f.other]
+    let mask = [f.video, f.audio, f.image, f.document, f.archive, f.folder, f.other, f.book]
         .iter()
         .enumerate()
-        .fold(0u8, |mask, (i, on)| if *on { mask | 1 << (i + 1) } else { mask });
+        .fold(0u16, |mask, (i, on)| if *on { mask | 1 << (i + 1) } else { mask });
     let value = format!("{sort},{},{mask},2", options.ascending as u8);
     if let Err(e) = crate::platform::save_pref(&list_options_key(tab), &value) {
         log::warn!("couldn't save the list options: {e}");
@@ -2373,14 +2403,14 @@ fn save_list_options(tab: i32, options: &TabListOptions) {
 
 fn load_list_options(tab: i32) -> Option<TabListOptions> {
     let value = crate::platform::get_pref(&list_options_key(tab), "").ok()?;
-    let parts: Vec<u8> = value.split(',').map(|p| p.trim().parse().ok()).collect::<Option<_>>()?;
+    let parts: Vec<u16> = value.split(',').map(|p| p.trim().parse().ok()).collect::<Option<_>>()?;
     // Four parts: a set of types; three (before): one type, or all.
     let (sort, ascending, mask) = match parts.as_slice() {
         [sort, ascending, mask, _] => (sort, ascending, *mask),
-        [sort, ascending, filter] => (sort, ascending, if *filter == 0 { 0 } else { 1u8.checked_shl(u32::from(*filter)).unwrap_or(0) }),
+        [sort, ascending, filter] => (sort, ascending, if *filter == 0 { 0 } else { 1u16.checked_shl(u32::from(*filter)).unwrap_or(0) }),
         _ => return None,
     };
-    let on = |n: u8| mask & (1 << n) != 0;
+    let on = |n: u16| mask & (1 << n) != 0;
     Some(TabListOptions {
         sort: match sort {
             1 => SortKey::Name,
@@ -2389,7 +2419,7 @@ fn load_list_options(tab: i32) -> Option<TabListOptions> {
             _ => SortKey::DateAdded,
         },
         ascending: *ascending == 1,
-        filters: FileFilters { video: on(1), audio: on(2), image: on(3), document: on(4), archive: on(5), folder: on(6), other: on(7) },
+        filters: FileFilters { video: on(1), audio: on(2), image: on(3), document: on(4), archive: on(5), folder: on(6), other: on(7), book: on(8) },
     })
 }
 
@@ -2397,7 +2427,7 @@ fn load_list_options(tab: i32) -> Option<TabListOptions> {
 /// Whether a download is one of the types shown (any of them; none set
 /// shows everything).
 fn matches_filter(item: &DownloadItem, f: &FileFilters) -> bool {
-    let any = f.video || f.audio || f.image || f.document || f.archive || f.folder || f.other;
+    let any = f.video || f.audio || f.image || f.document || f.archive || f.folder || f.other || f.book;
     !any
         || (f.video && item.file_type == FileType::Video)
         || (f.audio && item.file_type == FileType::Audio)
@@ -2408,6 +2438,8 @@ fn matches_filter(item: &DownloadItem, f: &FileFilters) -> bool {
         || (f.folder && item.is_folder)
         // Not a folder, and none of the types above.
         || (f.other && !item.is_folder && matches!(item.file_type, FileType::Other | FileType::Program))
+        // Web novels (finished, they're EPUBs: Documents too).
+        || (f.book && item.backend == LinkBackend::Book)
 }
 
 /// Every download as the lists show it, with live progress.
@@ -2445,7 +2477,7 @@ fn items() -> Vec<Row> {
                         entry.speed = if speed > 0.0 { speed } else { measured_speed(entry, done) };
                     }
                 }
-                Row { item: view(entry, state), added: entry.saved.added, size: entry.saved.total }
+                Row { item: view(entry, state), added: entry.saved.added, ended: entry.saved.ended, size: entry.saved.total }
             })
             .collect()
     })

@@ -834,6 +834,12 @@ msgstr "Verrouillé"
 msgid "Choose chapters"
 msgstr "Choisir les chapitres"
 
+msgid "Refresh"
+msgstr "Actualiser"
+
+msgid "Refreshing…"
+msgstr "Actualisation…"
+
 msgid "The book is made again with the ticked chapters; ones fetched before aren't fetched again"
 msgstr "Le livre est refait avec les chapitres cochés ; ceux déjà récupérés ne le sont pas à nouveau"
 

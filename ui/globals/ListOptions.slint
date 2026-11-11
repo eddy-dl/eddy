@@ -2,7 +2,8 @@ export enum SortKey { DateAdded, Name, Size, Progress }
 
 // Folder: downloads saved as a folder of files (playlists, posts, torrents).
 // Other: files of no type Eddy knows (.bin and the like) and programs.
-export enum FileFilter { All, Video, Audio, Image, Document, Archive, Folder, Other }
+// Book: web novels saved as books (Documents too, being EPUBs).
+export enum FileFilter { All, Video, Audio, Image, Document, Archive, Folder, Other, Book }
 
 // The types a tab shows; none set shows everything.
 export struct FileFilters {
@@ -13,6 +14,7 @@ export struct FileFilters {
     archive: bool,
     folder: bool,
     other: bool,
+    book: bool,
 }
 
 export struct TabListOptions {
@@ -40,7 +42,8 @@ export global ListOptions {
             : which == FileFilter.Archive ? f.archive
             : which == FileFilter.Folder ? f.folder
             : which == FileFilter.Other ? f.other
-            : !(f.video || f.audio || f.image || f.document || f.archive || f.folder || f.other)
+            : which == FileFilter.Book ? f.book
+            : !(f.video || f.audio || f.image || f.document || f.archive || f.folder || f.other || f.book)
     }
 
     // `f` with `which` shown or not, the others as they were.
@@ -53,6 +56,7 @@ export global ListOptions {
             archive: which == FileFilter.Archive ? !f.archive : f.archive,
             folder: which == FileFilter.Folder ? !f.folder : f.folder,
             other: which == FileFilter.Other ? !f.other : f.other,
+            book: which == FileFilter.Book ? !f.book : f.book,
         }
     }
 }

@@ -58,6 +58,10 @@ export global ChooseFiles {
     // as soon as it's changed).
     in-out property <bool> parts;
     callback parts_changed(on: bool);
+    // A book's chapter list read again from its site (only when asked:
+    // opening shows the one kept), and whether that's under way.
+    callback refresh(id: int);
+    in-out property <bool> refreshing;
     // Download with the ticked files (Rust reads `files`).
     callback apply(id: int);
     // Ticks every file, or none; one (its row in `files`); a group's.
@@ -236,6 +240,31 @@ export component ChooseFilesSheet inherits Rectangle {
                         font-size: 13px;
                         color: ThemeSettings.text_color.transparentize(35%);
                         overflow: elide;
+                    }
+                }
+
+                // MD3 text button: a book's chapters as they are now.
+                if ChooseFiles.book: VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        height: 40px;
+                        width: refresh_label.preferred-width + 24px;
+                        border-radius: 20px;
+                        background: refresh_ta.pressed ? ThemeSettings.primary_accent.transparentize(88%) : transparent;
+                        animate background { duration: 150ms; }
+
+                        refresh_ta := TouchArea {
+                            enabled: !ChooseFiles.refreshing;
+                            clicked => { ChooseFiles.refresh(ChooseFiles.id); }
+                        }
+                        refresh_label := Text {
+                            text: ChooseFiles.refreshing ? @tr("Refreshing…") : @tr("Refresh");
+                            font-size: 14px;
+                            font-weight: 500;
+                            color: ThemeSettings.primary_accent.transparentize(ChooseFiles.refreshing ? 50% : 0%);
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
                     }
                 }
 

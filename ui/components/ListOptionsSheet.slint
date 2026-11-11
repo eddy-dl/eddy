@@ -198,6 +198,15 @@ export component ListOptionsSheet inherits Rectangle {
                     selected: ListOptions.shows(root.current.filters, FileFilter.Archive);
                     clicked => { root.set_filter(FileFilter.Archive); }
                 }
+            }
+
+            HorizontalLayout {
+                spacing: 8px;
+                Chip {
+                    text: @tr("Books");
+                    selected: ListOptions.shows(root.current.filters, FileFilter.Book);
+                    clicked => { root.set_filter(FileFilter.Book); }
+                }
                 Chip {
                     text: @tr("Other");
                     selected: ListOptions.shows(root.current.filters, FileFilter.Other);
