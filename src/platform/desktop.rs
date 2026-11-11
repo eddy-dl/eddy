@@ -97,6 +97,29 @@ where
     }
 }
 
+/// Every setting (a backup's).
+pub fn all_prefs() -> HashMap<String, String> {
+    read_all_prefs()
+}
+
+/// Lets the user pick a backup to restore (Settings → General), starting
+/// where Eddy puts them.
+pub fn pick_backup_file<F>(on_picked: F)
+where
+    F: FnOnce(String, String) + Send + 'static,
+{
+    if let Some(path) = rfd::FileDialog::new()
+        .set_title("Restore a backup")
+        .set_directory(crate::backup::backups_dir())
+        .add_filter("Eddy backups", &["zip"])
+        .add_filter("All files", &["*"])
+        .pick_file()
+    {
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        on_picked(path.to_string_lossy().into_owned(), name);
+    }
+}
+
 /// Lets the user pick a cookies.txt (Settings → Downloads → Cookies).
 pub fn pick_cookies_file<F>(on_picked: F)
 where

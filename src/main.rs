@@ -89,6 +89,7 @@ fn main() -> Result<(), slint::PlatformError> {
     eddy::desktop_notify::install(&ui);
     eddy::cookies::install(&ui);
     eddy::cache::install(&ui);
+    eddy::backup::install(&ui);
     eddy::handoff::listen(&ui);
     eddy::handoff::open(&ui, &args);
     ui.window().set_size(slint::PhysicalSize::new(800, 600));

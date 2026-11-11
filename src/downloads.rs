@@ -140,6 +140,55 @@ fn with_entries<T>(f: impl FnOnce(&mut Vec<Entry>) -> T) -> T {
     f(entries)
 }
 
+/// Every download's record, as saved (a backup's).
+pub fn records() -> Vec<String> {
+    with_entries(|entries| entries.iter().map(|e| serde_json::to_string(&e.saved).unwrap_or_default()).collect())
+}
+
+/// A backup's records, added to the lists unless they're there already
+/// (the same link, added at the same moment). Ones that were running come
+/// back paused; one whose folder this device hasn't (another device's
+/// path, or an Android folder picked there, whose access doesn't carry
+/// over) goes to the usual one. Returns how many were added (UI thread).
+pub fn restore(records: &[serde_json::Value]) -> usize {
+    let added = with_entries(|entries| {
+        let mut added = 0;
+        for record in records {
+            let Ok(mut saved) = serde_json::from_value::<Saved>(record.clone()) else {
+                continue;
+            };
+            if entries.iter().any(|e| e.saved.request.url == saved.request.url && e.saved.added == saved.added) {
+                continue;
+            }
+            if matches!(saved.state, State::Active | State::Queued) {
+                saved.state = State::Paused;
+            }
+            let folder = saved.request.folder.clone();
+            if folder.starts_with("content://") || (!folder.is_empty() && !std::path::Path::new(&folder).is_dir()) {
+                saved.request.folder.clear();
+                saved.move_to = None;
+            }
+            if saved.move_to.is_none() {
+                saved.folder = folder_display(&saved.request);
+            }
+            let id = crate::db::insert_download(&serde_json::to_string(&saved).unwrap_or_default());
+            if id <= 0 {
+                continue;
+            }
+            saved.request.id = id;
+            let entry = Entry { id, saved, handle: None, retired: Vec::new(), last: None, speed: 0.0, part: None };
+            save(&entry);
+            entries.push(entry);
+            added += 1;
+        }
+        added
+    });
+    if added > 0 {
+        refresh_now();
+    }
+    added
+}
+
 fn save(entry: &Entry) {
     if entry.id > 0 {
         crate::db::update_download(entry.id, &serde_json::to_string(&entry.saved).unwrap_or_default());

@@ -308,6 +308,25 @@ class MainActivity : GameActivity() {
         }
     }
 
+    // The same picker, on zips: a backup to restore (Settings → General).
+    fun openBackupPicker() {
+        runOnUiThread {
+            val intent = Intent(this, FilePickerActivity::class.java).putExtra(FilePickerActivity.EXTRA_BACKUP, true)
+            startActivityForResult(intent, REQUEST_CODE_FILE_PICKER)
+        }
+    }
+
+    // Every setting, as JSON (a backup's; Eddy's are all strings).
+    fun allPrefs(): String {
+        val json = org.json.JSONObject()
+        for ((key, value) in getSharedPreferences("app_prefs", MODE_PRIVATE).all) {
+            if (value is String) {
+                json.put(key, value)
+            }
+        }
+        return json.toString()
+    }
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         

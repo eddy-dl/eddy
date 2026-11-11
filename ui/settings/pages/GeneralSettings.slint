@@ -3,7 +3,8 @@ import { AppSettings } from "../../globals/AppSettings.slint";
 import { ThemeSettings } from "../../themes/theme.slint";
 import { AnimatedPopup } from "../../components/AnimatedPopup.slint";
 import { RadioRow } from "../../components/RadioRow.slint";
-import { SettingsCard, SettingsLayout } from "../SettingsCard.slint";
+import { SectionHeader, SettingsCard, SettingsLayout } from "../SettingsCard.slint";
+import { SwitchRow } from "../../components/SwitchRow.slint";
 import { WrappedText } from "../../components/WrappedText.slint";
 
 export component GeneralSettings inherits Rectangle {
@@ -275,6 +276,97 @@ export component GeneralSettings inherits Rectangle {
                         toggled => { AppSettings.preferences_changed(); }
                     }
                 }
+            }
+
+            // Eddy's settings and download list as one file, and back.
+            SectionHeader { text: @tr("Backup"); }
+
+            SettingsCard {
+                first: true;
+                last: false;
+                highlighted: backup_ta.has-hover;
+
+                backup_ta := TouchArea {
+                    clicked => { AppSettings.back_up(); }
+                }
+
+                HorizontalLayout {
+                    padding: 8px;
+                    padding-top: 12px;
+                    padding-bottom: 12px;
+                    padding-left: SettingsLayout.inset;
+                    padding-right: SettingsLayout.inset;
+                    spacing: 16px;
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        horizontal-stretch: 1;
+
+                        Text {
+                            text: @tr("Back up");
+                            font-size: 18px;
+                            font-weight: 600;
+                            color: root.text_color;
+                        }
+
+                        WrappedText {
+                            text: @tr("Saves your settings and download list as a file in the download folder's Backups. Not the downloaded files, nor cookies.");
+                            font-size: 13px;
+                            color: root.text_color.transparentize(30%);
+                        }
+                    }
+                }
+            }
+
+            SettingsCard {
+                first: false;
+                last: false;
+                highlighted: restore_ta.has-hover;
+
+                restore_ta := TouchArea {
+                    clicked => { AppSettings.restore(); }
+                }
+
+                HorizontalLayout {
+                    padding: 8px;
+                    padding-top: 12px;
+                    padding-bottom: 12px;
+                    padding-left: SettingsLayout.inset;
+                    padding-right: SettingsLayout.inset;
+                    spacing: 16px;
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        horizontal-stretch: 1;
+
+                        Text {
+                            text: @tr("Restore");
+                            font-size: 18px;
+                            font-weight: 600;
+                            color: root.text_color;
+                        }
+
+                        WrappedText {
+                            text: AppSettings.ios
+                                ? @tr("Takes the newest backup in Eddy's Backups folder: its settings, and the downloads this list doesn't have. What's here stays.")
+                                : @tr("Pick a backup: its settings are taken, and the downloads this list doesn't have are added. What's here stays.");
+                            font-size: 13px;
+                            color: root.text_color.transparentize(30%);
+                        }
+                    }
+                }
+            }
+
+            SwitchRow {
+                first: false;
+                last: true;
+                title: @tr("Include saved chapters");
+                subtitle: @tr("Backups also hold the chapters fetched for books, so making a book again doesn't fetch them again. They can be large.");
+                text_color: root.text_color;
+                checked <=> AppSettings.backup_chapters;
+                toggled => { AppSettings.backup_chapters_changed(AppSettings.backup_chapters); }
             }
         }
     }

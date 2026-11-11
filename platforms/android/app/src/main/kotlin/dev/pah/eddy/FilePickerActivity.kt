@@ -9,7 +9,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import java.io.File
 
-// Trampoline that lets the user pick a .txt list of links or a .torrent file.
+// Trampoline that lets the user pick a .txt list of links or a .torrent file
+// (or, with EXTRA_BACKUP, a backup's .zip).
 // The picked document is copied into the app's cache, because Rust can only
 // read plain file paths, not content:// URIs.
 class FilePickerActivity : ComponentActivity() {
@@ -32,7 +33,15 @@ class FilePickerActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // Many file managers don't tag .torrent files, so octet-stream is
         // allowed too; Rust checks what the file actually is.
-        filePickerLauncher.launch(arrayOf("text/plain", "application/x-bittorrent", "application/octet-stream"))
+        if (intent.getBooleanExtra(EXTRA_BACKUP, false)) {
+            filePickerLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
+        } else {
+            filePickerLauncher.launch(arrayOf("text/plain", "application/x-bittorrent", "application/octet-stream"))
+        }
+    }
+
+    companion object {
+        const val EXTRA_BACKUP = "backup"
     }
 
     // Returns (path, display name), or null if the file couldn't be read.
