@@ -269,6 +269,39 @@ pub fn add_links_from_text(text: &str) -> Vec<i32> {
     extract_links(text).iter().filter_map(|url| add_url(url, true)).collect()
 }
 
+/// A download handed over by the browser extension (see native_host), as
+/// the browser would have made it: shown ready with the browser's name and
+/// size (checked again without the browser's cookies, it may well be
+/// refused), and downloaded with its cookies, page and user agent. Returns
+/// its id.
+pub fn add_caught(caught: &crate::browser::Caught) -> Option<i32> {
+    let url = caught.url.trim();
+    if url.is_empty() {
+        return None;
+    }
+    let pass = crate::downloader::BrowserPass { page: caught.referer.clone(), cookies: caught.cookies.clone(), referer: caught.referer.clone() };
+    let id = match PENDING.with(|m| m.iter().find(|l| l.url.as_str() == url).map(|l| l.id)) {
+        Some(id) => id,
+        None => {
+            crate::db::add_pending(url);
+            let id = next_id();
+            let filename = Some(clean_name(&caught.filename)).filter(|n| !n.is_empty()).or_else(|| name_from_url(url)).unwrap_or_default();
+            let mut link = initial_link(id, url);
+            link.state = ProbeState::Ready;
+            link.file_type = file_type_for(&filename, Some(caught.mime.as_str()).filter(|m| !m.is_empty()));
+            link.filename = filename.into();
+            if caught.size > 0 {
+                link.size = format_size(caught.size).into();
+            }
+            link.category = link_category(&link, false).into();
+            PENDING.with(|m| m.push(link));
+            id
+        }
+    };
+    CAUGHT.with(|c| c.borrow_mut().insert(id, (url.to_string(), pass, caught.user_agent.clone())));
+    Some(id)
+}
+
 /// A file from "Add from file" or a share: a .torrent is added as a pending
 /// torrent; anything else is read as text and its links are added.
 pub fn add_file(path: &str, name: &str) -> Vec<i32> {
