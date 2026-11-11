@@ -141,10 +141,9 @@ jobs:
 
       - name: Install Linux UI dependencies
         run: |
-          sudo apt-get update
           # Slint (fontconfig, xcb, xkbcommon), rfd's GTK file dialogs, system-theme (D-Bus),
           # and WebKitGTK for eddy-webview (only the helper links it).
-          sudo apt-get install -y libfontconfig1-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libgtk-3-dev libdbus-1-dev libwebkit2gtk-4.1-dev
+          bash tools/ci-apt.sh libfontconfig1-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libgtk-3-dev libdbus-1-dev libwebkit2gtk-4.1-dev
 
       # Dependencies only (Eddy's own crates are left out), restored from
       # main's cache and saved only on main, so PRs don't fill the store.
@@ -198,10 +197,9 @@ jobs:
 
       - name: Install Linux UI dependencies
         run: |
-          sudo apt-get update
           # Slint (fontconfig, xcb, xkbcommon), rfd's GTK file dialogs, system-theme (D-Bus),
           # and WebKitGTK for eddy-webview (only the helper links it).
-          sudo apt-get install -y libfontconfig1-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libgtk-3-dev libdbus-1-dev libwebkit2gtk-4.1-dev
+          bash tools/ci-apt.sh libfontconfig1-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libgtk-3-dev libdbus-1-dev libwebkit2gtk-4.1-dev
 
       # Dependencies only (Eddy's own crates are left out), restored from
       # main's cache and saved only on main, so PRs don't fill the store.
@@ -496,9 +494,7 @@ jobs:
         run: cargo install cargo-ndk
 
       - name: Install dependencies (Linux host)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libfontconfig1-dev
+        run: bash tools/ci-apt.sh libfontconfig1-dev
 
       # Its default package list still includes "tools", which the SDK no
       # longer has. android-36 for the Rust library (as built locally), 35
