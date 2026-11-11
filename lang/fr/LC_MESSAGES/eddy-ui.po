@@ -449,6 +449,12 @@ msgstr "Avancé"
 msgid "Download cache"
 msgstr "Cache des téléchargements"
 
+msgid "Book images"
+msgstr "Images des livres"
+
+msgid "Pictures fetched for books, kept so a book made again has them. Cleared, they're fetched again then; ones their sites no longer have are gone."
+msgstr "Images récupérées pour les livres, conservées pour qu’un livre refait les retrouve. Effacées, elles sont récupérées de nouveau à ce moment-là ; celles que leurs sites n’ont plus sont perdues."
+
 msgid "Link previews' thumbnails and info, downloaded installers, temporary files."
 msgstr "Miniatures et infos des aperçus de liens, installateurs téléchargés, fichiers temporaires."
 

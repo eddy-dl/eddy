@@ -129,6 +129,12 @@ export global AppSettings {
     in property <bool> downloads_running: false;
     callback cache_refresh();
     callback cache_clear();
+    // The pictures kept for books (measured with the cache): fetched again
+    // when a book is next made, so they can go.
+    in property <string> book_images_size: "";
+    in property <bool> book_images_empty: true;
+    in property <bool> book_images_busy: false;
+    callback book_images_clear();
 
     // Picks a cookies.txt and keeps a copy of it.
     callback cookies_add();
