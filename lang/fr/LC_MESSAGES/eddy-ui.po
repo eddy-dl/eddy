@@ -372,6 +372,12 @@ msgstr "Installer"
 msgid "Joins video and audio, converts to audio, saves streams"
 msgstr "Assemble vidéo et audio, convertit en audio, enregistre les flux"
 
+msgid "Eddy's browser"
+msgstr "Navigateur d’Eddy"
+
+msgid "Opens pages behind bot checks, and pages whose file comes from a click"
+msgstr "Ouvre les pages protégées contre les robots, et celles dont le fichier s’obtient d’un clic"
+
 msgid "Optional: helps with YouTube and Instagram"
 msgstr "Facultatif : aide pour YouTube et Instagram"
 

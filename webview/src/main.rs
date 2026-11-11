@@ -3,8 +3,9 @@
 //! Eddy starts it the first time a site needs it (platform::desktop) and
 //! hands it one job a line on stdin, "<kind>\t<url>\t<result file>": the
 //! jobs (lib.rs) are done in one webview, with its cookies kept in the folder
-//! given as the only argument; a `check` shows in a window of its own, which
-//! the user passes it in or closes. It says "ready" on
+//! given as the only argument; a `check` or `browse` shows in a window of its
+//! own, which the user passes it in (or clicks the download in) or closes.
+//! It says "ready" on
 //! stdout once the webview is up, and quits when stdin closes (Eddy went)
 //! or after a while with nothing to do.
 
@@ -19,11 +20,16 @@ use tao::dpi::LogicalSize;
 use tao::event::{Event, StartCause, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
 use tao::window::{Window, WindowBuilder};
-use wry::{WebContext, WebView, WebViewBuilder};
+use wry::{NewWindowResponse, WebContext, WebView, WebViewBuilder};
 
 enum UserEvent {
     Job(Job),
     Script(Answered),
+    /// A download the page started (stopped: Eddy downloads it), and the
+    /// name the browser would have given it.
+    Download(String, String),
+    /// A page asking for a new window (not opened as one).
+    NewWindow(String),
     Quit,
 }
 
@@ -86,8 +92,19 @@ fn main() {
             std::process::exit(1);
         }
     };
+    let proxy = event_loop.create_proxy();
     let mut context = WebContext::new(Some(data));
-    let builder = WebViewBuilder::new_with_web_context(&mut context);
+    let (downloads, windows) = (proxy.clone(), proxy.clone());
+    let builder = WebViewBuilder::new_with_web_context(&mut context)
+        .with_download_started_handler(move |url, path| {
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let _ = downloads.send_event(UserEvent::Download(url, name));
+            false
+        })
+        .with_new_window_req_handler(move |url, _features| {
+            let _ = windows.send_event(UserEvent::NewWindow(url));
+            NewWindowResponse::Deny
+        });
     #[cfg(target_os = "linux")]
     let webview = {
         use tao::platform::unix::WindowExtUnix;
@@ -109,7 +126,6 @@ fn main() {
     println!("ready");
     let _ = std::io::stdout().flush();
 
-    let proxy = event_loop.create_proxy();
     let reader = proxy.clone();
     std::thread::spawn(move || read_jobs(reader));
     let mut jobs = Jobs::new(Desktop { window, proxy }, webview);
@@ -127,6 +143,8 @@ fn main() {
             }
             Event::UserEvent(UserEvent::Job(job)) => jobs.add(job),
             Event::UserEvent(UserEvent::Script(answered)) => jobs.answered(answered),
+            Event::UserEvent(UserEvent::Download(url, name)) => jobs.download_started(url, name),
+            Event::UserEvent(UserEvent::NewWindow(url)) => jobs.new_window(url),
             Event::UserEvent(UserEvent::Quit) => *control_flow = ControlFlow::Exit,
             Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => jobs.closed(),
             _ => {}

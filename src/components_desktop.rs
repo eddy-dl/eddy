@@ -1,9 +1,11 @@
-//! yt-dlp, FFmpeg, Deno and gallery-dl on desktop (Settings → Downloads),
-//! adapted from urlsula's installdeps: when the user asks (and confirms),
-//! Eddy downloads them from GitHub into its own bin folder (yt-dlp with the
-//! community plugin, ffmpeg and ffprobe from BtbN's builds, Deno,
-//! gallery-dl's own builds). Copies already on PATH count as installed;
-//! Eddy only updates its own.
+//! yt-dlp, FFmpeg, Deno, gallery-dl and Eddy's browser helper on desktop
+//! (Settings → Downloads), adapted from urlsula's installdeps: when the user
+//! asks (and confirms), Eddy downloads them from GitHub into its own bin
+//! folder (yt-dlp with the community plugin, ffmpeg and ffprobe from BtbN's
+//! builds, Deno, gallery-dl's own builds, eddy-webview from Eddy's own
+//! release for its version). Copies already on PATH (or, for the helper,
+//! next to Eddy) count as installed; Eddy only updates its own. A file
+//! whose release gives its SHA-256 is checked against it.
 
 use crate::{AppSettings, DownloaderApp, HelperPackage};
 use slint::{ComponentHandle, ModelRc, VecModel};
@@ -15,7 +17,10 @@ use std::sync::Mutex;
 
 
 /// The tools, in the order Settings lists them.
-const TOOLS: [&str; 4] = ["ytdlp", "ffmpeg", "deno", "gallerydl"];
+const TOOLS: [&str; 5] = ["ytdlp", "ffmpeg", "deno", "gallerydl", "webview"];
+
+/// Where Eddy's own releases are.
+const EDDY_RELEASES: &str = "https://api.github.com/repos/eddy-dl/eddy/releases";
 
 /// A tool's newest build for this computer.
 #[derive(Clone, Debug)]
@@ -23,6 +28,8 @@ struct Release {
     version: String,
     url: String,
     size: u64,
+    /// The file's SHA-256 (hex), when GitHub gives it.
+    sha256: Option<String>,
 }
 
 /// A tool as it is now: its version, and whether it's Eddy's own copy.
@@ -154,9 +161,12 @@ fn installed_versions() -> HashMap<String, Installed> {
         let name = match key {
             "ytdlp" => "yt-dlp",
             "gallerydl" => "gallery-dl",
+            "webview" => "eddy-webview",
             _ => key,
         };
-        let Some(path) = crate::platform::find_tool(name) else {
+        // The helper may be next to Eddy too (as released, or in Eddy.app).
+        let path = if key == "webview" { crate::platform::webview_file() } else { crate::platform::find_tool(name) };
+        let Some(path) = path else {
             continue;
         };
         let own = path.starts_with(&own_dir);
@@ -170,6 +180,8 @@ fn installed_versions() -> HashMap<String, Installed> {
             // gallery-dl's "1.32.19".
             _ if own => std::fs::read_to_string(own_dir.join(format!(".{key}-version"))).ok().map(|v| v.trim().to_string()),
             "gallerydl" => first_line(&path, "--version"),
+            // Next to Eddy: it came with this Eddy.
+            "webview" => Some(env!("CARGO_PKG_VERSION").to_string()),
             _ => first_line(&path, "-version").and_then(|l| l.split_whitespace().nth(2).map(String::from)),
         };
         found.insert(key.to_string(), Installed { version: version.unwrap_or_default(), own });
@@ -185,6 +197,18 @@ fn gallerydl_asset() -> Option<&'static str> {
         ("macos", _) => Some("gallery-dl_macos"),
         ("windows", "x86_64" | "aarch64") => Some("gallery-dl_windows.exe"),
         ("windows", "x86") => Some("gallery-dl_windows_x86.exe"),
+        _ => None,
+    }
+}
+
+/// Eddy's browser helper for this computer, as the release names it
+/// (macOS has it inside Eddy.app).
+fn webview_asset() -> Option<&'static str> {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => Some("eddy-webview-linux-x86_64"),
+        ("linux", "aarch64") => Some("eddy-webview-linux-arm64"),
+        ("windows", "x86_64") => Some("eddy-webview-windows-x86_64.exe"),
+        ("windows", "aarch64") => Some("eddy-webview-windows-arm64.exe"),
         _ => None,
     }
 }
@@ -233,6 +257,12 @@ async fn github_release(api: &str) -> Result<serde_json::Value, String> {
     serde_json::from_str(&text).map_err(|e| e.to_string())
 }
 
+/// A release's asset's SHA-256, from GitHub's "digest" ("sha256:…").
+fn digest(release: &serde_json::Value, name: &str) -> Option<String> {
+    let asset = release["assets"].as_array()?.iter().find(|a| a["name"] == name)?;
+    asset["digest"].as_str()?.strip_prefix("sha256:").map(str::to_ascii_lowercase)
+}
+
 /// A release's asset by name: its download link and size.
 fn asset(release: &serde_json::Value, name: &str) -> Option<(String, u64, String)> {
     let asset = release["assets"].as_array()?.iter().find(|a| a["name"] == name)?;
@@ -250,21 +280,21 @@ async fn fetch_releases() -> Result<HashMap<String, Release>, String> {
         let release = github_release("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest").await?;
         if let Some((url, size, _)) = asset(&release, name) {
             let version = release["tag_name"].as_str().unwrap_or_default().to_string();
-            found.insert("ytdlp".to_string(), Release { version, url, size });
+            found.insert("ytdlp".to_string(), Release { version, url, size, sha256: digest(&release, name) });
         }
     }
     if let Some(name) = ffmpeg {
         // "latest" is rebuilt daily; its build date stands in for a version.
         let release = github_release("https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/latest").await?;
         if let Some((url, size, date)) = asset(&release, name) {
-            found.insert("ffmpeg".to_string(), Release { version: date, url, size });
+            found.insert("ffmpeg".to_string(), Release { version: date, url, size, sha256: digest(&release, name) });
         }
     }
     if let Some(name) = deno {
         let release = github_release("https://api.github.com/repos/denoland/deno/releases/latest").await?;
         if let Some((url, size, _)) = asset(&release, &name) {
             let version = release["tag_name"].as_str().unwrap_or_default().trim_start_matches('v').to_string();
-            found.insert("deno".to_string(), Release { version, url, size });
+            found.insert("deno".to_string(), Release { version, url, size, sha256: digest(&release, &name) });
         }
     }
     if let Some(name) = gallerydl_asset() {
@@ -272,10 +302,46 @@ async fn fetch_releases() -> Result<HashMap<String, Release>, String> {
         let release = github_release("https://api.github.com/repos/gdl-org/builds/releases/latest").await?;
         if let Some((url, size, _)) = asset(&release, name) {
             let version = release["tag_name"].as_str().unwrap_or_default().to_string();
-            found.insert("gallerydl".to_string(), Release { version, url, size });
+            found.insert("gallerydl".to_string(), Release { version, url, size, sha256: digest(&release, name) });
+        }
+    }
+    if let Some(name) = webview_asset() {
+        // This Eddy's own release, else the newest that has it (a build
+        // between releases).
+        let release = match github_release(&format!("{EDDY_RELEASES}/tags/v{}", env!("CARGO_PKG_VERSION"))).await {
+            Ok(release) if asset(&release, name).is_some() => release,
+            // Not found isn't the other tools' failure: the row says so.
+            _ => match github_release(&format!("{EDDY_RELEASES}?per_page=10")).await {
+                Ok(all) => all.as_array().into_iter().flatten().find(|r| asset(r, name).is_some()).cloned().unwrap_or_default(),
+                Err(e) => {
+                    log::warn!("couldn't look for eddy-webview's release: {e}");
+                    serde_json::Value::Null
+                }
+            },
+        };
+        if let Some((url, size, _)) = asset(&release, name) {
+            let version = release["tag_name"].as_str().unwrap_or_default().trim_start_matches('v').to_string();
+            found.insert("webview".to_string(), Release { version, url, size, sha256: digest(&release, name) });
         }
     }
     Ok(found)
+}
+
+/// Whether `file` is what its release says (when it says).
+fn verify(file: &Path, sha256: Option<&str>) -> Result<(), String> {
+    use sha2::{Digest, Sha256};
+    let Some(wanted) = sha256 else {
+        return Ok(());
+    };
+    let mut hasher = Sha256::new();
+    std::io::copy(&mut std::fs::File::open(file).map_err(|e| e.to_string())?, &mut hasher).map_err(|e| e.to_string())?;
+    let got: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    if got == wanted {
+        Ok(())
+    } else {
+        let _ = std::fs::remove_file(file);
+        Err(format!("the download doesn't match its release's SHA-256 ({got}, not {wanted})"))
+    }
 }
 
 /// Downloads and installs a tool (the user confirmed).
@@ -350,8 +416,13 @@ async fn install_tool(key: &str, release: &Release) -> Result<(), String> {
     let (key_owned, release_owned, dir_owned) = (key.to_string(), release.clone(), dir.clone());
     let unpacked = tokio::task::spawn_blocking(move || -> Result<(), String> {
         let (key, release, dir) = (key_owned, release_owned, dir_owned);
+        verify(&archive, release.sha256.as_deref())?;
         match key.as_str() {
             "ytdlp" => place(&archive, &dir.join(format!("yt-dlp{exe}"))),
+            "webview" => {
+                place(&archive, &dir.join(format!("eddy-webview{exe}")))?;
+                std::fs::write(dir.join(".webview-version"), &release.version).map_err(|e| e.to_string())
+            }
             "ffmpeg" => {
                 let wanted = [format!("ffmpeg{exe}"), format!("ffprobe{exe}")];
                 if release.url.ends_with(".zip") {

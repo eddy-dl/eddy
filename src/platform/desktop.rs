@@ -136,9 +136,11 @@ pub fn open_site_check(url: &str, result: &str) -> bool {
     send_to_webview("check", url, result)
 }
 
-/// No browser to catch a page's download in on desktop (yet).
-pub fn open_browser(_page: &str, _result: &str) -> bool {
-    false
+/// Opens `page` in the webview helper's window, where the user clicks its
+/// download: the file's link and what came with it are written to
+/// `result`, as Android's BrowserActivity does (see crate::browser).
+pub fn open_browser(page: &str, result: &str) -> bool {
+    send_to_webview("browse", page, result)
 }
 
 /// A page read in the webview helper, unseen, for a site that turns Eddy's
@@ -162,11 +164,17 @@ static WEBVIEW: std::sync::Mutex<Option<Webview>> = std::sync::Mutex::new(None);
 static WEBVIEW_MISSING_SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// The helper: EDDY_WEBVIEW, else next to Eddy (as built, or as released:
-/// "eddy-webview-linux-x86_64"…), else on the PATH.
+/// "eddy-webview-linux-x86_64"…), else Eddy's own copy (Settings →
+/// Downloads → External packages), else on the PATH.
 fn webview_path() -> PathBuf {
+    webview_file().unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "eddy-webview.exe" } else { "eddy-webview" }))
+}
+
+/// The helper's file, if it's anywhere but (maybe) on the PATH.
+pub fn webview_file() -> Option<PathBuf> {
     let name = if cfg!(windows) { "eddy-webview.exe" } else { "eddy-webview" };
     if let Some(path) = std::env::var_os("EDDY_WEBVIEW") {
-        return path.into();
+        return Some(path.into());
     }
     let dir = std::env::current_exe().ok().and_then(|exe| exe.parent().map(PathBuf::from));
     let beside = dir.as_ref().map(|dir| dir.join(name)).filter(|path| path.exists()).or_else(|| {
@@ -178,7 +186,7 @@ fn webview_path() -> PathBuf {
         released.sort();
         released.pop()
     });
-    beside.unwrap_or_else(|| PathBuf::from(name))
+    beside.or_else(|| find_tool("eddy-webview"))
 }
 
 /// Starts the helper and waits for its "ready" (its browser is up); a
@@ -241,12 +249,14 @@ fn send_to_webview(kind: &str, url: &str, result: &str) -> bool {
                 log::warn!("{e}");
                 if !WEBVIEW_MISSING_SAID.swap(true, std::sync::atomic::Ordering::SeqCst) {
                     // macOS has its webview built in: only the helper can be missing.
-                    show_toast(if cfg!(windows) {
-                        "Sites with bot checks need Microsoft Edge WebView2"
+                    show_toast(if webview_file().is_none() {
+                        "Eddy's browser needs its helper: get it in Settings → Downloads → External packages"
+                    } else if cfg!(windows) {
+                        "Eddy's browser needs Microsoft Edge WebView2"
                     } else if cfg!(target_os = "macos") {
-                        "Sites with bot checks need eddy-webview next to Eddy"
+                        "Eddy's browser didn't start"
                     } else {
-                        "Sites with bot checks need WebKitGTK (libwebkit2gtk-4.1)"
+                        "Eddy's browser needs WebKitGTK (libwebkit2gtk-4.1)"
                     });
                 }
                 return false;
