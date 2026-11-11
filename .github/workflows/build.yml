@@ -51,7 +51,7 @@ jobs:
           workspaces: |
             .
             webview
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.head_ref == 'faster-ci' }}
 
       # Each crate's compiled output, found again by its inputs (unlike
       # Cargo's own reuse, this survives a fresh checkout): a PR that leaves
@@ -101,7 +101,7 @@ jobs:
           workspaces: |
             .
             webview
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.head_ref == 'faster-ci' }}
 
       # Each crate's compiled output, found again by its inputs (unlike
       # Cargo's own reuse, this survives a fresh checkout): a PR that leaves
@@ -155,7 +155,7 @@ jobs:
           workspaces: |
             .
             webview
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.head_ref == 'faster-ci' }}
 
       # Each crate's compiled output, found again by its inputs (unlike
       # Cargo's own reuse, this survives a fresh checkout): a PR that leaves
@@ -212,7 +212,7 @@ jobs:
           workspaces: |
             .
             webview
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.head_ref == 'faster-ci' }}
 
       # Each crate's compiled output, found again by its inputs (unlike
       # Cargo's own reuse, this survives a fresh checkout): a PR that leaves
@@ -268,7 +268,7 @@ jobs:
           workspaces: |
             .
             webview
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.head_ref == 'faster-ci' }}
 
       # Each crate's compiled output, found again by its inputs (unlike
       # Cargo's own reuse, this survives a fresh checkout): a PR that leaves
@@ -359,7 +359,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: ios
-          save-if: ${{ github.ref == 'refs/heads/main' || github.head_ref == 'ios' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.head_ref == 'ios' || github.head_ref == 'faster-ci' }}
 
       - name: Set up sccache
         uses: mozilla-actions/sccache-action@v0.0.9
@@ -484,7 +484,7 @@ jobs:
           shared-key: android
           workspaces: |
             .
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.head_ref == 'faster-ci' }}
 
       # Each crate's compiled output, found again by its inputs (unlike
       # Cargo's own reuse, this survives a fresh checkout): a PR that leaves
