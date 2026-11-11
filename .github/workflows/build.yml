@@ -27,6 +27,9 @@ env:
   # main's cache (a PR's own is only its own).
   CARGO_PROFILE_RELEASE_LTO: ${{ github.event_name == 'workflow_dispatch' && 'fat' || 'off' }}
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ github.event_name == 'workflow_dispatch' && '1' || '16' }}
+  # EXPERIMENT: light optimisation outside a release (nobody runs these
+  # builds; the release keeps Cargo.toml's "z").
+  CARGO_PROFILE_RELEASE_OPT_LEVEL: ${{ github.event_name == 'workflow_dispatch' && 'z' || '1' }}
 
 jobs:
   build-windows-x86_64:
@@ -65,6 +68,11 @@ jobs:
         run: |
           cargo build --release --bin eddy-desktop --target x86_64-pc-windows-msvc
           cargo build --release --target x86_64-pc-windows-msvc --manifest-path webview/Cargo.toml
+
+      # Whether the compiles came from sccache (the experiment's numbers).
+      - name: Cache stats
+        if: always()
+        run: sccache --show-stats
 
       - name: Rename Binary
         run: |
@@ -113,6 +121,11 @@ jobs:
         run: |
           cargo build --release --bin eddy-desktop
           cargo build --release --manifest-path webview/Cargo.toml
+
+      # Whether the compiles came from sccache (the experiment's numbers).
+      - name: Cache stats
+        if: always()
+        run: sccache --show-stats
 
       - name: Rename Binary
         run: |
@@ -170,6 +183,11 @@ jobs:
       - name: Tests
         run: cargo test --release --lib
 
+      # Whether the compiles came from sccache (the experiment's numbers).
+      - name: Cache stats
+        if: always()
+        run: sccache --show-stats
+
       - name: Rename Binary
         run: |
           mv -f target/release/eddy-desktop target/release/eddy-linux-x86_64
@@ -222,6 +240,11 @@ jobs:
         run: |
           cargo build --release --bin eddy-desktop
           cargo build --release --manifest-path webview/Cargo.toml
+
+      # Whether the compiles came from sccache (the experiment's numbers).
+      - name: Cache stats
+        if: always()
+        run: sccache --show-stats
 
       - name: Rename Binary
         run: |
@@ -278,6 +301,11 @@ jobs:
         run: |
           cargo build --release --bin eddy-desktop
           cargo build --release --manifest-path webview/Cargo.toml
+
+      # Whether the compiles came from sccache (the experiment's numbers).
+      - name: Cache stats
+        if: always()
+        run: sccache --show-stats
 
       # Eddy.app: Eddy with its webview helper beside it (macOS's own WebKit,
       # nothing to install), zipped.
@@ -522,6 +550,11 @@ jobs:
           ANDROID_BUILD_TOOLS_VERSION: "35.0.0"
           FORCE_SKIA_BUILD: 1 
         run: cargo ndk -t armeabi-v7a -P 26 build --lib --release
+
+      # Whether the compiles came from sccache (the experiment's numbers).
+      - name: Cache stats
+        if: always()
+        run: sccache --show-stats
 
       - name: Decode Android Keystore
         env:
