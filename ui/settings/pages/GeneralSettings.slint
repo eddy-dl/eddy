@@ -107,7 +107,7 @@ export component GeneralSettings inherits Rectangle {
 
             SettingsCard {
                 first: true;
-                last: !AppSettings.is_mobile && !AppSettings.can_register_handlers;
+                last: !AppSettings.is_mobile && !AppSettings.can_register_handlers && !AppSettings.can_register_browser;
                 highlighted: language_ta.has-hover;
 
                 language_ta := TouchArea {
@@ -153,7 +153,7 @@ export component GeneralSettings inherits Rectangle {
             // Desktop: Eddy as what opens magnet links and .torrent files.
             if AppSettings.can_register_handlers: SettingsCard {
                 first: false;
-                last: true;
+                last: !AppSettings.can_register_browser;
                 highlighted: handlers_ta.has-hover;
 
                 handlers_ta := TouchArea {
@@ -182,6 +182,45 @@ export component GeneralSettings inherits Rectangle {
 
                         WrappedText {
                             text: @tr("Click to make Eddy the app that opens magnet links and .torrent files.");
+                            font-size: 13px;
+                            color: root.text_color.transparentize(30%);
+                        }
+                    }
+                }
+            }
+
+            // Desktop: the browser extension's downloads, handed to Eddy.
+            if AppSettings.can_register_browser: SettingsCard {
+                first: false;
+                last: true;
+                highlighted: browser_ta.has-hover;
+
+                browser_ta := TouchArea {
+                    clicked => { AppSettings.register_browser(); }
+                }
+
+                HorizontalLayout {
+                    padding: 8px;
+                    padding-top: 12px;
+                    padding-bottom: 12px;
+                    padding-left: SettingsLayout.inset;
+                    padding-right: SettingsLayout.inset;
+                    spacing: 16px;
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        horizontal-stretch: 1;
+
+                        Text {
+                            text: @tr("Browser extension");
+                            font-size: 18px;
+                            font-weight: 600;
+                            color: root.text_color;
+                        }
+
+                        WrappedText {
+                            text: @tr("Click to let the Eddy extension for Chrome, Edge, Brave, Vivaldi and Firefox send their downloads here, with their cookies.");
                             font-size: 13px;
                             color: root.text_color.transparentize(30%);
                         }

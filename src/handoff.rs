@@ -5,7 +5,8 @@
 //! hands its arguments over and quits rather than opening a second window on
 //! the same database; with none, it brings the open window forward. Also makes
 //! Eddy what the system opens magnet links and .torrent files with
-//! (Settings → General).
+//! (Settings → General). The browser extension's downloads come the same
+//! way (see native_host), as a `browser` line.
 
 use crate::DownloaderApp;
 use slint::ComponentHandle;
@@ -13,6 +14,10 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+
+/// Starts a line that's a download from the browser extension, its details
+/// (browser::Caught) as JSON after it.
+pub const BROWSER: &str = "browser\t";
 
 /// "<port> <token>" of the Eddy running now.
 fn instance_file() -> PathBuf {
@@ -118,6 +123,13 @@ pub fn open(ui: &DownloaderApp, args: &[String]) {
     let mut links = String::new();
     let mut added = false;
     for arg in args {
+        if let Some(json) = arg.strip_prefix(BROWSER) {
+            match serde_json::from_str::<crate::browser::Caught>(json) {
+                Ok(caught) => added |= crate::links::add_caught(&caught).is_some(),
+                Err(e) => log::warn!("a download from the browser extension that isn't one: {e}"),
+            }
+            continue;
+        }
         let path = Path::new(arg);
         if !is_link(arg) && path.is_file() {
             let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();

@@ -623,6 +623,9 @@ jobs:
           echo "| Android Universal | $APK_UNIV_SHA |" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
+      - name: Zip the Browser Extension
+        run: cd extension && zip -r ../release-artifacts/eddy-browser-extension.zip .
+
       - name: Publish Draft Release
         uses: softprops/action-gh-release@v3
         with:
@@ -639,6 +642,7 @@ jobs:
             release-artifacts/eddy-macos-*.zip
             release-artifacts/eddy-ios-unsigned.ipa
             release-artifacts/*.apk
+            release-artifacts/eddy-browser-extension.zip
 
       - name: Delete Artifacts
         uses: geekyeggo/delete-artifact@v6

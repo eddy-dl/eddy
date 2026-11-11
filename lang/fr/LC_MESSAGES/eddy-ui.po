@@ -944,3 +944,9 @@ msgstr "Aucune : la police du système"
 
 msgid "None: Eddy's own"
 msgstr "Aucune : celle d’Eddy"
+
+msgid "Browser extension"
+msgstr "Extension de navigateur"
+
+msgid "Click to let the Eddy extension for Chrome, Edge, Brave, Vivaldi and Firefox send their downloads here, with their cookies."
+msgstr "Cliquez pour que l’extension Eddy pour Chrome, Edge, Brave, Vivaldi et Firefox envoie ses téléchargements ici, avec ses cookies."

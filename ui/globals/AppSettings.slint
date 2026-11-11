@@ -23,6 +23,10 @@ export global AppSettings {
     // files (Linux, Windows), and does when asked (Settings → General).
     in property <bool> can_register_handlers: false;
     callback register_handlers();
+    // Desktop: lets the browser extension (extension/) hand downloads to
+    // Eddy, its native messaging host (Settings → General).
+    in property <bool> can_register_browser: false;
+    callback register_browser();
     in-out property <bool> haptic_feedback: false;
     // Android: draw with the font picked for the phone (found as Eddy
     // opens, so it shows from the next start).

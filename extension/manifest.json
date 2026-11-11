@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "Eddy",
+  "description": "Sends downloads to Eddy, the download manager, with the browser's cookies.",
+  "version": "0.2.1",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAkNzpDLCroh3H0ltXlIE8t6yD7Mfnr9VeU4zrdnGA3SuGrltcy3vOxlg56v7un/XKhhOk8G91Ll956HTYaRl0yHZPh9ZmPk/0GZqIuLF/hDkijzAIfe6mL0sIrNZkIZbJqWg2dMFWPKTFAXvFEijCu5F0hr4iycgmI/q5bcP970VTvV/J64IwUtLW4Db+9WHROl468+fu2a3UEkYOOAimNRiWhABIzBLZRxhUK0C9R6K6gkf8Kk4VNwCzARtpKAjLcm191BkhWfZpFPeTzSRHNZOzIYYJTsYUTFs9RP9oTKN6FXRhs6iwiEn0h7LazqBU323f7cRWgnYVWNj97Zq4PQIDAQAB",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "permissions": ["contextMenus", "cookies", "downloads", "nativeMessaging", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js",
+    "scripts": ["background.js"]
+  },
+  "action": {
+    "default_title": "Eddy",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    }
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "eddy@pah.dev",
+      "strict_min_version": "121.0"
+    }
+  }
+}

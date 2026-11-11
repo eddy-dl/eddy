@@ -17,6 +17,8 @@ pub mod gallerydl;
 pub mod handoff;
 pub mod links;
 pub mod logs;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub mod native_host;
 pub mod novels;
 pub mod platform;
 pub mod preferences;

@@ -52,6 +52,19 @@ Downloads go to `Download/Eddy` (by type, if you like) or a folder you pick.
 English and French. The French translation was written by an AI model, not a translator, and
 hasn't been checked by a native speaker: corrections are welcome.
 
+## Browser extension
+
+On desktop, `extension/` (also `eddy-browser-extension.zip` with each release) sends downloads
+from Chrome, Edge, Brave, Vivaldi or Firefox to Eddy, with the browser's cookies and the page they
+came from, so files that only download from a logged-in or visited page still work. Right-click a
+link, picture or video for **Download with Eddy**; its options can also send every download there.
+
+1. In Eddy, click **Settings → General → Browser extension** once (and again if Eddy moves).
+2. Chrome and the browsers built on it: `chrome://extensions`, turn on Developer mode, **Load
+   unpacked**, and pick the `extension` folder. Firefox: `about:debugging` → This Firefox → **Load
+   Temporary Add-on**, and pick its `manifest.json` (until Firefox restarts; it isn't signed yet),
+   then allow it on all sites in its permissions.
+
 ## Building
 
 For Android, you need Rust (edition 2024), the Android NDK and SDK (API 36), and
@@ -98,6 +111,7 @@ slint-viewer --style material ui/app.slint
 | `platforms/android/` | The Android app: Gradle, the download service, the browser check and Eddy's browser (Kotlin) |
 | `platforms/ios/` | The iOS app: its Xcode project (XcodeGen) and build script; CI fetches Python, ffmpeg and QuickJS-ng into it |
 | `patches/` | Patched crates: aria2_rust, and Slint's Android backend |
+| `extension/` | The browser extension (Chrome, Firefox), which hands downloads to Eddy |
 | `lang/` | Translations (gettext `.po`) |
 | `tools/` | The icon and wordmark generators, and `sync_po.py` for the translations |
 | `docs/` | Design notes |
