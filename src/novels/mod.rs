@@ -227,15 +227,17 @@ struct CachedChapter {
     hidden_classes: Vec<String>,
 }
 
+/// Where a book's fetched chapters (and, in `images`, its pictures) are
+/// kept.
+fn cache_dir(book: &Book) -> PathBuf {
+    PathBuf::from(crate::platform::get_app_data_dir()).join("novels").join(book.site.key()).join(clean::safe_component(&book.id))
+}
+
 fn cache_file(book: &Book, chapter: &ChapterRef) -> PathBuf {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     chapter.url.hash(&mut hasher);
-    PathBuf::from(crate::platform::get_app_data_dir())
-        .join("novels")
-        .join(book.site.key())
-        .join(clean::safe_component(&book.id))
-        .join(format!("{:016x}.json", hasher.finish()))
+    cache_dir(book).join(format!("{:016x}.json", hasher.finish()))
 }
 
 /// The chapters `options` picks (one by one, else its range), locked ones
@@ -303,8 +305,9 @@ pub async fn download(
         }
     }
 
-    // Images: each once, smaller or as a still where asked.
-    let mut collected = images::Collector::new(options.small_images);
+    // Images: each once, smaller or as a still where asked; kept, so the
+    // book made again has the ones it had.
+    let mut collected = images::Collector::new(options.small_images, cache_dir(&book).join("images"));
     let mut packed = Vec::with_capacity(texts.len());
     for (c, xhtml) in texts {
         let xhtml = if options.images { collected.rewrite(&xhtml).await } else { xhtml };
