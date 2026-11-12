@@ -19,6 +19,24 @@ pub mod xenforo;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+tokio::task_local! {
+    /// Where reading a long table of contents reports how far it got (the
+    /// preview's "page 3 of 32"), while the book is read for one.
+    static CONTENTS_PROGRESS: Box<dyn Fn(u64, u64) + Send + Sync>;
+}
+
+/// Runs `read` with its table of contents progress (pages read, pages)
+/// going to `report`.
+pub async fn with_contents_progress<T>(report: impl Fn(u64, u64) + Send + Sync + 'static, read: impl std::future::Future<Output = T>) -> T {
+    CONTENTS_PROGRESS.scope(Box::new(report), read).await
+}
+
+/// A table of contents' pages read so far, of how many (no one may be
+/// listening).
+fn contents_progress(read: u64, pages: u64) {
+    let _ = CONTENTS_PROGRESS.try_with(|report| report(read, pages));
+}
+
 /// The reading sites Eddy knows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Site {

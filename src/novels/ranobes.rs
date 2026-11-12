@@ -45,12 +45,28 @@ pub async fn book(url: &str) -> Result<Book, String> {
     let html = fetch::text(&page_url).await?;
     let toc = format!("{site}/chapters/{id}/");
     let first = fetch::text(&toc).await?;
-    let (mut chapters, pages) = toc_page(&first, &site);
-    for n in 2..=pages.min(MAX_PAGES) {
-        let page = fetch::text(&format!("{toc}page/{n}/")).await?;
-        chapters.extend(toc_page(&page, &site).0);
+    let (mut chapters, pages) = toc_page(&first, &site).ok_or_else(|| not_the_page(&toc, &first))?;
+    let pages = pages.min(MAX_PAGES);
+    super::contents_progress(1, pages);
+    for n in 2..=pages {
+        let url = format!("{toc}page/{n}/");
+        let page = fetch::text(&url).await?;
+        // A page without its chapters (the site's own picture check, shown
+        // to readers it thinks too fast): the book isn't read with some of
+        // its chapters left out.
+        chapters.extend(toc_page(&page, &site).ok_or_else(|| not_the_page(&url, &page))?.0);
+        super::contents_progress(n, pages);
     }
     parse_book(&id, &page_url, &html, chapters)
+}
+
+/// The error for a page that came without what it should have: most likely
+/// Ranobes' own bot check ("click on the similar image"), which Eddy doesn't
+/// recognise yet. Saved beside the logs, to see what it is.
+fn not_the_page(url: &str, html: &str) -> String {
+    log::warn!("{url}: not the page ({} characters, titled {:?}; saved as ranobes-page.html beside the logs)", html.len(), fetch::title_of(html));
+    crate::logs::save("ranobes-page.html", html);
+    "Ranobes showed a check instead of the page (its picture puzzle?): open the book in a browser, solve it, then try again".to_string()
 }
 
 /// The book's page, as a page of it links it.
@@ -63,11 +79,10 @@ fn book_link(html: &str, site: &str, id: &str) -> Option<String> {
     })
 }
 
-/// A contents page's chapters (newest first, as listed) and the page count.
-fn toc_page(html: &str, site: &str) -> (Vec<ChapterRef>, u64) {
-    let Some(data) = json_after(html, "window.__DATA__") else {
-        return (Vec::new(), 0);
-    };
+/// A contents page's chapters (newest first, as listed) and the page count;
+/// None for a page without them.
+fn toc_page(html: &str, site: &str) -> Option<(Vec<ChapterRef>, u64)> {
+    let data = json_after(html, "window.__DATA__")?;
     let pages = data.get("pages_count").and_then(|p| p.as_u64().or_else(|| p.as_str()?.parse().ok())).unwrap_or(1);
     let chapters = data
         .get("chapters")
@@ -81,7 +96,7 @@ fn toc_page(html: &str, site: &str) -> (Vec<ChapterRef>, u64) {
             Some(ChapterRef { url, title, volume: None, locked: false })
         })
         .collect();
-    (chapters, pages)
+    Some((chapters, pages))
 }
 
 /// The JSON value assigned to `name` in a script (`name = {...};`).
@@ -149,7 +164,7 @@ pub fn parse_book(id: &str, page_url: &str, html: &str, mut chapters: Vec<Chapte
 
 pub async fn chapter(url: &str) -> Result<RawChapter, String> {
     let html = fetch::text(url).await?;
-    parse_chapter(&html)
+    parse_chapter(&html).map_err(|_| not_the_page(url, &html))
 }
 
 pub fn parse_chapter(html: &str) -> Result<RawChapter, String> {
@@ -185,8 +200,10 @@ mod tests {
             <div id="mc-fs-genre"><a href="/tags/genre/Action/">Action</a>, <a href="/tags/genre/Fantasy/">Fantasy</a></div>
             </body></html>"#;
         let toc = r#"<script>window.__DATA__ = {"chapters":[{"id":2,"title":"Chapter 2","link":"https://ranobes.top/mother-of-learning-v812312-976776/2.html"},{"id":1,"title":"Chapter 1","link":"https://ranobes.top/mother-of-learning-v812312-976776/1.html"}],"pages_count":3};</script>"#;
-        let (chapters, pages) = toc_page(toc, "https://ranobes.top");
+        let (chapters, pages) = toc_page(toc, "https://ranobes.top").unwrap();
         assert_eq!(pages, 3);
+        // Its picture check in place of the contents isn't a page without chapters.
+        assert!(toc_page("<html><body>If you are human, click on the similar image</body></html>", "https://ranobes.top").is_none());
         let book = parse_book("976776", "https://ranobes.top/novels/976776-mother-of-learning-v812312.html", html, chapters).unwrap();
         assert_eq!(book.title, "Mother of Learning");
         assert_eq!(book.author.as_deref(), Some("nobody103"));
