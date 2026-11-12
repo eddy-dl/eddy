@@ -1,0 +1,29 @@
+// The Books page: every book saved, one row each however many files
+// (parts) it came as. The Rust side fills `books` (see library.rs).
+
+export struct BookRow {
+    key: string, // "<site>:<id>", what `save_again` and `remove` take
+    title: string,
+    site: string, // e.g. "Royal Road"
+    chapters: int, // the book's chapters when it was last saved
+    cover: image, // empty when none was kept
+    // Its downloads, all deleted: shown struck out, to save again or remove.
+    deleted: bool,
+    // The download the row's buttons act on (its first file), -1 if deleted.
+    download_id: int,
+    checking: bool, // checking for new chapters
+}
+
+export global Library {
+    // PLACEHOLDER: sample books so the page can be designed in the viewer;
+    // the Rust side replaces them.
+    in property <[BookRow]> books: [
+        { key: "royalroad:1", title: "Mother of Learning", site: "Royal Road", chapters: 108, download_id: 1 },
+        { key: "ranobes:2", title: "Salvos (A Monster Evolution LitRPG)", site: "Ranobes", chapters: 812, download_id: 2, checking: true },
+        { key: "ao3:3", title: "The Last Ship Out of Somewhere Very Far Away", site: "AO3", chapters: 24, deleted: true, download_id: -1 },
+    ];
+    // Opens the preview for the book's link, to save it again.
+    callback save_again(string);
+    // Takes a deleted book off the page.
+    callback remove(string);
+}

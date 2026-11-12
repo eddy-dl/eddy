@@ -1,0 +1,270 @@
+// The Books page (from the small FAB above +): each book saved, one row
+// however many files it came as, with its cover. A book's update and
+// chapter picking live here; one whose downloads were all deleted stays,
+// struck out in red, to be saved again or removed.
+
+import { ThemeSettings } from "../themes/theme.slint";
+import { HoldTouchArea, HintBubble } from "HoldHint.slint";
+import { Library, BookRow } from "../globals/Library.slint";
+
+// MD3's error colour, as Eddy uses it elsewhere.
+global BookColors {
+    out property <color> deleted: #E5534B;
+}
+
+// A 48 icon button at a card's right end; holding it names it, at its left.
+component BookButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> hint;
+    in property <bool> enabled: true;
+    callback tapped();
+
+    width: 48px;
+    height: 48px;
+    border-radius: 24px;
+    background: ta.pressed && !ta.holding ? ThemeSettings.text_color.transparentize(90%) : transparent;
+
+    Image {
+        source: root.icon;
+        width: 24px;
+        height: 24px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        // MD3 disabled: on-surface at 38%.
+        colorize: ThemeSettings.text_color.transparentize(root.enabled ? 25% : 62%);
+    }
+    ta := HoldTouchArea {
+        enabled: root.enabled;
+        tapped => { root.tapped(); }
+    }
+    HintBubble {
+        text: root.hint;
+        shown: ta.holding;
+        x: -self.width - 4px;
+        y: (parent.height - self.height) / 2;
+    }
+}
+
+component BookCard inherits Rectangle {
+    in property <BookRow> book;
+    callback open();
+    callback update();
+    callback chapters();
+    callback save_again();
+    callback remove();
+
+    height: 88px;
+    border-radius: 12px;
+    background: ta.pressed ? ThemeSettings.surface.darker(0.08) : ThemeSettings.surface;
+    animate background { duration: ta.pressed ? 150ms : ThemeSettings.fade; easing: ease-in-out; }
+
+    // A tap opens the book (its first file); a deleted one has none.
+    ta := TouchArea {
+        enabled: !root.book.deleted;
+        clicked => { root.open(); }
+    }
+
+    HorizontalLayout {
+        padding: 12px;
+        // Room for the two buttons over the right end.
+        padding-right: 12px + 2 * 48px;
+        spacing: 12px;
+
+        // The cover, 2:3 as books are; a book glyph when none was kept.
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 44px;
+                height: 64px;
+                border-radius: 6px;
+                clip: true;
+                background: ThemeSettings.secondary_container;
+                opacity: root.book.deleted ? 0.45 : 1.0;
+
+                if root.book.cover.width == 0: Image {
+                    source: @image-url("../icons/rounded/menu_book.svg");
+                    width: 24px;
+                    height: 24px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    colorize: ThemeSettings.on_secondary_container;
+                }
+                if root.book.cover.width > 0: Image {
+                    source: root.book.cover;
+                    width: 100%;
+                    height: 100%;
+                    image-fit: cover;
+                }
+            }
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 6px;
+
+            Rectangle {
+                height: title.preferred-height;
+                title := Text {
+                    width: 100%;
+                    text: root.book.title;
+                    color: root.book.deleted ? BookColors.deleted : ThemeSettings.text_color;
+                    font-size: 15px;
+                    font-weight: 600;
+                    overflow: elide;
+                }
+                // Struck out (Slint's Text has no strikethrough): a line
+                // through the middle, as long as the text shown.
+                if root.book.deleted: Rectangle {
+                    x: 0;
+                    y: (parent.height - self.height) / 2 + 1px;
+                    width: Math.min(title.preferred-width, parent.width);
+                    height: 1.5px;
+                    background: BookColors.deleted;
+                }
+            }
+
+            Text {
+                text: root.book.deleted ? @tr("Deleted")
+                    : root.book.checking ? @tr("Checking for new chapters…")
+                    : root.book.site + " · " + @tr("{n} chapter" | "{n} chapters" % root.book.chapters);
+                color: root.book.deleted ? BookColors.deleted : ThemeSettings.text_color.transparentize(35%);
+                font-size: 12px;
+                overflow: elide;
+            }
+        }
+    }
+
+    // Over the card's right end: what it can do.
+    if !root.book.deleted: BookButton {
+        x: parent.width - 2 * self.width - 4px;
+        y: (parent.height - self.height) / 2;
+        icon: @image-url("../icons/rounded/checklist.svg");
+        hint: @tr("Choose chapters");
+        tapped => { root.chapters(); }
+    }
+    if !root.book.deleted: BookButton {
+        x: parent.width - self.width - 4px;
+        y: (parent.height - self.height) / 2;
+        icon: @image-url("../icons/rounded/refresh.svg");
+        hint: @tr("Check for new chapters");
+        enabled: !root.book.checking;
+        tapped => { root.update(); }
+    }
+    if root.book.deleted: BookButton {
+        x: parent.width - 2 * self.width - 4px;
+        y: (parent.height - self.height) / 2;
+        icon: @image-url("../icons/rounded/download.svg");
+        hint: @tr("Save again");
+        tapped => { root.save_again(); }
+    }
+    if root.book.deleted: BookButton {
+        x: parent.width - self.width - 4px;
+        y: (parent.height - self.height) / 2;
+        icon: @image-url("../icons/rounded/close.svg");
+        hint: @tr("Remove from Books");
+        tapped => { root.remove(); }
+    }
+}
+
+export component BooksPage inherits Rectangle {
+    in property <length> safe_area_top;
+    in property <length> safe_area_left;
+    in property <length> safe_area_right;
+    in property <length> safe_area_bottom;
+    callback back_pressed();
+    // What a book's buttons do to its download (`id`), as on its card.
+    callback open(int);
+    callback update(int);
+    callback chapters(int);
+    // A deleted book's "Save again": its link, into the preview.
+    callback save_again(string);
+
+    background: ThemeSettings.background;
+    animate background { duration: ThemeSettings.fade; easing: ease-in-out; }
+
+    // Nothing under the page takes a tap.
+    TouchArea { }
+
+    VerticalLayout {
+        padding-top: Math.max(8px, root.safe_area_top);
+        padding-left: Math.max(12px, root.safe_area_left);
+        padding-right: Math.max(12px, root.safe_area_right);
+        spacing: 8px;
+
+        // Top bar: back, then the title, as Settings has it.
+        HorizontalLayout {
+            height: 40px;
+            vertical-stretch: 0;
+            alignment: start;
+            spacing: 12px;
+            padding-left: 4px;
+            padding-right: 4px;
+
+            Rectangle {
+                width: 40px;
+                height: 40px;
+                border-radius: 20px;
+                background: back_ta.pressed ? ThemeSettings.text_color.transparentize(88%)
+                    : back_ta.has-hover ? ThemeSettings.hover_color : transparent;
+
+                Image {
+                    source: @image-url("../icons/rounded/arrow_back.svg");
+                    width: 24px;
+                    height: 24px;
+                    colorize: ThemeSettings.text_color;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                }
+
+                back_ta := TouchArea {
+                    clicked => { root.back_pressed(); }
+                }
+            }
+
+            Text {
+                text: @tr("Books");
+                font-size: 22px;
+                font-weight: 700;
+                color: ThemeSettings.text_color;
+                vertical-alignment: center;
+            }
+        }
+
+        Rectangle {
+            vertical-stretch: 1;
+
+            Flickable {
+                width: 100%;
+                height: 100%;
+                content-height: list.preferred-height;
+
+                list := VerticalLayout {
+                    padding-left: 4px;
+                    padding-right: 4px;
+                    padding-top: 8px;
+                    padding-bottom: Math.max(16px, root.safe_area_bottom);
+                    spacing: 8px;
+
+                    for book in Library.books: BookCard {
+                        book: book;
+                        open => { root.open(book.download_id); }
+                        update => { root.update(book.download_id); }
+                        chapters => { root.chapters(book.download_id); }
+                        save_again => { root.save_again(book.key); }
+                        remove => { Library.remove(book.key); }
+                    }
+                }
+            }
+
+            // The last one removed while the page is open.
+            if Library.books.length == 0: Text {
+                text: @tr("No books yet");
+                color: ThemeSettings.text_color.transparentize(35%);
+                font-size: 14px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+}

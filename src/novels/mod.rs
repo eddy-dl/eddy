@@ -53,7 +53,7 @@ impl Site {
     }
 
     /// Short and stable: the chapter cache's folder name.
-    fn key(self) -> &'static str {
+    pub fn key(self) -> &'static str {
         match self {
             Site::RoyalRoad => "royalroad",
             Site::Ao3 => "ao3",
@@ -230,7 +230,39 @@ struct CachedChapter {
 /// Where a book's fetched chapters (and, in `images`, its pictures) are
 /// kept.
 fn cache_dir(book: &Book) -> PathBuf {
-    PathBuf::from(crate::platform::get_app_data_dir()).join("novels").join(book.site.key()).join(clean::safe_component(&book.id))
+    book_dir(book.site, &book.id)
+}
+
+/// A book's own folder: its chapter cache, images and cover.
+fn book_dir(site: Site, id: &str) -> PathBuf {
+    PathBuf::from(crate::platform::get_app_data_dir()).join("novels").join(site.key()).join(clean::safe_component(id))
+}
+
+/// Picture types a cover is kept as.
+const COVER_TYPES: [&str; 5] = ["jpg", "png", "webp", "gif", "svg"];
+
+/// The cover kept when the book was last saved (the Books page shows it).
+pub fn cover_file(site: Site, id: &str) -> Option<PathBuf> {
+    let dir = book_dir(site, id);
+    COVER_TYPES.iter().map(|ext| dir.join(format!("cover.{ext}"))).find(|p| p.exists())
+}
+
+/// Keeps a book's cover beside its chapters, replacing the one before.
+fn keep_cover(book: &Book, data: &[u8], content_type: &str) {
+    let ext = match content_type {
+        "image/png" => "png",
+        "image/webp" => "webp",
+        "image/gif" => "gif",
+        "image/svg+xml" => "svg",
+        _ => "jpg",
+    };
+    let dir = cache_dir(book);
+    for old in COVER_TYPES {
+        let _ = std::fs::remove_file(dir.join(format!("cover.{old}")));
+    }
+    if let Err(e) = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(dir.join(format!("cover.{ext}")), data)) {
+        log::warn!(target: "books", "couldn't keep {}'s cover: {e}", book.title);
+    }
 }
 
 fn cache_file(book: &Book, chapter: &ChapterRef) -> PathBuf {
@@ -290,6 +322,9 @@ pub async fn download(
     let last = book.chapters.iter().rposition(|c| chapters.iter().any(|w| std::ptr::eq(*w, c))).map_or(0, |i| i + 1);
     // The cover first: a book that has one is never saved without it.
     let cover = cover(&book).await?;
+    if let Some((data, content_type)) = &cover {
+        keep_cover(&book, data, content_type);
+    }
     let total = chapters.len();
     // Chapters saved before (in the cache) count from the start, so a book
     // carried on with shows what it has straight away.

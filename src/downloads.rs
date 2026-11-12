@@ -273,12 +273,60 @@ pub fn take_slot(request: &DownloadRequest) -> bool {
 
 /// A book download saved its book.
 pub fn book_saved(id: i64, book: crate::novels::SavedBook) {
-    with_entries(|entries| {
-        if let Some(entry) = entries.iter_mut().find(|e| e.id == id) {
-            entry.saved.book = Some(book);
-            save(entry);
-        }
+    let saved = with_entries(|entries| {
+        let entry = entries.iter_mut().find(|e| e.id == id)?;
+        entry.saved.book = Some(book.clone());
+        save(entry);
+        Some(entry.saved.request.clone())
     });
+    // Onto the Books page, under the title it was given.
+    if let Some(request) = saved {
+        let options = serde_json::from_str::<crate::novels::NovelOptions>(&request.format).unwrap_or_default();
+        let title = if options.title.trim().is_empty() { book.title.clone() } else { options.title.trim().to_string() };
+        crate::library::remember(book.site, &book.id, &request.url, &title, book.chapters);
+    }
+}
+
+/// A saved book's download, for the Books page.
+pub struct BookDownload {
+    pub site: crate::novels::Site,
+    pub book_id: String,
+    pub id: i64,
+    pub url: String,
+    /// Its title on the site, and as it was named (its own title).
+    pub title: String,
+    pub named: String,
+    pub chapters: usize,
+    /// The book's first file (not a part added since).
+    pub first: bool,
+    pub ended: u64,
+    pub checking: bool,
+}
+
+/// Every download that saved a book (finished, or being saved again).
+pub fn book_downloads() -> Vec<BookDownload> {
+    let checking = CHECKING.with(|c| c.borrow().clone());
+    with_entries(|entries| {
+        entries
+            .iter()
+            .filter_map(|e| {
+                let book = e.saved.book.as_ref()?;
+                let options = serde_json::from_str::<crate::novels::NovelOptions>(&e.saved.request.format).unwrap_or_default();
+                Some(BookDownload {
+                    site: book.site,
+                    book_id: book.id.clone(),
+                    id: e.id,
+                    url: e.saved.request.url.clone(),
+                    title: book.title.clone(),
+                    named: options.title.trim().to_string(),
+                    chapters: book.chapters,
+                    first: options.part == 0,
+                    ended: e.saved.ended,
+                    checking: checking.contains(&e.id),
+                })
+            })
+            .collect()
+    })
 }
 
 /// The download a book was saved by, if it was: (its id, how many chapters
@@ -2055,6 +2103,7 @@ pub fn install(ui: &DownloaderApp) {
     ui.set_completed_items(ModelRc::from(completed.clone()));
 
     APP.with(|app| *app.borrow_mut() = Some(ui.as_weak()));
+    crate::library::install(ui);
     let folder_files = ui.global::<FolderFiles>();
     folder_files.on_open_file(|id, index| {
         let missing = || crate::platform::show_toast("This file can't be found. It may have been moved or deleted");
@@ -2195,6 +2244,7 @@ pub fn install(ui: &DownloaderApp) {
         sync(&downloading, pick(&[DownloadState::Active, DownloadState::Queued], &options.get_downloading()));
         sync(&stopped, pick(&[DownloadState::Paused, DownloadState::Failed, DownloadState::Cancelled], &options.get_stopped()));
         sync(&completed, pick(&[DownloadState::Completed], &options.get_completed()));
+        crate::library::refresh(&ui);
     };
     // Each tab's choice is kept, so the lists come back sorted the same way.
     let list_options = ui.global::<ListOptions>();

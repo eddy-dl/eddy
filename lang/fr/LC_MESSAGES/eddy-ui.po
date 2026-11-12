@@ -1031,3 +1031,18 @@ msgstr "Extension de navigateur"
 
 msgid "Click to let the Eddy extension for Chrome, Edge, Brave, Vivaldi and Firefox send their downloads here, with their cookies."
 msgstr "Cliquez pour que l’extension Eddy pour Chrome, Edge, Brave, Vivaldi et Firefox envoie ses téléchargements ici, avec ses cookies."
+
+msgid "Deleted"
+msgstr "Supprimé"
+
+msgid "Checking for new chapters…"
+msgstr "Recherche de nouveaux chapitres…"
+
+msgid "Save again"
+msgstr "Enregistrer à nouveau"
+
+msgid "Remove from Books"
+msgstr "Retirer des livres"
+
+msgid "No books yet"
+msgstr "Aucun livre pour l’instant"

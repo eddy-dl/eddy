@@ -63,6 +63,16 @@ pub fn init<P: AsRef<Path>>(app_dir: P) -> Result<()> {
         [],
     )?;
 
+    // The Books page's books (see library.rs), each by "<site>:<id>", as
+    // JSON: kept after their downloads are deleted.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS library_books (
+            key TEXT PRIMARY KEY,
+            data TEXT NOT NULL
+        )",
+        [],
+    )?;
+
     let _ = DB_CONNECTION.set(Mutex::new(conn));
     Ok(())
 }
@@ -174,5 +184,31 @@ pub fn downloads() -> Vec<(i64, String)> {
         let mut stmt = conn.prepare("SELECT id, data FROM download_items ORDER BY id")?;
         let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?.collect::<Result<Vec<(i64, String)>>>()?;
         Ok(rows)
+    })
+}
+
+/// Every book on the Books page: (key, record).
+pub fn library_books() -> Vec<(String, String)> {
+    with_conn(|conn| {
+        let mut stmt = conn.prepare("SELECT key, data FROM library_books")?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?.collect::<Result<Vec<(String, String)>>>()?;
+        Ok(rows)
+    })
+}
+
+pub fn save_library_book(key: &str, data: &str) {
+    with_conn(|conn| {
+        conn.execute(
+            "INSERT INTO library_books (key, data) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET data = excluded.data",
+            params![key, data],
+        )?;
+        Ok(())
+    })
+}
+
+pub fn delete_library_book(key: &str) {
+    with_conn(|conn| {
+        conn.execute("DELETE FROM library_books WHERE key = ?1", params![key])?;
+        Ok(())
     })
 }
