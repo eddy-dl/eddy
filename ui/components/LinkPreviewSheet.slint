@@ -625,7 +625,8 @@ export component LinkPreviewSheet inherits Rectangle {
                                 }
                             }
                             Text {
-                                text: root.link.state == ProbeState.Probing ? @tr("Checking link…")
+                                text: root.link.state == ProbeState.Probing && root.link.book_pages > 1 ? @tr("Reading the chapter list: page {} of {}", root.link.book_pages_read, root.link.book_pages)
+                                    : root.link.state == ProbeState.Probing ? @tr("Checking link…")
                                     : root.link.state == ProbeState.Failed ? root.link.error
                                     : root.link.book_chapters > 0 ? root.link.source + " · " + @tr("{n} chapter" | "{n} chapters" % root.link.book_chapters)
                                     : root.link.size != "" ? root.link.source + " · " + root.link.size

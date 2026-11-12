@@ -2173,6 +2173,7 @@ dependencies = [
  "eddy-ui",
  "eddy-webview",
  "ego-tree",
+ "image",
  "jni 0.22.4",
  "libc",
  "linkify",
@@ -4081,6 +4082,7 @@ checksum = "85ab80394333c02fe689eaf900ab500fbd0c2213da414687ebf995a65d5a6104"
 dependencies = [
  "bytemuck",
  "byteorder-lite",
+ "image-webp",
  "moxcms",
  "num-traits",
  "png",

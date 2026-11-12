@@ -45,6 +45,10 @@ dirs = "5.0"
 eddy-ui = { path = "ui" }
 # Walking scraper's parsed tree (its node type).
 ego-tree = "0.10"
+# Not used here: turns on WebP in Slint's own image crate (it reads image
+# files with it, PNG and JPEG only by default), for Ranobes' book covers in
+# the preview. Its decoder is already in the tree (resvg's).
+image = { version = "0.25", default-features = false, features = ["webp"] }
 linkify = "0.11"
 log = "0.4"
 percent-encoding = "2"

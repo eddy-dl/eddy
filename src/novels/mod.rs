@@ -19,6 +19,24 @@ pub mod xenforo;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+tokio::task_local! {
+    /// Where reading a long table of contents reports how far it got (the
+    /// preview's "page 3 of 32"), while the book is read for one.
+    static CONTENTS_PROGRESS: Box<dyn Fn(u64, u64) + Send + Sync>;
+}
+
+/// Runs `read` with its table of contents progress (pages read, pages)
+/// going to `report`.
+pub async fn with_contents_progress<T>(report: impl Fn(u64, u64) + Send + Sync + 'static, read: impl std::future::Future<Output = T>) -> T {
+    CONTENTS_PROGRESS.scope(Box::new(report), read).await
+}
+
+/// A table of contents' pages read so far, of how many (no one may be
+/// listening).
+fn contents_progress(read: u64, pages: u64) {
+    let _ = CONTENTS_PROGRESS.try_with(|report| report(read, pages));
+}
+
 /// The reading sites Eddy knows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Site {
@@ -53,7 +71,7 @@ impl Site {
     }
 
     /// Short and stable: the chapter cache's folder name.
-    fn key(self) -> &'static str {
+    pub fn key(self) -> &'static str {
         match self {
             Site::RoyalRoad => "royalroad",
             Site::Ao3 => "ao3",
@@ -230,7 +248,44 @@ struct CachedChapter {
 /// Where a book's fetched chapters (and, in `images`, its pictures) are
 /// kept.
 fn cache_dir(book: &Book) -> PathBuf {
-    PathBuf::from(crate::platform::get_app_data_dir()).join("novels").join(book.site.key()).join(clean::safe_component(&book.id))
+    book_dir(book.site, &book.id)
+}
+
+/// A book's own folder: its chapter cache, images and cover.
+fn book_dir(site: Site, id: &str) -> PathBuf {
+    PathBuf::from(crate::platform::get_app_data_dir()).join("novels").join(site.key()).join(clean::safe_component(id))
+}
+
+/// Picture types a cover is kept as.
+const COVER_TYPES: [&str; 5] = ["jpg", "png", "webp", "gif", "svg"];
+
+/// The cover kept when the book was last saved (the Books page shows it).
+pub fn cover_file(site: Site, id: &str) -> Option<PathBuf> {
+    let dir = book_dir(site, id);
+    COVER_TYPES.iter().map(|ext| dir.join(format!("cover.{ext}"))).find(|p| p.exists())
+}
+
+/// Keeps a book's cover beside its chapters, replacing the one before.
+fn keep_cover(book: &Book, data: &[u8], content_type: &str) {
+    let ext = match content_type {
+        "image/png" => "png",
+        "image/webp" => "webp",
+        "image/gif" => "gif",
+        "image/svg+xml" => "svg",
+        _ => "jpg",
+    };
+    keep_cover_as(book.site, &book.id, data, ext);
+}
+
+/// Keeps `data` as a book's cover, of type `ext` (one of COVER_TYPES).
+pub fn keep_cover_as(site: Site, id: &str, data: &[u8], ext: &str) {
+    let dir = book_dir(site, id);
+    for old in COVER_TYPES {
+        let _ = std::fs::remove_file(dir.join(format!("cover.{old}")));
+    }
+    if let Err(e) = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(dir.join(format!("cover.{ext}")), data)) {
+        log::warn!(target: "books", "couldn't keep {id}'s cover: {e}");
+    }
 }
 
 fn cache_file(book: &Book, chapter: &ChapterRef) -> PathBuf {
@@ -263,6 +318,9 @@ pub struct SavedBook {
     /// ones are those after it.
     #[serde(default)]
     pub last: usize,
+    /// Its author ("" if the site gives none, or from before it was kept).
+    #[serde(default)]
+    pub author: String,
 }
 
 /// Saves the book as `<dir>/<name>.epub`, reporting (chapters done, total).
@@ -290,6 +348,9 @@ pub async fn download(
     let last = book.chapters.iter().rposition(|c| chapters.iter().any(|w| std::ptr::eq(*w, c))).map_or(0, |i| i + 1);
     // The cover first: a book that has one is never saved without it.
     let cover = cover(&book).await?;
+    if let Some((data, content_type)) = &cover {
+        keep_cover(&book, data, content_type);
+    }
     let total = chapters.len();
     // Chapters saved before (in the cache) count from the start, so a book
     // carried on with shows what it has straight away.
@@ -318,7 +379,14 @@ pub async fn download(
     let series = options.parts.then_some(options.part.max(1));
     let bytes = epub::pack(&book, &packed, cover, collected.into_images(), series)?;
     tokio::fs::write(&path, bytes).await.map_err(|e| e.to_string())?;
-    Ok((path, SavedBook { site: book.site, id: book.id.clone(), chapters: book.chapters.len(), title: site_title, last }))
+    Ok((path, SavedBook {
+        site: book.site,
+        id: book.id.clone(),
+        chapters: book.chapters.len(),
+        title: site_title,
+        last,
+        author: book.author.clone().unwrap_or_default(),
+    }))
 }
 
 /// The book's cover (the first of its covers that comes, each tried a few

@@ -305,26 +305,19 @@ export component StoppedCard inherits Rectangle {
     }
 }
 
-// Finished download: name, then size and date.
+// Finished download: name, then size and date. A book's update and
+// chapter picking are on the Books page.
 export component CompletedCard inherits Rectangle {
     in property <DownloadItem> item;
     in property <bool> selected;
-    // Hides the book's button while picking downloads.
-    in property <bool> selecting: false;
     callback clicked();
     callback long_pressed();
-    // A saved book's "Check for new chapters", and "Choose chapters".
-    callback update_book();
-    callback choose_chapters();
-
-    private property <bool> book: root.item.backend == LinkBackend.Book && !root.selecting;
 
     height: 68px;
 
     CardFrame {
         file_type: root.item.is_folder ? FileType.Folder : root.item.file_type;
         selected: root.selected;
-        trailing: root.book ? 88px : 0px;
         clicked => { root.clicked(); }
         long_pressed => { root.long_pressed(); }
 
@@ -334,60 +327,6 @@ export component CompletedCard inherits Rectangle {
 
         CardDetail {
             text: root.item.size + " · " + root.item.date;
-        }
-    }
-
-    // Over the card's right end: two icon buttons, 48 touch targets.
-    if root.book: Rectangle {
-        x: parent.width - 2 * self.width - 4px;
-        width: 48px;
-        height: 48px;
-        border-radius: 24px;
-        background: choose_ta.pressed && !choose_ta.holding ? ThemeSettings.text_color.transparentize(90%) : transparent;
-        Image {
-            source: @image-url("../icons/rounded/checklist.svg");
-            width: 24px;
-            height: 24px;
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            colorize: ThemeSettings.text_color.transparentize(25%);
-        }
-        choose_ta := HoldTouchArea {
-            tapped => { root.choose_chapters(); }
-        }
-        // Holding it names it, at its left: the finger hides what's below,
-        // and the list cuts off what's above the first card.
-        HintBubble {
-            text: @tr("Choose chapters");
-            shown: choose_ta.holding;
-            x: -self.width - 4px;
-            y: (parent.height - self.height) / 2;
-        }
-    }
-    if root.book: Rectangle {
-        x: parent.width - self.width - 4px;
-        width: 48px;
-        height: 48px;
-        border-radius: 24px;
-        background: update_ta.pressed && !update_ta.holding ? ThemeSettings.text_color.transparentize(90%) : transparent;
-        Image {
-            source: @image-url("../icons/rounded/refresh.svg");
-            width: 24px;
-            height: 24px;
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            // MD3 disabled: on-surface at 38%, while it checks.
-            colorize: ThemeSettings.text_color.transparentize(root.item.checking ? 62% : 25%);
-        }
-        update_ta := HoldTouchArea {
-            enabled: !root.item.checking;
-            tapped => { root.update_book(); }
-        }
-        HintBubble {
-            text: @tr("Check for new chapters");
-            shown: update_ta.holding;
-            x: -self.width - 4px;
-            y: (parent.height - self.height) / 2;
         }
     }
 }

@@ -16,6 +16,7 @@ pub mod folders;
 pub mod gallerydl;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod handoff;
+pub mod library;
 pub mod links;
 pub mod logs;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
