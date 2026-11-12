@@ -680,6 +680,45 @@ msgstr "Version, développeur, code source"
 msgid "Version {}"
 msgstr "Version {}"
 
+msgid "Updates"
+msgstr "Mises à jour"
+
+msgid "Check"
+msgstr "Vérifier"
+
+msgid "Open"
+msgstr "Ouvrir"
+
+msgid "Restart"
+msgstr "Redémarrer"
+
+msgid "Eddy is up to date"
+msgstr "Eddy est à jour"
+
+msgid "Eddy {} is out · {}"
+msgstr "Eddy {} est disponible · {}"
+
+msgid "Eddy {} is out"
+msgstr "Eddy {} est disponible"
+
+msgid "Downloaded · Eddy restarts to finish, pausing its downloads"
+msgstr "Téléchargée · Eddy redémarre pour terminer, ce qui met ses téléchargements en pause"
+
+msgid "Couldn't check for updates"
+msgstr "Impossible de vérifier les mises à jour"
+
+msgid "Check when Eddy opens"
+msgstr "Vérifier à l’ouverture d’Eddy"
+
+msgid "Once a day at most, on GitHub. Nothing is downloaded until you ask"
+msgstr "Une fois par jour au plus, sur GitHub. Rien n’est téléchargé sans votre demande"
+
+msgid "Pre-releases too"
+msgstr "Préversions aussi"
+
+msgid "Test versions, out before a release"
+msgstr "Versions de test, publiées avant une version stable"
+
 msgid "A download manager for files, torrents, media and web novels, built with Rust and Slint."
 msgstr "Un gestionnaire de téléchargements pour les fichiers, les torrents, les médias et les romans en ligne, fait avec Rust et Slint."
 

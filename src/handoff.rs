@@ -24,6 +24,13 @@ fn instance_file() -> PathBuf {
     PathBuf::from(crate::platform::get_app_data_dir()).join("instance")
 }
 
+/// Forgets the Eddy running now, so one started next opens on its own
+/// rather than handing itself over (an update starting the new Eddy as
+/// this one quits).
+pub fn forget_instance() {
+    let _ = std::fs::remove_file(instance_file());
+}
+
 fn is_link(arg: &str) -> bool {
     arg.contains("://") || arg.to_ascii_lowercase().starts_with("magnet:")
 }

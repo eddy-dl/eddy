@@ -49,6 +49,21 @@ export global AppSettings {
     callback reset_font();
     // Settings → About.
     in property <string> app_version: "0.0.0";
+    // Eddy's own updates (updates.rs). `update_state`: 0 not looked, 1
+    // looking, 2 up to date, 3 an update to download, 4 downloading, 5
+    // downloaded (to install; on desktop, to start again into), 6 an update
+    // to get from its page, 7 couldn't look.
+    in property <int> update_state: 0;
+    in property <string> update_version;
+    in property <string> update_size;
+    in property <float> update_progress: 0;
+    in-out property <bool> update_check_on_start: true;
+    in-out property <bool> update_prereleases: false;
+    callback update_check();
+    callback update_download();
+    callback update_install();
+    callback update_open_page();
+    callback update_settings_changed();
     in property <string> slint_version: "1.18.1";
     callback open_url(string);
     in-out property <bool> bottom_navigation_bar: true;
