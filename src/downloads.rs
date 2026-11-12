@@ -133,10 +133,8 @@ fn with_entries<T>(f: impl FnOnce(&mut Vec<Entry>) -> T) -> T {
                     saved.file_type = file_type_index(guess_type(&saved.request));
                     saved.several |= several_files(&saved.request);
                 }
-                // Saved when e-books were Documents (3): books now.
-                if saved.file_type == 3
-                    && (saved.request.backend == Backend::Book || crate::links::file_type_for(&saved.name, None) == FileType::Book)
-                {
+                // Saved books (web novels) were Documents (3).
+                if saved.file_type == 3 && saved.request.backend == Backend::Book {
                     saved.file_type = file_type_index(FileType::Book);
                 }
                 // And Android apps were Programs (7).
@@ -2586,8 +2584,8 @@ fn matches_filter(item: &DownloadItem, f: &FileFilters) -> bool {
         || (f.folder && item.is_folder)
         // Not a folder, and none of the types above.
         || (f.other && !item.is_folder && matches!(item.file_type, FileType::Other | FileType::Program | FileType::Apk))
-        // Web novels, and e-books downloaded as files.
-        || (f.book && (item.backend == LinkBackend::Book || item.file_type == FileType::Book))
+        // Saved books (web novels); other e-books are Documents.
+        || (f.book && item.backend == LinkBackend::Book)
 }
 
 /// Every download as the lists show it, with live progress.
