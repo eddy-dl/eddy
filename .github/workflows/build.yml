@@ -18,8 +18,10 @@ env:
   # The Rust every job builds with, bumped here by hand: the caches' keys
   # hold its version, so following stable made every cache miss on the day
   # a Rust came out. A bump costs one cold build, when it's chosen. (Not
-  # named RUST*: rust-cache puts those in its key too.)
-  TOOLCHAIN: "1.100.0"
+  # named RUST*: rust-cache puts those in its key too; nor TOOLCHAIN:
+  # Windows' names ignore case, and the toolchain action's own `toolchain`
+  # then came out empty.)
+  EDDY_RUST: "1.100.0"
   CARGO_TERM_COLOR: always
   # SLINT_STYLE is each job's own: fluent on the desktops, material on
   # Android. Never Qt, even where it's installed: Slint would link it,
@@ -57,7 +59,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ env.TOOLCHAIN }}
+          toolchain: ${{ env.EDDY_RUST }}
           targets: x86_64-pc-windows-msvc
 
       # Dependencies only (Eddy's own crates are left out), restored from
@@ -119,7 +121,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ env.TOOLCHAIN }}
+          toolchain: ${{ env.EDDY_RUST }}
 
       # Dependencies only (Eddy's own crates are left out), restored from
       # main's cache and saved only on main, so PRs don't fill the store.
@@ -174,7 +176,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ env.TOOLCHAIN }}
+          toolchain: ${{ env.EDDY_RUST }}
 
       - name: Install Linux UI dependencies
         run: |
@@ -241,7 +243,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ env.TOOLCHAIN }}
+          toolchain: ${{ env.EDDY_RUST }}
 
       - name: Install Linux UI dependencies
         run: |
@@ -308,7 +310,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ env.TOOLCHAIN }}
+          toolchain: ${{ env.EDDY_RUST }}
 
       # Dependencies only (Eddy's own crates are left out), restored from
       # main's cache and saved only on main, so PRs don't fill the store.
@@ -408,7 +410,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ env.TOOLCHAIN }}
+          toolchain: ${{ env.EDDY_RUST }}
           targets: aarch64-apple-ios
 
       # Saved from the ios branch too, while iOS is built there only (there's
@@ -537,7 +539,7 @@ jobs:
       - name: Install Rust + Android target
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ env.TOOLCHAIN }}
+          toolchain: ${{ env.EDDY_RUST }}
           targets: aarch64-linux-android, armv7-linux-androideabi
 
       # Dependencies only (Eddy's own crates are left out), restored from
