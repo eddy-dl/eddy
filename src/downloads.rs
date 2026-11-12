@@ -133,6 +133,14 @@ fn with_entries<T>(f: impl FnOnce(&mut Vec<Entry>) -> T) -> T {
                     saved.file_type = file_type_index(guess_type(&saved.request));
                     saved.several |= several_files(&saved.request);
                 }
+                // Saved books (web novels) were Documents (3).
+                if saved.file_type == 3 && saved.request.backend == Backend::Book {
+                    saved.file_type = file_type_index(FileType::Book);
+                }
+                // And Android apps were Programs (7).
+                if saved.file_type == 7 && crate::links::file_type_for(&saved.name, None) == FileType::Apk {
+                    saved.file_type = file_type_index(FileType::Apk);
+                }
                 Some(Entry { id, saved, handle: None, retired: Vec::new(), last: None, speed: 0.0, part: None })
             })
             .collect()
@@ -273,12 +281,74 @@ pub fn take_slot(request: &DownloadRequest) -> bool {
 
 /// A book download saved its book.
 pub fn book_saved(id: i64, book: crate::novels::SavedBook) {
-    with_entries(|entries| {
-        if let Some(entry) = entries.iter_mut().find(|e| e.id == id) {
-            entry.saved.book = Some(book);
-            save(entry);
-        }
+    let saved = with_entries(|entries| {
+        let entry = entries.iter_mut().find(|e| e.id == id)?;
+        entry.saved.book = Some(book.clone());
+        save(entry);
+        Some(entry.saved.request.clone())
     });
+    // Onto the Books page, under the title it was given.
+    if let Some(request) = saved {
+        let options = serde_json::from_str::<crate::novels::NovelOptions>(&request.format).unwrap_or_default();
+        let title = if options.title.trim().is_empty() { book.title.clone() } else { options.title.trim().to_string() };
+        crate::library::remember(book.site, &book.id, &request.url, &title, &book.author, book.chapters);
+    }
+}
+
+/// A saved book's download, for the Books page.
+pub struct BookDownload {
+    pub site: crate::novels::Site,
+    pub book_id: String,
+    pub id: i64,
+    pub url: String,
+    /// Its title on the site, and as it was named (its own title).
+    pub title: String,
+    pub named: String,
+    pub author: String,
+    pub chapters: usize,
+    /// The last chapter it saved (or how many the book had, from before
+    /// that was kept), and its part (the book's first file is part 1).
+    pub last: usize,
+    pub part: usize,
+    /// The book's first file (not a part added since).
+    pub first: bool,
+    pub ended: u64,
+    pub checking: bool,
+    /// The saved file and its size, once it's saved (not while it's being
+    /// saved again).
+    pub path: Option<String>,
+    pub size: u64,
+}
+
+/// Every download that saved a book (finished, or being saved again).
+pub fn book_downloads() -> Vec<BookDownload> {
+    let checking = CHECKING.with(|c| c.borrow().clone());
+    with_entries(|entries| {
+        entries
+            .iter()
+            .filter_map(|e| {
+                let book = e.saved.book.as_ref()?;
+                let options = serde_json::from_str::<crate::novels::NovelOptions>(&e.saved.request.format).unwrap_or_default();
+                Some(BookDownload {
+                    site: book.site,
+                    book_id: book.id.clone(),
+                    id: e.id,
+                    url: e.saved.request.url.clone(),
+                    title: book.title.clone(),
+                    named: options.title.trim().to_string(),
+                    author: book.author.clone(),
+                    chapters: book.chapters,
+                    last: if book.last > 0 { book.last } else { book.chapters },
+                    part: options.part.max(1),
+                    first: options.part == 0,
+                    ended: e.saved.ended,
+                    checking: checking.contains(&e.id),
+                    path: e.saved.path.clone().filter(|_| e.saved.state == State::Completed),
+                    size: if e.saved.state == State::Completed { e.saved.total } else { 0 },
+                })
+            })
+            .collect()
+    })
 }
 
 /// The download a book was saved by, if it was: (its id, how many chapters
@@ -318,10 +388,17 @@ fn update_book(id: i64) {
         // The last chapter saved, rather than how many the book had then:
         // locked ones at its end (early access) count as new once they open.
         let chapters = parts.iter().filter_map(|e| e.saved.book.as_ref().map(|b| if b.last > 0 { b.last } else { b.chapters })).max();
-        Some((entry.saved.request.clone(), chapters, parts.len(), stem))
+        let key = book.map(|b| (b.site, b.id.clone()));
+        Some((entry.saved.request.clone(), chapters, next_part(entries, &members), stem, key))
     });
-    let Some((request, chapters, count, stem)) = found else {
+    let Some((request, chapters, next, stem, key)) = found else {
         return;
+    };
+    // Counted from the last chapter ever saved: a newest part deleted
+    // (read, say) isn't saved again.
+    let chapters = match key.map_or(0, |(site, id)| crate::library::saved_so_far(site, &id).0) {
+        0 => chapters,
+        last => Some(chapters.map_or(last, |c| c.max(last))),
     };
     // Once at a time: its button waits until the check's done.
     if !CHECKING.with(|c| c.borrow_mut().insert(id)) {
@@ -356,7 +433,7 @@ fn update_book(id: i64) {
                 let mut request = request;
                 request.choices = book_choices(&book);
                 let new = (known + 1..=book.chapters.len()).filter(|&n| !book.chapters[n - 1].locked).collect();
-                let request = part_request(&request, new, count + 1, &stem);
+                let request = part_request(&request, new, next, &stem);
                 // The others keep the chapters they have now.
                 with_entries(|entries| {
                     for i in book_members(entries, id) {
@@ -1183,7 +1260,7 @@ fn change_options(id: i64, options: &crate::LinkOptions) {
             subfolder: match options.category {
                 false => String::new(),
                 true if book => "Books".to_string(),
-                true => crate::links::file_category(file_type(entry.saved.file_type), &entry.saved.name).to_string(),
+                true => crate::links::category_folder(file_type(entry.saved.file_type)).to_string(),
             },
             replace_existing: entry.saved.request.settings.replace_existing,
         };
@@ -1690,7 +1767,25 @@ fn first_part_stem(entries: &[Entry], members: &[usize]) -> String {
         .map(|&i| &entries[i])
         .find(|e| serde_json::from_str::<crate::novels::NovelOptions>(&e.saved.request.format).is_ok_and(|o| o.part == 0))
         .or_else(|| members.first().map(|&i| &entries[i]));
-    first.map(|e| e.saved.name.trim_end_matches(".epub").to_string()).unwrap_or_default()
+    let name = first.map(|e| e.saved.name.trim_end_matches(".epub").to_string()).unwrap_or_default();
+    // The first file deleted: a part's name, without what makes it one.
+    static PART: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r" \(part \d+, ch [^)]*\)$").unwrap());
+    PART.replace(&name, "").into_owned()
+}
+
+/// The number a book's next part gets: after its highest (the book's
+/// first file is part 1), so a deleted part's number isn't given twice.
+fn next_part(entries: &[Entry], members: &[usize]) -> usize {
+    // Deleted ones too, as the Books page remembers them.
+    let known = members.iter().find_map(|&i| entries[i].saved.book.as_ref()).map_or(0, |b| crate::library::saved_so_far(b.site, &b.id).1);
+    members
+        .iter()
+        .filter_map(|&i| serde_json::from_str::<crate::novels::NovelOptions>(&entries[i].saved.request.format).ok())
+        .map(|o| o.part.max(1))
+        .max()
+        .unwrap_or(0)
+        .max(known)
+        + 1
 }
 
 /// Choose chapters on a book in parts (`id`: any of them): a part that lost
@@ -1729,7 +1824,7 @@ fn choose_parts(id: i64, ticked: &[usize], retitled: bool) {
         let opened = entries.iter().find(|e| e.id == id)?;
         let locked = |n: &usize| opened.saved.request.choices.iter().any(|c| c.index == *n && c.locked);
         let new: Vec<usize> = ticked.iter().copied().filter(|n| !covered.contains(n) && !locked(n)).collect();
-        let part = (!new.is_empty()).then(|| part_request(&opened.saved.request, new, members.len() + 1, &stem));
+        let part = (!new.is_empty()).then(|| part_request(&opened.saved.request, new, next_part(entries, &members), &stem));
         if part.is_some() {
             // The others keep the chapters they have now.
             for &i in &members {
@@ -2055,6 +2150,7 @@ pub fn install(ui: &DownloaderApp) {
     ui.set_completed_items(ModelRc::from(completed.clone()));
 
     APP.with(|app| *app.borrow_mut() = Some(ui.as_weak()));
+    crate::library::install(ui);
     let folder_files = ui.global::<FolderFiles>();
     folder_files.on_open_file(|id, index| {
         let missing = || crate::platform::show_toast("This file can't be found. It may have been moved or deleted");
@@ -2195,6 +2291,7 @@ pub fn install(ui: &DownloaderApp) {
         sync(&downloading, pick(&[DownloadState::Active, DownloadState::Queued], &options.get_downloading()));
         sync(&stopped, pick(&[DownloadState::Paused, DownloadState::Failed, DownloadState::Cancelled], &options.get_stopped()));
         sync(&completed, pick(&[DownloadState::Completed], &options.get_completed()));
+        crate::library::refresh(&ui);
     };
     // Each tab's choice is kept, so the lists come back sorted the same way.
     let list_options = ui.global::<ListOptions>();
@@ -2486,8 +2583,8 @@ fn matches_filter(item: &DownloadItem, f: &FileFilters) -> bool {
         // A folder also shows under what's in it (a playlist under Video).
         || (f.folder && item.is_folder)
         // Not a folder, and none of the types above.
-        || (f.other && !item.is_folder && matches!(item.file_type, FileType::Other | FileType::Program))
-        // Web novels (finished, they're EPUBs: Documents too).
+        || (f.other && !item.is_folder && matches!(item.file_type, FileType::Other | FileType::Program | FileType::Apk))
+        // Saved books (web novels); other e-books are Documents.
         || (f.book && item.backend == LinkBackend::Book)
 }
 
@@ -2661,7 +2758,7 @@ fn guess_type(request: &DownloadRequest) -> FileType {
         // What's in it: a single file's type (its name is the file's);
         // several files show as a folder (`several_files`).
         Backend::Torrent => crate::links::file_type_for(&request.filename, None),
-        Backend::Book => FileType::Document,
+        Backend::Book => FileType::Book,
         Backend::Media => {
             let media: crate::extractors::MediaRequest = serde_json::from_str(&request.format).unwrap_or_default();
             if media.image {
@@ -2698,6 +2795,8 @@ fn file_type_index(file_type: FileType) -> i32 {
         FileType::DiskImage => 5,
         // 6 was torrents' own type (see with_entries).
         FileType::Program => 7,
+        FileType::Book => 9,
+        FileType::Apk => 10,
         _ => 8,
     }
 }
@@ -2711,6 +2810,8 @@ fn file_type(index: i32) -> FileType {
         4 => FileType::Archive,
         5 => FileType::DiskImage,
         7 => FileType::Program,
+        9 => FileType::Book,
+        10 => FileType::Apk,
         _ => FileType::Other,
     }
 }

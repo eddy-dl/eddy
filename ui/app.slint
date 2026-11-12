@@ -29,6 +29,8 @@ import { DownloadItem, DownloadState, FileType, DownloadingCard, QueuedCard, Lis
 import { ThemeSettings, ThemeMode, AccentColor } from "themes/theme.slint";
 import { BackGesture } from "globals/BackGesture.slint";
 import { AppSettings } from "globals/AppSettings.slint";
+import { Library } from "globals/Library.slint";
+import { BooksPage } from "components/BooksPage.slint";
 
 export { AccentColor, ThemeMode, ThemeSettings }from "themes/theme.slint";
 export { AppSettings, HelperPackage }from "globals/AppSettings.slint";
@@ -42,6 +44,7 @@ export { DownloadInfo, InfoRow } from "components/DownloadInfoSheet.slint";
 export { ItemAction } from "components/DownloadOptionsSheet.slint";
 export { FolderFiles, FolderFile } from "components/FolderFilesSheet.slint";
 export { ChooseFiles, ChoiceFile } from "components/ChooseFilesSheet.slint";
+export { Library, BookRow, BookSort } from "globals/Library.slint";
 
 // The Android share popup's window. Exported before DownloaderApp so the
 // viewer (which shows the last component) still opens the main app.
@@ -131,14 +134,16 @@ export component DownloaderApp inherits Window {
     // The Downloading tab's cards are on screen (its progress bars glide
     // only then), and the main screen at all (the tab's icon moves only
     // then, if the setting allows): what isn't seen isn't redrawn.
-    private property <bool> downloading_in_view: root.active_tab == 0 && !root.show_settings;
-    private property <bool> tab_icon_moves: root.has_active_downloads && !root.show_settings && AppSettings.animate_downloading_tab;
+    private property <bool> downloading_in_view: root.active_tab == 0 && !root.show_settings && !root.show_books;
+    private property <bool> tab_icon_moves: root.has_active_downloads && !root.show_settings && !root.show_books && AppSettings.animate_downloading_tab;
     out property <ColorScheme> system-theme: Palette.color-scheme;
     out property <brush> system-accent: Palette.accent-background;
 
     in-out property <bool> show_appearance: false;
     in-out property <bool> show_about: false;
     in-out property <bool> show_settings: false;
+    // The Books page (the small FAB above +).
+    in-out property <bool> show_books: false;
 
     // Space the bottom bar takes (or just the inset when the top bar is used).
     private property <length> bottom_bar_height: AppSettings.top_navigation_bar ? root.safe-area-insets.bottom : 80px + root.safe-area-insets.bottom;
@@ -269,7 +274,11 @@ export component DownloaderApp inherits Window {
     }
 
     // Room below the last card: clear of the bottom bar and the + button.
-    private property <length> list_bottom_padding: root.bottom_bar_height + 64px + 32px;
+    // Scrolled to the end, the last card clears the FABs (and the Books
+    // one above +, once there are books: 40 and its 16 gap; not changed by
+    // selecting, which hides it, so the list doesn't jump).
+    private property <length> list_bottom_padding: root.bottom_bar_height + 64px + 32px + (Library.books.length > 0 ? 56px : 0px);
+    private property <bool> books_fab_shown: Library.books.length > 0 && !root.selection_mode;
 
     // A tab's sort & filter sheet goes with it (the bar isn't covered by its
     // dimming, so tapping or swiping to another tab doesn't dismiss it).
@@ -347,6 +356,7 @@ export component DownloaderApp inherits Window {
     changed height => { root.update_orientation(); }
     changed width => { root.update_orientation(); }
     changed show_settings => { back_scope.focus(); }
+    changed show_books => { back_scope.focus(); }
     init => { update_orientation(); update_system_theme(); back_scope.focus(); }
 
     callback add_from_txt_clicked();
@@ -405,6 +415,15 @@ export component DownloaderApp inherits Window {
         }
         if (FolderFiles.open) {
             FolderFiles.open = false;
+            return true;
+        }
+        // Under the sheets it opens (Choose chapters), above the lists.
+        if (root.show_books) {
+            if (books_page.sort_open) {
+                books_page.sort_open = false;
+            } else {
+                root.show_books = false;
+            }
             return true;
         }
         if (root.selection_mode) {
@@ -788,9 +807,6 @@ export component DownloaderApp inherits Window {
                                             property <int> selected_in: 0;
                                             selected: root.selection_mode && ((self.selected_in == root.selection_gen) != root.selection_inverted);
                                             item: item;
-                                            selecting: root.selection_mode;
-                                            update_book => { root.download_action(item.id, ItemAction.UpdateBook, ""); }
-                                            choose_chapters => { root.download_action(item.id, ItemAction.ChooseFiles, ""); }
                                                 clicked => {
                                                     if (root.selection_mode) {
                                                         row_2.selected_in = row_2.selected_in == root.selection_gen ? 0 : root.selection_gen;
@@ -888,6 +904,51 @@ export component DownloaderApp inherits Window {
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
                             }
+                        }
+                    }
+
+                    // The Books page: an MD3 small FAB (40, 12 corners, a 24
+                    // icon) centred above +, once a book has been saved.
+                    Rectangle {
+                        property <bool> shown: root.books_fab_shown;
+                        width: 40px;
+                        height: 40px;
+                        border-radius: 12px;
+                        background: ThemeSettings.secondary_container;
+                        animate background { duration: ThemeSettings.fade; easing: ease-in-out; }
+                        drop-shadow-blur: 8px;
+                        drop-shadow-color: #00000030;
+                        drop-shadow-offset-y: 2px;
+
+                        x: parent.width - 56px - Math.max(16px, root.safe-area-insets.right) + (56px - self.width) / 2;
+                        y: parent.height - 56px - 16px - root.bottom_bar_height - 16px - self.height;
+
+                        visible: self.opacity > 0;
+                        opacity: !self.shown ? 0 : (ta_books.pressed ? 0.8 : 1.0);
+                        transform-scale: self.shown ? 1.0 : 0.6;
+                        animate opacity, transform-scale { duration: 200ms; easing: ease-out-quad; }
+
+                        states [
+                            scrolling when self.shown && root.list_scrolling && !ta_books.pressed: {
+                                opacity: 0.4;
+                            }
+                        ]
+
+                        ta_books := TouchArea {
+                            enabled: parent.shown;
+                            clicked => {
+                                root.fab_open = false;
+                                root.show_books = true;
+                            }
+                        }
+
+                        Image {
+                            source: @image-url("icons/rounded/menu_book.svg");
+                            width: 24px;
+                            height: 24px;
+                            colorize: ThemeSettings.on_secondary_container;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
                         }
                     }
 
@@ -1468,6 +1529,47 @@ export component DownloaderApp inherits Window {
                         root.selection_action(root.active_tab, SelectionAction.Delete, root.delete_files);
                         root.clear_selection();
                     }
+                }
+            }
+        }
+
+        // The Books page: above the lists, under the sheets its books open
+        // (Choose chapters, Delete) and under Settings.
+        Rectangle {
+            z: 80;
+            width: 100%;
+            height: 100%;
+            opacity: root.show_books ? 1.0 : 0.0;
+            y: root.show_books ? 0px : 40px;
+            // iOS's back swipe moves it when it's what Back would close (no
+            // sheet over it), as Settings; closed by one, it keeps its place
+            // as it fades.
+            property <bool> on_top: !books_page.sort_open && !ChooseFiles.open && !FolderFiles.open && !DownloadInfo.open
+                && !FolderBrowser.open && !root.delete_confirm_open && !root.item_options_open;
+            x: !root.show_books || (BackGesture.dragging && self.on_top) ? BackGesture.offset : 0px;
+            visible: self.opacity > 0;
+            animate opacity, y {
+                duration: 250ms;
+                easing: ease-out-quad;
+            }
+            animate x {
+                duration: BackGesture.dragging ? 0ms : 250ms;
+                easing: ease-out-quad;
+            }
+
+            books_page := BooksPage {
+                safe_area_top: root.safe-area-insets.top;
+                safe_area_left: root.safe-area-insets.left;
+                safe_area_right: root.safe-area-insets.right;
+                safe_area_bottom: root.safe-area-insets.bottom;
+                back_pressed => { root.show_books = false; }
+                open(id) => { root.download_action(id, ItemAction.Open, ""); }
+                update(id) => { root.download_action(id, ItemAction.UpdateBook, ""); }
+                chapters(id) => { root.download_action(id, ItemAction.ChooseFiles, ""); }
+                save_again(key) => {
+                    Library.save_again(key);
+                    root.show_books = false;
+                    root.preview_open = Links.pending.length > 0;
                 }
             }
         }

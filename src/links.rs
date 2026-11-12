@@ -693,17 +693,7 @@ fn link_category(link: &PendingLink, audio: bool) -> &'static str {
         Some(LinkBackend::Drive | LinkBackend::Mega) if link.file_type == FileType::Folder => category_folder(FileType::Other),
         // A page of galleries (a user's): pictures, mostly.
         Some(LinkBackend::Gallery) if link.file_type == FileType::Folder => category_folder(FileType::Image),
-        _ => file_category(link.file_type, &link.filename),
-    }
-}
-
-/// `category_folder`, with e-books (a type of their own only here) in Books.
-pub fn file_category(file_type: FileType, name: &str) -> &'static str {
-    let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
-    match ext.as_str() {
-        _ if file_type == FileType::Folder => category_folder(file_type),
-        "epub" | "mobi" | "azw" | "azw3" | "kfx" | "fb2" | "djvu" | "cbz" | "cbr" => "Books",
-        _ => category_folder(file_type),
+        _ => category_folder(link.file_type),
     }
 }
 
@@ -714,8 +704,9 @@ pub fn category_folder(file_type: FileType) -> &'static str {
         FileType::Audio => "Music",
         FileType::Image => "Pictures",
         FileType::Document => "Documents",
+        FileType::Book => "Books",
         FileType::Archive => "Compressed",
-        FileType::DiskImage | FileType::Program => "Programs",
+        FileType::DiskImage | FileType::Program | FileType::Apk => "Programs",
         // Only torrents are a folder before they're downloaded.
         FileType::Folder => "Torrents",
         _ => "Other",
@@ -1247,7 +1238,7 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
         };
         return Ok(Probe {
             filename: crate::novels::default_name(&book),
-            file_type: FileType::Document,
+            file_type: FileType::Book,
             size: String::new(),
             backends: vec![LinkBackend::Book],
             formats: Vec::new(),
@@ -2258,7 +2249,8 @@ pub fn file_type_for(name: &str, content_type: Option<&str>) -> FileType {
         "pdf" | "doc" | "docx" | "odt" | "txt" | "rtf" | "epub" | "mobi" | "azw" | "azw3" | "kfx" | "fb2" | "djvu" | "xls" | "xlsx" | "ppt" | "pptx" | "md" => FileType::Document,
         "zip" | "rar" | "7z" | "tar" | "gz" | "xz" | "bz2" | "zst" | "tgz" => FileType::Archive,
         "iso" | "img" | "dmg" => FileType::DiskImage,
-        "exe" | "msi" | "apk" | "deb" | "rpm" | "appimage" | "pkg" | "sh" => FileType::Program,
+        "apk" | "apks" | "xapk" | "apkm" => FileType::Apk,
+        "exe" | "msi" | "deb" | "rpm" | "appimage" | "pkg" | "sh" => FileType::Program,
         _ => match content_type.and_then(|t| t.split('/').next()) {
             Some("video") => FileType::Video,
             Some("audio") => FileType::Audio,

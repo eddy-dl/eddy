@@ -1,0 +1,516 @@
+// The Books page (from the small FAB above +): each book saved, one row
+// however many files it came as, with its cover. A book's update and
+// chapter picking live here; one whose downloads were all deleted stays,
+// struck out in red, to be saved again or removed.
+
+import { ThemeSettings } from "../themes/theme.slint";
+import { AppSettings } from "../globals/AppSettings.slint";
+import { HoldTouchArea, HintBubble } from "HoldHint.slint";
+import { DragHandle } from "DragHandle.slint";
+import { Chip, SectionLabel } from "Chips.slint";
+import { TapToDismissArea } from "AnimatedPopup.slint";
+import { Library, BookRow, BookSort } from "../globals/Library.slint";
+
+// MD3's error colour, as Eddy uses it elsewhere.
+global BookColors {
+    out property <color> deleted: #E5534B;
+}
+
+// A 48 icon button at a card's right end; holding it names it, at its left.
+component BookButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> hint;
+    in property <bool> enabled: true;
+    callback tapped();
+
+    width: 48px;
+    height: 48px;
+    border-radius: 24px;
+    background: ta.pressed && !ta.holding ? ThemeSettings.text_color.transparentize(90%) : transparent;
+
+    Image {
+        source: root.icon;
+        width: 24px;
+        height: 24px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        // MD3 disabled: on-surface at 38%.
+        colorize: ThemeSettings.text_color.transparentize(root.enabled ? 25% : 62%);
+    }
+    ta := HoldTouchArea {
+        enabled: root.enabled;
+        tapped => { root.tapped(); }
+    }
+    HintBubble {
+        text: root.hint;
+        shown: ta.holding;
+        x: -self.width - 4px;
+        y: (parent.height - self.height) / 2;
+    }
+}
+
+component BookCard inherits Rectangle {
+    in property <BookRow> book;
+    callback open();
+    callback update();
+    callback chapters();
+    callback save_again();
+    callback remove();
+
+    height: Math.max(92px, row.preferred-height);
+    border-radius: 12px;
+    background: ta.pressed ? ThemeSettings.surface.darker(0.08) : ThemeSettings.surface;
+    animate background { duration: ta.pressed ? 150ms : ThemeSettings.fade; easing: ease-in-out; }
+
+    // A tap opens the book (its first file); a deleted one has none.
+    ta := TouchArea {
+        enabled: !root.book.deleted;
+        clicked => { root.open(); }
+    }
+
+    row := HorizontalLayout {
+        padding: 12px;
+        // Room for the two buttons over the right end.
+        padding-right: 12px + 2 * 48px;
+        spacing: 12px;
+
+        // The cover, 2:3 as books are; a book glyph when none was kept.
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 44px;
+                height: 64px;
+                border-radius: 6px;
+                clip: true;
+                background: ThemeSettings.secondary_container;
+                opacity: root.book.deleted ? 0.45 : 1.0;
+
+                if root.book.cover.width == 0: Image {
+                    source: @image-url("../icons/rounded/menu_book.svg");
+                    width: 24px;
+                    height: 24px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    colorize: ThemeSettings.on_secondary_container;
+                }
+                if root.book.cover.width > 0: Image {
+                    source: root.book.cover;
+                    width: 100%;
+                    height: 100%;
+                    image-fit: cover;
+                }
+            }
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 4px;
+
+            Rectangle {
+                height: title.preferred-height;
+                title := Text {
+                    width: 100%;
+                    text: root.book.title;
+                    color: root.book.deleted ? BookColors.deleted : ThemeSettings.text_color;
+                    font-size: 15px;
+                    font-weight: 600;
+                    overflow: elide;
+                }
+                // Struck out (Slint's Text has no strikethrough): a line
+                // through the middle, as long as the text shown.
+                if root.book.deleted: Rectangle {
+                    x: 0;
+                    y: (parent.height - self.height) / 2 + 1px;
+                    width: Math.min(title.preferred-width, parent.width);
+                    height: 1.5px;
+                    background: BookColors.deleted;
+                }
+            }
+
+            if root.book.author != "": Text {
+                text: root.book.author;
+                color: ThemeSettings.text_color.transparentize(root.book.deleted ? 55% : 25%);
+                font-size: 13px;
+                overflow: elide;
+            }
+
+            Text {
+                text: root.book.deleted ? @tr("Deleted")
+                    : root.book.checking ? @tr("Checking for new chapters…")
+                    : root.book.site + " · " + @tr("{n} chapter" | "{n} chapters" % root.book.chapters)
+                        + (root.book.size != "" ? " · " + root.book.size : "");
+                color: root.book.deleted ? BookColors.deleted : ThemeSettings.text_color.transparentize(35%);
+                font-size: 12px;
+                overflow: elide;
+            }
+
+            if root.book.missing_count > 0: Text {
+                text: root.book.missing_count == 1 ? @tr("Part {} deleted", root.book.missing_parts) : @tr("Parts {} deleted", root.book.missing_parts);
+                color: BookColors.deleted;
+                font-size: 12px;
+                overflow: elide;
+            }
+        }
+    }
+
+    // Over the card's right end: what it can do.
+    if !root.book.deleted: BookButton {
+        x: parent.width - 2 * self.width - 4px;
+        y: (parent.height - self.height) / 2;
+        icon: @image-url("../icons/rounded/checklist.svg");
+        hint: @tr("Choose chapters");
+        tapped => { root.chapters(); }
+    }
+    if !root.book.deleted: BookButton {
+        x: parent.width - self.width - 4px;
+        y: (parent.height - self.height) / 2;
+        icon: @image-url("../icons/rounded/refresh.svg");
+        hint: @tr("Check for new chapters");
+        enabled: !root.book.checking;
+        tapped => { root.update(); }
+    }
+    if root.book.deleted: BookButton {
+        x: parent.width - 2 * self.width - 4px;
+        y: (parent.height - self.height) / 2;
+        icon: @image-url("../icons/rounded/download.svg");
+        hint: @tr("Save again");
+        tapped => { root.save_again(); }
+    }
+    if root.book.deleted: BookButton {
+        x: parent.width - self.width - 4px;
+        y: (parent.height - self.height) / 2;
+        icon: @image-url("../icons/rounded/close.svg");
+        hint: @tr("Remove from Books");
+        tapped => { root.remove(); }
+    }
+}
+
+// The page's sort sheet (MD3 bottom sheet), as the lists' sort & filter.
+component BooksSortSheet inherits Rectangle {
+    in property <length> side_inset;
+    in property <length> bottom_inset;
+    out property <length> drag_offset: handle.offset;
+    out property <bool> dragging: handle.dragging;
+    callback dismiss_requested();
+    public function reset_drag() {
+        handle.reset();
+    }
+
+    function set(sort: BookSort, ascending: bool) {
+        Library.sort = sort;
+        Library.ascending = ascending;
+        Library.sort_changed();
+    }
+
+    height: layout.preferred-height;
+    background: ThemeSettings.surface;
+    animate background { duration: ThemeSettings.fade; easing: ease-in-out; }
+    border-top-left-radius: 28px;
+    border-top-right-radius: 28px;
+    drop-shadow-blur: 12px;
+    drop-shadow-color: #00000020;
+
+    // Keeps taps on the sheet's gaps from reaching the backdrop.
+    TouchArea { }
+
+    layout := VerticalLayout {
+        padding: 16px;
+        padding-left: Math.max(16px, root.side_inset);
+        padding-right: Math.max(16px, root.side_inset);
+        padding-top: 32px;
+        padding-bottom: Math.max(16px, root.bottom_inset);
+        spacing: 12px;
+
+        HorizontalLayout {
+            spacing: 8px;
+            // As tall with Reset as without, so the sheet doesn't jump.
+            min-height: 32px;
+            Text {
+                text: @tr("Sort · Books");
+                font-size: 16px;
+                font-weight: 700;
+                color: ThemeSettings.text_color;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                overflow: elide;
+            }
+            // Back to newest first; only once it's been changed.
+            if Library.sort != BookSort.Date || Library.ascending: Chip {
+                text: @tr("Reset");
+                horizontal-stretch: 0;
+                width: 88px;
+                height: 32px;
+                clicked => { root.set(BookSort.Date, false); }
+            }
+        }
+
+        SectionLabel { text: @tr("Sort by"); }
+
+        HorizontalLayout {
+            spacing: 8px;
+            Chip {
+                text: @tr("Date");
+                selected: Library.sort == BookSort.Date;
+                clicked => { root.set(BookSort.Date, Library.ascending); }
+            }
+            Chip {
+                text: @tr("Title");
+                selected: Library.sort == BookSort.Title;
+                clicked => { root.set(BookSort.Title, Library.ascending); }
+            }
+            Chip {
+                text: @tr("Author");
+                selected: Library.sort == BookSort.Author;
+                clicked => { root.set(BookSort.Author, Library.ascending); }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            Chip {
+                text: @tr("Size");
+                selected: Library.sort == BookSort.Size;
+                clicked => { root.set(BookSort.Size, Library.ascending); }
+            }
+            Chip {
+                text: @tr("Chapters");
+                selected: Library.sort == BookSort.Chapters;
+                clicked => { root.set(BookSort.Chapters, Library.ascending); }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            Chip {
+                text: @tr("Ascending");
+                selected: Library.ascending;
+                clicked => { root.set(Library.sort, true); }
+            }
+            Chip {
+                text: @tr("Descending");
+                selected: !Library.ascending;
+                clicked => { root.set(Library.sort, false); }
+            }
+        }
+    }
+
+    handle := DragHandle {
+        y: 0;
+        width: 100%;
+        dismissed => { root.dismiss_requested(); }
+    }
+}
+
+export component BooksPage inherits Rectangle {
+    in property <length> safe_area_top;
+    in property <length> safe_area_left;
+    in property <length> safe_area_right;
+    in property <length> safe_area_bottom;
+    callback back_pressed();
+    // What a book's buttons do to its download (`id`), as on its card.
+    callback open(int);
+    callback update(int);
+    callback chapters(int);
+    // A deleted book's "Save again": its link, into the preview.
+    callback save_again(string);
+    // The sort sheet's open (Back closes it first).
+    in-out property <bool> sort_open: false;
+    changed sort_open => {
+        if (self.sort_open) {
+            sort_sheet.reset_drag();
+        }
+    }
+
+    background: ThemeSettings.background;
+    animate background { duration: ThemeSettings.fade; easing: ease-in-out; }
+
+    // Nothing under the page takes a tap.
+    TouchArea { }
+
+    VerticalLayout {
+        padding-top: Math.max(8px, root.safe_area_top);
+        padding-left: Math.max(12px, root.safe_area_left);
+        padding-right: Math.max(12px, root.safe_area_right);
+        spacing: 8px;
+
+        // Top bar, as Settings has it: back, the title, then sort; on iOS
+        // an accent chevron and "Back", the title centred, as iOS's own.
+        Rectangle {
+            height: 40px;
+            vertical-stretch: 0;
+
+            if !AppSettings.ios: HorizontalLayout {
+                spacing: 12px;
+                padding-left: 4px;
+                padding-right: 4px;
+
+                Rectangle {
+                    width: 40px;
+                    height: 40px;
+                    border-radius: 20px;
+                    background: back_ta.pressed ? ThemeSettings.text_color.transparentize(88%)
+                        : back_ta.has-hover ? ThemeSettings.hover_color : transparent;
+
+                    Image {
+                        source: @image-url("../icons/rounded/arrow_back.svg");
+                        width: 24px;
+                        height: 24px;
+                        colorize: ThemeSettings.text_color;
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                    }
+
+                    back_ta := TouchArea {
+                        clicked => { root.back_pressed(); }
+                    }
+                }
+
+                Text {
+                    text: @tr("Books");
+                    font-size: 22px;
+                    font-weight: 700;
+                    color: ThemeSettings.text_color;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+
+                // Sort: an icon button at the bar's end.
+                Rectangle {
+                    width: 40px;
+                    height: 40px;
+                    border-radius: 20px;
+                    background: sort_ta.pressed ? ThemeSettings.text_color.transparentize(88%)
+                        : sort_ta.has-hover ? ThemeSettings.hover_color : transparent;
+
+                    Image {
+                        source: @image-url("../icons/rounded/sort.svg");
+                        width: 24px;
+                        height: 24px;
+                        colorize: ThemeSettings.text_color.transparentize(25%);
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                    }
+
+                    sort_ta := TouchArea {
+                        clicked => { root.sort_open = true; }
+                    }
+                }
+            }
+
+
+            if AppSettings.ios: Rectangle {
+                ios_back_ta := TouchArea {
+                    x: 0px;
+                    width: ios_back.preferred-width + 8px;
+                    clicked => { root.back_pressed(); }
+                }
+                ios_back := HorizontalLayout {
+                    x: 0px;
+                    height: 100%;
+                    spacing: 2px;
+                    alignment: start;
+                    cross-axis-alignment: center;
+                    Image {
+                        width: 28px;
+                        height: 28px;
+                        source: @image-url("../icons/rounded/chevron_left.svg");
+                        colorize: ThemeSettings.primary_accent.transparentize(ios_back_ta.pressed ? 60% : 0%);
+                    }
+                    Text {
+                        text: @tr("Back");
+                        font-size: 17px;
+                        color: ThemeSettings.primary_accent.transparentize(ios_back_ta.pressed ? 60% : 0%);
+                        vertical-alignment: center;
+                    }
+                }
+                Text {
+                    // Clear of the back button on a narrow screen.
+                    x: Math.max(ios_back.preferred-width + 12px, (parent.width - self.width) / 2);
+                    width: self.preferred-width;
+                    height: 100%;
+                    text: @tr("Books");
+                    font-size: 17px;
+                    font-weight: 600;
+                    color: ThemeSettings.text_color;
+                    vertical-alignment: center;
+                }
+                // Sort, in the accent, as iOS's bar buttons are.
+                ios_sort_ta := TouchArea {
+                    x: parent.width - self.width;
+                    width: 40px;
+                    clicked => { root.sort_open = true; }
+                }
+                Image {
+                    x: parent.width - 32px;
+                    y: (parent.height - self.height) / 2;
+                    width: 24px;
+                    height: 24px;
+                    source: @image-url("../icons/rounded/sort.svg");
+                    colorize: ThemeSettings.primary_accent.transparentize(ios_sort_ta.pressed ? 60% : 0%);
+                }
+            }
+        }
+
+        Rectangle {
+            vertical-stretch: 1;
+
+            Flickable {
+                width: 100%;
+                height: 100%;
+                content-height: list.preferred-height;
+
+                list := VerticalLayout {
+                    padding-left: 4px;
+                    padding-right: 4px;
+                    padding-top: 8px;
+                    padding-bottom: Math.max(16px, root.safe_area_bottom);
+                    spacing: 8px;
+
+                    for book in Library.books: BookCard {
+                        book: book;
+                        open => { root.open(book.download_id); }
+                        update => { root.update(book.download_id); }
+                        chapters => { root.chapters(book.download_id); }
+                        save_again => { root.save_again(book.key); }
+                        remove => { Library.remove(book.key); }
+                    }
+                }
+            }
+
+            // The last one removed while the page is open.
+            if Library.books.length == 0: Text {
+                text: @tr("No books yet");
+                color: ThemeSettings.text_color.transparentize(35%);
+                font-size: 14px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    // The sort sheet, over a dimmed page.
+    Rectangle {
+        background: #00000060;
+        opacity: root.sort_open ? 1.0 : 0.0;
+        visible: self.opacity > 0;
+        animate opacity { duration: 250ms; }
+
+        TapToDismissArea {
+            tapped => { root.sort_open = false; }
+        }
+
+        sort_sheet := BooksSortSheet {
+            width: parent.width;
+            side_inset: Math.max(root.safe_area_left, root.safe_area_right);
+            bottom_inset: root.safe_area_bottom;
+            dismiss_requested => { root.sort_open = false; }
+            // Closed, slid down out of sight.
+            y: (root.sort_open ? parent.height - self.height : parent.height) + self.drag_offset;
+            animate y {
+                duration: self.dragging ? 0ms : 250ms;
+                easing: ease-out-quad;
+            }
+        }
+    }
+}
