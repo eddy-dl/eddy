@@ -8,6 +8,8 @@ import { SettingsCard, SettingsLayout } from "../settings/SettingsCard.slint";
 export component SwitchRow inherits SettingsCard {
     in property <string> title;
     in property <string> subtitle;
+    // Before the title, in settings rows whose neighbours have one.
+    in property <image> icon;
     in property <bool> compact: false;
     // No inset at the sides: for rows inside an already padded layout.
     in property <bool> flush: false;
@@ -37,6 +39,16 @@ export component SwitchRow inherits SettingsCard {
         padding-left: root.flush ? 0px : root.compact ? 4px : SettingsLayout.inset;
         padding-right: self.padding-left;
         spacing: 16px;
+
+        if root.icon.width > 0: VerticalLayout {
+            alignment: center;
+            Image {
+                source: root.icon;
+                width: 24px;
+                height: 24px;
+                colorize: root.text_color;
+            }
+        }
 
         VerticalLayout {
             alignment: center;
