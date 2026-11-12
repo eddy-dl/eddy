@@ -8,8 +8,12 @@
 //! - Android: its APK is handed to Android's installer.
 //! - Windows and Linux: the running program's file is swapped for it (the
 //!   old one kept as ".old" until the next start) and Eddy starts again.
-//! - macOS and iOS (an app bundle, a sideloaded app): Eddy can't put it in
-//!   place itself, so it opens the release's page.
+//! - macOS: the release's zip is unpacked (ditto, as it was packed) and
+//!   Eddy.app swapped for the one in it, the same way. Not while macOS runs
+//!   Eddy from a temporary copy (opened from where it was downloaded,
+//!   never moved): there's no app of its own to replace.
+//! - iOS (a sideloaded app): Eddy can't install anything, so it opens the
+//!   release's page.
 
 use crate::{AppSettings, DownloaderApp};
 use slint::ComponentHandle;
@@ -93,9 +97,13 @@ pub fn install(ui: &DownloaderApp) {
     // What the last update left: its download, and (desktop) the program
     // it replaced.
     let _ = std::fs::remove_dir_all(updates_dir());
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     if let Ok(exe) = std::env::current_exe() {
         let _ = std::fs::remove_file(exe.with_extension("old"));
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(app) = app_bundle() {
+        let _ = std::fs::remove_dir_all(app.with_extension("app.old"));
     }
 
     let settings = ui.global::<AppSettings>();
@@ -162,7 +170,7 @@ fn refresh() {
 
 /// Whether Eddy can put an update in place itself here.
 fn can_install() -> bool {
-    cfg!(any(target_os = "android", target_os = "windows", target_os = "linux"))
+    cfg!(any(target_os = "android", target_os = "windows", target_os = "linux", target_os = "macos"))
 }
 
 /// This system's file in a release, as the releases name them.
@@ -175,6 +183,8 @@ fn file_name() -> Option<&'static str> {
         ("windows", "aarch64") => Some("eddy-windows-arm64.exe"),
         ("linux", "x86_64") => Some("eddy-linux-x86_64"),
         ("linux", "aarch64") => Some("eddy-linux-arm64"),
+        ("macos", "aarch64") => Some("eddy-macos-arm64.zip"),
+        ("macos", "x86_64") => Some("eddy-macos-x86_64.zip"),
         _ => None,
     }
 }
@@ -345,7 +355,7 @@ fn install_downloaded() {
     };
     #[cfg(target_os = "android")]
     crate::platform::install_apk(&path.to_string_lossy());
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     if let Err(e) = restart_into(&path) {
         log::warn!("couldn't put the update in place: {e}");
         crate::platform::show_toast(&format!("{e}: get it from its page"));
@@ -358,7 +368,7 @@ fn install_downloaded() {
         });
         refresh();
     }
-    #[cfg(not(any(target_os = "android", target_os = "windows", target_os = "linux")))]
+    #[cfg(target_os = "ios")]
     let _ = path;
 }
 
@@ -387,6 +397,57 @@ fn restart_into(new: &std::path::Path) -> Result<(), String> {
     // The new Eddy mustn't hand itself over to this one, on its way out.
     crate::handoff::forget_instance();
     if let Err(e) = std::process::Command::new(&exe).spawn() {
+        return Err(format!("The new Eddy is in place but didn't start ({e}): open it again"));
+    }
+    let _ = slint::quit_event_loop();
+    Ok(())
+}
+
+/// Eddy.app, when that's what's running.
+#[cfg(target_os = "macos")]
+fn app_bundle() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    exe.ancestors().find(|p| p.extension().is_some_and(|e| e == "app")).map(PathBuf::from)
+}
+
+/// Unpacks the release's zip and swaps the running Eddy.app for the one in
+/// it, then opens that, this Eddy quitting. The old app stays as
+/// "Eddy.app.old" until the next start.
+#[cfg(target_os = "macos")]
+fn restart_into(zip: &std::path::Path) -> Result<(), String> {
+    use std::process::Command;
+    let app = app_bundle().ok_or("Eddy isn't running from Eddy.app")?;
+    // Opened from where it was downloaded and never moved: macOS runs a
+    // read-only copy from a folder of its own, not the app the user has.
+    if app.to_string_lossy().contains("/AppTranslocation/") {
+        return Err("Move Eddy to Applications first (macOS is running a temporary copy)".to_string());
+    }
+    let unpacked = updates_dir().join("unpacked");
+    let _ = std::fs::remove_dir_all(&unpacked);
+    // ditto, as the zip was made: it keeps the app's signature and links.
+    let unzipped = Command::new("/usr/bin/ditto").args(["-x", "-k"]).arg(zip).arg(&unpacked).status();
+    if !unzipped.is_ok_and(|s| s.success()) {
+        return Err("The update couldn't be unpacked".to_string());
+    }
+    let new = std::fs::read_dir(&unpacked)
+        .map_err(|e| e.to_string())?
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|p| p.extension().is_some_and(|e| e == "app"))
+        .ok_or("The update has no app in it")?;
+    let old = app.with_extension("app.old");
+    let _ = std::fs::remove_dir_all(&old);
+    std::fs::rename(&app, &old).map_err(|e| format!("Eddy can't replace its own app ({e})"))?;
+    // A move, or a copy when Eddy's data and the app are on two disks.
+    let placed = std::fs::rename(&new, &app).is_ok() || Command::new("/usr/bin/ditto").arg(&new).arg(&app).status().is_ok_and(|s| s.success());
+    if !placed {
+        let _ = std::fs::remove_dir_all(&app);
+        let _ = std::fs::rename(&old, &app);
+        return Err("Eddy can't replace its own app".to_string());
+    }
+    // The new Eddy mustn't hand itself over to this one, on its way out.
+    crate::handoff::forget_instance();
+    if let Err(e) = Command::new("/usr/bin/open").arg("-n").arg(&app).spawn() {
         return Err(format!("The new Eddy is in place but didn't start ({e}): open it again"));
     }
     let _ = slint::quit_event_loop();
