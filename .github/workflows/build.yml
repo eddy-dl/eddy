@@ -14,12 +14,24 @@ env:
   # making Qt something the app needs to start.
   SLINT_NO_QT: "1"
   CARGO_INCREMENTAL: 0
-  # Compiler output cached in GitHub's cache (see "Set up sccache").
-  RUSTC_WRAPPER: sccache
+  # Compiler output cached in GitHub's cache (see "Set up sccache"), for
+  # the workspace's own crates only: the dependencies are in the cargo
+  # cache's archive, and wrapping them too stored every one of them a second
+  # time (thousands of entries, a quarter of whose writes GitHub refused).
+  RUSTC_WORKSPACE_WRAPPER: sccache
   SCCACHE_GHA_ENABLED: "true"
   # Warnings are errors in Eddy's crates and its patched copies (registry
   # crates are exempt): a new one fails the PR instead of piling up.
   RUSTFLAGS: "-C debuginfo=0 -D warnings"
+  # Cargo.toml's release profile (fat LTO, one codegen unit: small and
+  # fast, but the whole program is optimised again at every link) only for
+  # a release; PRs and main's pushes, which only check it builds and its
+  # tests pass, skip LTO and split codegen. Both are the same, so a PR finds
+  # main's cache. Only main's pushes save that cache: a set of archives is
+  # over 6 GB of GitHub's 10, so a second set (a PR's own, a release's with
+  # its other settings) would push main's out.
+  CARGO_PROFILE_RELEASE_LTO: ${{ github.event_name == 'workflow_dispatch' && 'fat' || 'off' }}
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ github.event_name == 'workflow_dispatch' && '1' || '16' }}
 
 jobs:
   build-windows-x86_64:
@@ -44,7 +56,7 @@ jobs:
           workspaces: |
             .
             webview
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
 
       # Each crate's compiled output, found again by its inputs (unlike
       # Cargo's own reuse, this survives a fresh checkout): a PR that leaves
@@ -58,6 +70,12 @@ jobs:
         run: |
           cargo build --release --bin eddy-desktop --target x86_64-pc-windows-msvc
           cargo build --release --target x86_64-pc-windows-msvc --manifest-path webview/Cargo.toml
+
+      # Whether the compiles came from sccache, and how many of its writes
+      # GitHub's cache refused.
+      - name: Cache stats
+        if: always()
+        run: sccache --show-stats
 
       - name: Rename Binary
         run: |
@@ -76,6 +94,9 @@ jobs:
 
   build-windows-arm64:
     name: Build (Windows arm64)
+    # Not for PRs (main and releases only): the common targets say enough
+    # about a change, sooner.
+    if: github.event_name != 'pull_request'
     runs-on: windows-11-arm
     env:
       SLINT_STYLE: fluent
@@ -94,7 +115,7 @@ jobs:
           workspaces: |
             .
             webview
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
 
       # Each crate's compiled output, found again by its inputs (unlike
       # Cargo's own reuse, this survives a fresh checkout): a PR that leaves
@@ -106,6 +127,12 @@ jobs:
         run: |
           cargo build --release --bin eddy-desktop
           cargo build --release --manifest-path webview/Cargo.toml
+
+      # Whether the compiles came from sccache, and how many of its writes
+      # GitHub's cache refused.
+      - name: Cache stats
+        if: always()
+        run: sccache --show-stats
 
       - name: Rename Binary
         run: |
@@ -134,10 +161,9 @@ jobs:
 
       - name: Install Linux UI dependencies
         run: |
-          sudo apt-get update
           # Slint (fontconfig, xcb, xkbcommon), rfd's GTK file dialogs, system-theme (D-Bus),
           # and WebKitGTK for eddy-webview (only the helper links it).
-          sudo apt-get install -y libfontconfig1-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libgtk-3-dev libdbus-1-dev libwebkit2gtk-4.1-dev
+          bash tools/ci-apt.sh libfontconfig1-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libgtk-3-dev libdbus-1-dev libwebkit2gtk-4.1-dev
 
       # Dependencies only (Eddy's own crates are left out), restored from
       # main's cache and saved only on main, so PRs don't fill the store.
@@ -148,7 +174,7 @@ jobs:
           workspaces: |
             .
             webview
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
 
       # Each crate's compiled output, found again by its inputs (unlike
       # Cargo's own reuse, this survives a fresh checkout): a PR that leaves
@@ -163,6 +189,12 @@ jobs:
 
       - name: Tests
         run: cargo test --release --lib
+
+      # Whether the compiles came from sccache, and how many of its writes
+      # GitHub's cache refused.
+      - name: Cache stats
+        if: always()
+        run: sccache --show-stats
 
       - name: Rename Binary
         run: |
@@ -180,6 +212,9 @@ jobs:
 
   build-linux-arm64:
     name: Build (Linux arm64)
+    # Not for PRs (main and releases only): the common targets say enough
+    # about a change, sooner.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04-arm
     env:
       SLINT_STYLE: fluent
@@ -191,10 +226,9 @@ jobs:
 
       - name: Install Linux UI dependencies
         run: |
-          sudo apt-get update
           # Slint (fontconfig, xcb, xkbcommon), rfd's GTK file dialogs, system-theme (D-Bus),
           # and WebKitGTK for eddy-webview (only the helper links it).
-          sudo apt-get install -y libfontconfig1-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libgtk-3-dev libdbus-1-dev libwebkit2gtk-4.1-dev
+          bash tools/ci-apt.sh libfontconfig1-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libgtk-3-dev libdbus-1-dev libwebkit2gtk-4.1-dev
 
       # Dependencies only (Eddy's own crates are left out), restored from
       # main's cache and saved only on main, so PRs don't fill the store.
@@ -205,7 +239,7 @@ jobs:
           workspaces: |
             .
             webview
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
 
       # Each crate's compiled output, found again by its inputs (unlike
       # Cargo's own reuse, this survives a fresh checkout): a PR that leaves
@@ -217,6 +251,12 @@ jobs:
         run: |
           cargo build --release --bin eddy-desktop
           cargo build --release --manifest-path webview/Cargo.toml
+
+      # Whether the compiles came from sccache, and how many of its writes
+      # GitHub's cache refused.
+      - name: Cache stats
+        if: always()
+        run: sccache --show-stats
 
       - name: Rename Binary
         run: |
@@ -238,11 +278,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - arch: arm64
-            runner: macos-latest
-          - arch: x86_64
-            runner: macos-15-intel
+        # Intel Macs not for PRs (main and releases only).
+        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"arch":"arm64","runner":"macos-latest"}]' || '[{"arch":"arm64","runner":"macos-latest"},{"arch":"x86_64","runner":"macos-15-intel"}]') }}
     env:
       SLINT_STYLE: fluent
       MACOSX_DEPLOYMENT_TARGET: "11.0"
@@ -261,7 +298,7 @@ jobs:
           workspaces: |
             .
             webview
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
 
       # Each crate's compiled output, found again by its inputs (unlike
       # Cargo's own reuse, this survives a fresh checkout): a PR that leaves
@@ -273,6 +310,12 @@ jobs:
         run: |
           cargo build --release --bin eddy-desktop
           cargo build --release --manifest-path webview/Cargo.toml
+
+      # Whether the compiles came from sccache, and how many of its writes
+      # GitHub's cache refused.
+      - name: Cache stats
+        if: always()
+        run: sccache --show-stats
 
       # Eddy.app: Eddy with its webview helper beside it (macOS's own WebKit,
       # nothing to install), zipped.
@@ -352,7 +395,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: ios
-          save-if: ${{ github.ref == 'refs/heads/main' || github.head_ref == 'ios' }}
+          save-if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
 
       - name: Set up sccache
         uses: mozilla-actions/sccache-action@v0.0.9
@@ -477,7 +520,7 @@ jobs:
           shared-key: android
           workspaces: |
             .
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
 
       # Each crate's compiled output, found again by its inputs (unlike
       # Cargo's own reuse, this survives a fresh checkout): a PR that leaves
@@ -489,9 +532,7 @@ jobs:
         run: cargo install cargo-ndk
 
       - name: Install dependencies (Linux host)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libfontconfig1-dev
+        run: bash tools/ci-apt.sh libfontconfig1-dev
 
       # Its default package list still includes "tools", which the SDK no
       # longer has. android-36 for the Rust library (as built locally), 35
@@ -510,7 +551,10 @@ jobs:
           ANDROID_BUILD_TOOLS_VERSION: "35.0.0"
         run: cargo ndk -t arm64-v8a -P 26 build --lib --release
 
+      # 32-bit ARM not for PRs (main and releases only): Gradle then packs
+      # that APK without the library, which nothing uses.
       - name: Build Rust library (armeabi-v7a release)
+        if: github.event_name != 'pull_request'
         env:
           ANDROID_PLATFORM: android-36
           ANDROID_JAR: ${{ env.ANDROID_HOME }}/platforms/android-36/android.jar
@@ -519,6 +563,12 @@ jobs:
           ANDROID_BUILD_TOOLS_VERSION: "35.0.0"
           FORCE_SKIA_BUILD: 1 
         run: cargo ndk -t armeabi-v7a -P 26 build --lib --release
+
+      # Whether the compiles came from sccache, and how many of its writes
+      # GitHub's cache refused.
+      - name: Cache stats
+        if: always()
+        run: sccache --show-stats
 
       - name: Decode Android Keystore
         env:
