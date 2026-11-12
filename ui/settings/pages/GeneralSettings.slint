@@ -311,7 +311,7 @@ export component GeneralSettings inherits Rectangle {
                         }
 
                         WrappedText {
-                            text: @tr("Saves your settings and download list as a file in the download folder's Backups. Not the downloaded files, nor cookies.");
+                            text: @tr("Save your settings and download list to a file in your download folder's Backups. Downloaded files and cookies aren't included.");
                             font-size: 13px;
                             color: root.text_color.transparentize(30%);
                         }
@@ -350,8 +350,8 @@ export component GeneralSettings inherits Rectangle {
 
                         WrappedText {
                             text: AppSettings.ios
-                                ? @tr("Takes the newest backup in Eddy's Backups folder: its settings, and the downloads this list doesn't have. What's here stays.")
-                                : @tr("Pick a backup: its settings are taken, and the downloads this list doesn't have are added. What's here stays.");
+                                ? @tr("Restore from the newest backup in Eddy's Backups folder. This does not remove current downloaded files.")
+                                : @tr("Restore from a prior backup. This does not remove current downloaded files.");
                             font-size: 13px;
                             color: root.text_color.transparentize(30%);
                         }
@@ -363,7 +363,7 @@ export component GeneralSettings inherits Rectangle {
                 first: false;
                 last: true;
                 title: @tr("Include saved chapters");
-                subtitle: @tr("Backups also hold the chapters fetched for books, so making a book again doesn't fetch them again. They can be large.");
+                subtitle: @tr("Also back up the book chapters Eddy has already fetched, so they don't need fetching again. This can make backups large.");
                 text_color: root.text_color;
                 checked <=> AppSettings.backup_chapters;
                 toggled => { AppSettings.backup_chapters_changed(AppSettings.backup_chapters); }

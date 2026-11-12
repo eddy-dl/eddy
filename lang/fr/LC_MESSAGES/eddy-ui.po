@@ -51,23 +51,23 @@ msgstr "Sauvegarde"
 msgid "Back up"
 msgstr "Sauvegarder"
 
-msgid "Saves your settings and download list as a file in the download folder's Backups. Not the downloaded files, nor cookies."
-msgstr "Enregistre vos réglages et la liste des téléchargements dans un fichier, dans le dossier Backups du dossier de téléchargement. Ni les fichiers téléchargés, ni les cookies."
+msgid "Save your settings and download list to a file in your download folder's Backups. Downloaded files and cookies aren't included."
+msgstr "Enregistrez vos réglages et la liste des téléchargements dans un fichier, dans le dossier Backups de votre dossier de téléchargement. Les fichiers téléchargés et les cookies n’en font pas partie."
 
 msgid "Restore"
 msgstr "Restaurer"
 
-msgid "Takes the newest backup in Eddy's Backups folder: its settings, and the downloads this list doesn't have. What's here stays."
-msgstr "Prend la sauvegarde la plus récente du dossier Backups d’Eddy : ses réglages, et les téléchargements absents de cette liste. Ce qui est ici reste."
+msgid "Restore from the newest backup in Eddy's Backups folder. This does not remove current downloaded files."
+msgstr "Restaurez depuis la sauvegarde la plus récente du dossier Backups d’Eddy. Cela ne supprime pas les fichiers déjà téléchargés."
 
-msgid "Pick a backup: its settings are taken, and the downloads this list doesn't have are added. What's here stays."
-msgstr "Choisissez une sauvegarde : ses réglages sont repris, et les téléchargements absents de cette liste sont ajoutés. Ce qui est ici reste."
+msgid "Restore from a prior backup. This does not remove current downloaded files."
+msgstr "Restaurez depuis une sauvegarde précédente. Cela ne supprime pas les fichiers déjà téléchargés."
 
 msgid "Include saved chapters"
 msgstr "Inclure les chapitres enregistrés"
 
-msgid "Backups also hold the chapters fetched for books, so making a book again doesn't fetch them again. They can be large."
-msgstr "Les sauvegardes contiennent aussi les chapitres récupérés pour les livres : refaire un livre ne les récupère pas de nouveau. Elles peuvent être volumineuses."
+msgid "Also back up the book chapters Eddy has already fetched, so they don't need fetching again. This can make backups large."
+msgstr "Sauvegardez aussi les chapitres de livres qu’Eddy a déjà récupérés, pour ne pas avoir à les récupérer de nouveau. Les sauvegardes peuvent alors être volumineuses."
 
 msgid "Enable haptic feedback for some actions"
 msgstr "Activer le retour haptique pour certaines actions"
