@@ -14,7 +14,9 @@ targets:
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: dev.pah.eddy
       ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-      MARKETING_VERSION: "0.2.2"
+      # Set by CI from Cargo.toml's version (the build number as Android's
+      # versionCode): not bumped here.
+      MARKETING_VERSION: "0.0.0"
       CURRENT_PROJECT_VERSION: "1"
     info:
       path: Info.plist

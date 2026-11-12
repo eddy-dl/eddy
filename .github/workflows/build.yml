@@ -464,6 +464,12 @@ jobs:
       - name: Build (release)
         run: |
           cd platforms/ios
+          # Cargo.toml's version, and as a build number what Android's
+          # versionCode is (major * 10000 + minor * 100 + patch).
+          VERSION=$(grep -m 1 '^version = ' ../../Cargo.toml | awk -F '"' '{print $2}')
+          IFS=. read -r MAJOR MINOR PATCH <<< "$VERSION"
+          sed -i '' -e "s/MARKETING_VERSION: .*/MARKETING_VERSION: \"$VERSION\"/" \
+            -e "s/CURRENT_PROJECT_VERSION: .*/CURRENT_PROJECT_VERSION: \"$((MAJOR * 10000 + MINOR * 100 + PATCH))\"/" project.yml
           xcodegen
           xcodebuild -project Eddy.xcodeproj -scheme Eddy -configuration Release \
             -sdk iphoneos -destination generic/platform=iOS -derivedDataPath build \
@@ -673,8 +679,11 @@ jobs:
           echo "| Android Universal | $APK_UNIV_SHA |" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
+      # With Eddy's version (the manifest's own isn't bumped).
       - name: Zip the Browser Extension
-        run: cd extension && zip -r ../release-artifacts/eddy-browser-extension.zip .
+        run: |
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$APP_VERSION\"/" extension/manifest.json
+          cd extension && zip -r ../release-artifacts/eddy-browser-extension.zip .
 
       - name: Publish Draft Release
         uses: softprops/action-gh-release@v3

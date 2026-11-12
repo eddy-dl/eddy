@@ -1,6 +1,6 @@
 [package]
 name = "eddy"
-version = "0.2.2"
+version.workspace = true
 edition = "2024"
 license = "GPL-3.0-or-later"
 
@@ -9,6 +9,12 @@ license = "GPL-3.0-or-later"
 # is the desktop app's webview helper (webview/: a program of its own, so
 # Eddy doesn't need WebKitGTK or WebView2 to start).
 exclude = ["patches/aria2_rust", "webview"]
+
+# Eddy's version, the one place it's set: the UI crate takes it from here,
+# Android's build.gradle.kts and CI (iOS's project, the browser extension,
+# the release) read this line (the first `version = ` in the file).
+[workspace.package]
+version = "0.2.3"
 
 # Android/IOS build target
 [lib]
