@@ -131,6 +131,16 @@ export component GeneralSettings inherits Rectangle {
 
                     VerticalLayout {
                         alignment: center;
+                        Image {
+                            source: @image-url("../../icons/rounded/language.svg");
+                            width: 24px;
+                            height: 24px;
+                            colorize: root.text_color;
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
                         spacing: 4px;
                         horizontal-stretch: 1;
 
@@ -171,6 +181,16 @@ export component GeneralSettings inherits Rectangle {
 
                     VerticalLayout {
                         alignment: center;
+                        Image {
+                            source: @image-url("../../icons/rounded/link.svg");
+                            width: 24px;
+                            height: 24px;
+                            colorize: root.text_color;
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
                         spacing: 4px;
                         horizontal-stretch: 1;
 
@@ -207,6 +227,16 @@ export component GeneralSettings inherits Rectangle {
                     padding-left: SettingsLayout.inset;
                     padding-right: SettingsLayout.inset;
                     spacing: 16px;
+
+                    VerticalLayout {
+                        alignment: center;
+                        Image {
+                            source: @image-url("../../icons/rounded/extension.svg");
+                            width: 24px;
+                            height: 24px;
+                            colorize: root.text_color;
+                        }
+                    }
 
                     VerticalLayout {
                         alignment: center;
@@ -255,7 +285,18 @@ export component GeneralSettings inherits Rectangle {
 
                     VerticalLayout {
                         alignment: center;
+                        Image {
+                            source: @image-url("../../icons/rounded/vibration.svg");
+                            width: 24px;
+                            height: 24px;
+                            colorize: root.text_color;
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
                         spacing: 4px;
+                        horizontal-stretch: 1;
 
                         Text {
                             text: @tr("Haptic Feedback");
@@ -300,6 +341,16 @@ export component GeneralSettings inherits Rectangle {
 
                     VerticalLayout {
                         alignment: center;
+                        Image {
+                            source: @image-url("../../icons/rounded/backup.svg");
+                            width: 24px;
+                            height: 24px;
+                            colorize: root.text_color;
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
                         spacing: 4px;
                         horizontal-stretch: 1;
 
@@ -338,6 +389,16 @@ export component GeneralSettings inherits Rectangle {
 
                     VerticalLayout {
                         alignment: center;
+                        Image {
+                            source: @image-url("../../icons/rounded/settings_backup_restore.svg");
+                            width: 24px;
+                            height: 24px;
+                            colorize: root.text_color;
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
                         spacing: 4px;
                         horizontal-stretch: 1;
 
@@ -362,6 +423,7 @@ export component GeneralSettings inherits Rectangle {
             SwitchRow {
                 first: false;
                 last: true;
+                icon: @image-url("../../icons/rounded/menu_book.svg");
                 title: @tr("Include saved chapters");
                 subtitle: @tr("Also back up the book chapters Eddy has already fetched, so they do not need fetching again. This can make backups large.");
                 text_color: root.text_color;
