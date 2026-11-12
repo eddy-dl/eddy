@@ -1,6 +1,8 @@
 import { ThemeSettings, AccentColor } from "../themes/theme.slint";
 
-export enum FileType { Video, Audio, Image, Document, Archive, DiskImage, Program, Folder, Other }
+// Book: e-books (EPUB and the like, saved web novels), apart from Documents.
+// Apk: Android apps, apart from other Programs.
+export enum FileType { Video, Audio, Image, Document, Archive, DiskImage, Program, Folder, Book, Apk, Other }
 
 // Rounded tile with the file type's Material Symbols (rounded, filled) icon. Each
 // type has its own colour, with a faint tint of it behind the glyph. With the Greyscale accent every type
@@ -19,6 +21,9 @@ export component FileTypeIcon inherits Rectangle {
         : root.file_type == FileType.DiskImage ? #7E8CE0
         : root.file_type == FileType.Program ? #8D99AE
         : root.file_type == FileType.Folder ? #E9B949
+        : root.file_type == FileType.Book ? #3BA99C
+        // Android's own green, a shade darker to read on a light tile.
+        : root.file_type == FileType.Apk ? #2DB86E
         : #9E9E9E;
 
     width: 44px;
@@ -41,6 +46,8 @@ export component FileTypeIcon inherits Rectangle {
             : root.file_type == FileType.DiskImage ? @image-url("../icons/rounded/filled/album.svg")
             : root.file_type == FileType.Program ? @image-url("../icons/rounded/filled/apps.svg")
             : root.file_type == FileType.Folder ? @image-url("../icons/rounded/filled/folder.svg")
+            : root.file_type == FileType.Book ? @image-url("../icons/rounded/filled/menu_book.svg")
+            : root.file_type == FileType.Apk ? @image-url("../icons/rounded/filled/android.svg")
             : @image-url("../icons/rounded/filled/draft.svg");
     }
 }

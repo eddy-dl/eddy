@@ -133,6 +133,16 @@ fn with_entries<T>(f: impl FnOnce(&mut Vec<Entry>) -> T) -> T {
                     saved.file_type = file_type_index(guess_type(&saved.request));
                     saved.several |= several_files(&saved.request);
                 }
+                // Saved when e-books were Documents (3): books now.
+                if saved.file_type == 3
+                    && (saved.request.backend == Backend::Book || crate::links::file_type_for(&saved.name, None) == FileType::Book)
+                {
+                    saved.file_type = file_type_index(FileType::Book);
+                }
+                // And Android apps were Programs (7).
+                if saved.file_type == 7 && crate::links::file_type_for(&saved.name, None) == FileType::Apk {
+                    saved.file_type = file_type_index(FileType::Apk);
+                }
                 Some(Entry { id, saved, handle: None, retired: Vec::new(), last: None, speed: 0.0, part: None })
             })
             .collect()
@@ -2575,9 +2585,9 @@ fn matches_filter(item: &DownloadItem, f: &FileFilters) -> bool {
         // A folder also shows under what's in it (a playlist under Video).
         || (f.folder && item.is_folder)
         // Not a folder, and none of the types above.
-        || (f.other && !item.is_folder && matches!(item.file_type, FileType::Other | FileType::Program))
-        // Web novels (finished, they're EPUBs: Documents too).
-        || (f.book && item.backend == LinkBackend::Book)
+        || (f.other && !item.is_folder && matches!(item.file_type, FileType::Other | FileType::Program | FileType::Apk))
+        // Web novels, and e-books downloaded as files.
+        || (f.book && (item.backend == LinkBackend::Book || item.file_type == FileType::Book))
 }
 
 /// Every download as the lists show it, with live progress.
@@ -2750,7 +2760,7 @@ fn guess_type(request: &DownloadRequest) -> FileType {
         // What's in it: a single file's type (its name is the file's);
         // several files show as a folder (`several_files`).
         Backend::Torrent => crate::links::file_type_for(&request.filename, None),
-        Backend::Book => FileType::Document,
+        Backend::Book => FileType::Book,
         Backend::Media => {
             let media: crate::extractors::MediaRequest = serde_json::from_str(&request.format).unwrap_or_default();
             if media.image {
@@ -2787,6 +2797,8 @@ fn file_type_index(file_type: FileType) -> i32 {
         FileType::DiskImage => 5,
         // 6 was torrents' own type (see with_entries).
         FileType::Program => 7,
+        FileType::Book => 9,
+        FileType::Apk => 10,
         _ => 8,
     }
 }
@@ -2800,6 +2812,8 @@ fn file_type(index: i32) -> FileType {
         4 => FileType::Archive,
         5 => FileType::DiskImage,
         7 => FileType::Program,
+        9 => FileType::Book,
+        10 => FileType::Apk,
         _ => FileType::Other,
     }
 }
