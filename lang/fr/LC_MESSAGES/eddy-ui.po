@@ -239,6 +239,9 @@ msgstr "Nouveau téléchargement"
 msgid "Checking link…"
 msgstr "Vérification du lien…"
 
+msgid "Reading the chapter list: page {} of {}"
+msgstr "Lecture de la liste des chapitres : page {} sur {}"
+
 msgid "Size unknown"
 msgstr "Taille inconnue"
 

@@ -110,6 +110,10 @@ export struct PendingLink {
     // updates it. `book_new`: chapters added since.
     book_saved_id: int,
     book_new: int,
+    // While a long table of contents is read (Ranobes, a page every 8 s):
+    // pages read so far, of how many (0: not reading one).
+    book_pages_read: int,
+    book_pages: int,
 }
 
 export global Links {
