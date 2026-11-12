@@ -7,7 +7,21 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# A newer run of the same branch or PR cancels the one still going (several
+# quick merges to main build and save their caches once, not each). A
+# release (run by hand) is a group of its own, never cancelled by a push.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
 env:
+  # The Rust every job builds with, bumped here by hand: the caches' keys
+  # hold its version, so following stable made every cache miss on the day
+  # a Rust came out. A bump costs one cold build, when it's chosen. (Not
+  # named RUST*: rust-cache puts those in its key too; nor TOOLCHAIN:
+  # Windows' names ignore case, and the toolchain action's own `toolchain`
+  # then came out empty.)
+  EDDY_RUST: "1.100.0"
   CARGO_TERM_COLOR: always
   # SLINT_STYLE is each job's own: fluent on the desktops, material on
   # Android. Never Qt, even where it's installed: Slint would link it,
@@ -42,9 +56,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ env.EDDY_RUST }}
           targets: x86_64-pc-windows-msvc
 
       # Dependencies only (Eddy's own crates are left out), restored from
@@ -103,8 +118,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.EDDY_RUST }}
 
       # Dependencies only (Eddy's own crates are left out), restored from
       # main's cache and saved only on main, so PRs don't fill the store.
@@ -156,8 +173,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.EDDY_RUST }}
 
       - name: Install Linux UI dependencies
         run: |
@@ -221,8 +240,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.EDDY_RUST }}
 
       - name: Install Linux UI dependencies
         run: |
@@ -286,8 +307,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.EDDY_RUST }}
 
       # Dependencies only (Eddy's own crates are left out), restored from
       # main's cache and saved only on main, so PRs don't fill the store.
@@ -384,9 +407,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ env.EDDY_RUST }}
           targets: aarch64-apple-ios
 
       # Saved from the ios branch too, while iOS is built there only (there's
@@ -512,9 +536,10 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
     
-      - name: Install Rust stable + Android target
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust + Android target
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ env.EDDY_RUST }}
           targets: aarch64-linux-android, armv7-linux-androideabi
 
       # Dependencies only (Eddy's own crates are left out), restored from
