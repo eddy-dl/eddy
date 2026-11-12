@@ -44,7 +44,7 @@ export { DownloadInfo, InfoRow } from "components/DownloadInfoSheet.slint";
 export { ItemAction } from "components/DownloadOptionsSheet.slint";
 export { FolderFiles, FolderFile } from "components/FolderFilesSheet.slint";
 export { ChooseFiles, ChoiceFile } from "components/ChooseFilesSheet.slint";
-export { Library, BookRow } from "globals/Library.slint";
+export { Library, BookRow, BookSort } from "globals/Library.slint";
 
 // The Android share popup's window. Exported before DownloaderApp so the
 // viewer (which shows the last component) still opens the main app.
@@ -419,7 +419,11 @@ export component DownloaderApp inherits Window {
         }
         // Under the sheets it opens (Choose chapters), above the lists.
         if (root.show_books) {
-            root.show_books = false;
+            if (books_page.sort_open) {
+                books_page.sort_open = false;
+            } else {
+                root.show_books = false;
+            }
             return true;
         }
         if (root.selection_mode) {
@@ -1543,7 +1547,7 @@ export component DownloaderApp inherits Window {
                 easing: ease-out-quad;
             }
 
-            BooksPage {
+            books_page := BooksPage {
                 safe_area_top: root.safe-area-insets.top;
                 safe_area_left: root.safe-area-insets.left;
                 safe_area_right: root.safe-area-insets.right;

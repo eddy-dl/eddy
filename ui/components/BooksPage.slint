@@ -5,7 +5,10 @@
 
 import { ThemeSettings } from "../themes/theme.slint";
 import { HoldTouchArea, HintBubble } from "HoldHint.slint";
-import { Library, BookRow } from "../globals/Library.slint";
+import { DragHandle } from "DragHandle.slint";
+import { Chip, SectionLabel } from "Chips.slint";
+import { TapToDismissArea } from "AnimatedPopup.slint";
+import { Library, BookRow, BookSort } from "../globals/Library.slint";
 
 // MD3's error colour, as Eddy uses it elsewhere.
 global BookColors {
@@ -182,6 +185,122 @@ component BookCard inherits Rectangle {
     }
 }
 
+// The page's sort sheet (MD3 bottom sheet), as the lists' sort & filter.
+component BooksSortSheet inherits Rectangle {
+    in property <length> side_inset;
+    in property <length> bottom_inset;
+    out property <length> drag_offset: handle.offset;
+    out property <bool> dragging: handle.dragging;
+    callback dismiss_requested();
+    public function reset_drag() {
+        handle.reset();
+    }
+
+    function set(sort: BookSort, ascending: bool) {
+        Library.sort = sort;
+        Library.ascending = ascending;
+        Library.sort_changed();
+    }
+
+    height: layout.preferred-height;
+    background: ThemeSettings.surface;
+    animate background { duration: ThemeSettings.fade; easing: ease-in-out; }
+    border-top-left-radius: 28px;
+    border-top-right-radius: 28px;
+    drop-shadow-blur: 12px;
+    drop-shadow-color: #00000020;
+
+    // Keeps taps on the sheet's gaps from reaching the backdrop.
+    TouchArea { }
+
+    layout := VerticalLayout {
+        padding: 16px;
+        padding-left: Math.max(16px, root.side_inset);
+        padding-right: Math.max(16px, root.side_inset);
+        padding-top: 32px;
+        padding-bottom: Math.max(16px, root.bottom_inset);
+        spacing: 12px;
+
+        HorizontalLayout {
+            spacing: 8px;
+            // As tall with Reset as without, so the sheet doesn't jump.
+            min-height: 32px;
+            Text {
+                text: @tr("Sort · Books");
+                font-size: 16px;
+                font-weight: 700;
+                color: ThemeSettings.text_color;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                overflow: elide;
+            }
+            // Back to newest first; only once it's been changed.
+            if Library.sort != BookSort.Date || Library.ascending: Chip {
+                text: @tr("Reset");
+                horizontal-stretch: 0;
+                width: 88px;
+                height: 32px;
+                clicked => { root.set(BookSort.Date, false); }
+            }
+        }
+
+        SectionLabel { text: @tr("Sort by"); }
+
+        HorizontalLayout {
+            spacing: 8px;
+            Chip {
+                text: @tr("Date");
+                selected: Library.sort == BookSort.Date;
+                clicked => { root.set(BookSort.Date, Library.ascending); }
+            }
+            Chip {
+                text: @tr("Title");
+                selected: Library.sort == BookSort.Title;
+                clicked => { root.set(BookSort.Title, Library.ascending); }
+            }
+            Chip {
+                text: @tr("Author");
+                selected: Library.sort == BookSort.Author;
+                clicked => { root.set(BookSort.Author, Library.ascending); }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            Chip {
+                text: @tr("Size");
+                selected: Library.sort == BookSort.Size;
+                clicked => { root.set(BookSort.Size, Library.ascending); }
+            }
+            Chip {
+                text: @tr("Chapters");
+                selected: Library.sort == BookSort.Chapters;
+                clicked => { root.set(BookSort.Chapters, Library.ascending); }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            Chip {
+                text: @tr("Ascending");
+                selected: Library.ascending;
+                clicked => { root.set(Library.sort, true); }
+            }
+            Chip {
+                text: @tr("Descending");
+                selected: !Library.ascending;
+                clicked => { root.set(Library.sort, false); }
+            }
+        }
+    }
+
+    handle := DragHandle {
+        y: 0;
+        width: 100%;
+        dismissed => { root.dismiss_requested(); }
+    }
+}
+
 export component BooksPage inherits Rectangle {
     in property <length> safe_area_top;
     in property <length> safe_area_left;
@@ -194,6 +313,13 @@ export component BooksPage inherits Rectangle {
     callback chapters(int);
     // A deleted book's "Save again": its link, into the preview.
     callback save_again(string);
+    // The sort sheet's open (Back closes it first).
+    in-out property <bool> sort_open: false;
+    changed sort_open => {
+        if (self.sort_open) {
+            sort_sheet.reset_drag();
+        }
+    }
 
     background: ThemeSettings.background;
     animate background { duration: ThemeSettings.fade; easing: ease-in-out; }
@@ -211,7 +337,6 @@ export component BooksPage inherits Rectangle {
         HorizontalLayout {
             height: 40px;
             vertical-stretch: 0;
-            alignment: start;
             spacing: 12px;
             padding-left: 4px;
             padding-right: 4px;
@@ -243,6 +368,29 @@ export component BooksPage inherits Rectangle {
                 font-weight: 700;
                 color: ThemeSettings.text_color;
                 vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+
+            // Sort: an icon button at the bar's end.
+            Rectangle {
+                width: 40px;
+                height: 40px;
+                border-radius: 20px;
+                background: sort_ta.pressed ? ThemeSettings.text_color.transparentize(88%)
+                    : sort_ta.has-hover ? ThemeSettings.hover_color : transparent;
+
+                Image {
+                    source: @image-url("../icons/rounded/sort.svg");
+                    width: 24px;
+                    height: 24px;
+                    colorize: ThemeSettings.text_color.transparentize(25%);
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                }
+
+                sort_ta := TouchArea {
+                    clicked => { root.sort_open = true; }
+                }
             }
         }
 
@@ -279,6 +427,31 @@ export component BooksPage inherits Rectangle {
                 font-size: 14px;
                 horizontal-alignment: center;
                 vertical-alignment: center;
+            }
+        }
+    }
+
+    // The sort sheet, over a dimmed page.
+    Rectangle {
+        background: #00000060;
+        opacity: root.sort_open ? 1.0 : 0.0;
+        visible: self.opacity > 0;
+        animate opacity { duration: 250ms; }
+
+        TapToDismissArea {
+            tapped => { root.sort_open = false; }
+        }
+
+        sort_sheet := BooksSortSheet {
+            width: parent.width;
+            side_inset: Math.max(root.safe_area_left, root.safe_area_right);
+            bottom_inset: root.safe_area_bottom;
+            dismiss_requested => { root.sort_open = false; }
+            // Closed, slid down out of sight.
+            y: (root.sort_open ? parent.height - self.height : parent.height) + self.drag_offset;
+            animate y {
+                duration: self.dragging ? 0ms : 250ms;
+                easing: ease-out-quad;
             }
         }
     }

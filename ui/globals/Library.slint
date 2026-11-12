@@ -1,6 +1,10 @@
 // The Books page: every book saved, one row each however many files
 // (parts) it came as. The Rust side fills `books` (see library.rs).
 
+// What the Books page is sorted by: when each was first saved, its title,
+// author, files' size, or chapters.
+export enum BookSort { Date, Title, Author, Size, Chapters }
+
 export struct BookRow {
     key: string, // "<site>:<id>", what `save_again` and `remove` take
     title: string,
@@ -30,6 +34,11 @@ export global Library {
           missing_parts: "2", missing_count: 1 },
         { key: "ao3:3", title: "The Last Ship Out of Somewhere Very Far Away", author: "", site: "AO3", chapters: 24, deleted: true, download_id: -1 },
     ];
+    // The page's order (newest first to begin with); the Rust side keeps
+    // it and re-sorts on `sort_changed`.
+    in-out property <BookSort> sort: BookSort.Date;
+    in-out property <bool> ascending: false;
+    callback sort_changed();
     // Opens the preview for the book's link, to save it again.
     callback save_again(string);
     // Takes a deleted book off the page.

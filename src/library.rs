@@ -5,7 +5,7 @@
 //! what it needs to show the book and save it again.
 
 use crate::novels::Site;
-use crate::{BookRow, DownloaderApp, Library};
+use crate::{BookRow, BookSort, DownloaderApp, Library};
 use serde::{Deserialize, Serialize};
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use std::collections::HashMap;
@@ -168,6 +168,8 @@ fn cover(site: Site, id: &str) -> slint::Image {
     })
 }
 
+const SORT_PREF: &str = "books_sort";
+
 /// Hooks the page up. Call once, after creating the UI.
 pub fn install(ui: &DownloaderApp) {
     let library = ui.global::<Library>();
@@ -177,6 +179,35 @@ pub fn install(ui: &DownloaderApp) {
         if let Some(url) = url {
             crate::links::add_links_from_text(&url);
         }
+    });
+    // The order chosen last time ("<sort>,<ascending>").
+    if let Ok(saved) = crate::platform::get_pref(SORT_PREF, "") {
+        if let Some((sort, ascending)) = saved.split_once(',') {
+            library.set_sort(match sort {
+                "1" => BookSort::Title,
+                "2" => BookSort::Author,
+                "3" => BookSort::Size,
+                "4" => BookSort::Chapters,
+                _ => BookSort::Date,
+            });
+            library.set_ascending(ascending == "1");
+        }
+    }
+    let ui_weak = ui.as_weak();
+    library.on_sort_changed(move || {
+        let Some(ui) = ui_weak.upgrade() else { return };
+        let library = ui.global::<Library>();
+        let sort = match library.get_sort() {
+            BookSort::Title => 1,
+            BookSort::Author => 2,
+            BookSort::Size => 3,
+            BookSort::Chapters => 4,
+            _ => 0,
+        };
+        if let Err(e) = crate::platform::save_pref(SORT_PREF, &format!("{sort},{}", library.get_ascending() as u8)) {
+            log::warn!("couldn't save the Books page's order: {e}");
+        }
+        refresh(&ui);
     });
     let ui_weak = ui.as_weak();
     library.on_remove(move |wanted| {
@@ -192,7 +223,7 @@ pub fn install(ui: &DownloaderApp) {
 
 /// The page's rows, from the books and their downloads as they are now
 /// (with the lists, every second).
-pub fn refresh(_ui: &DownloaderApp) {
+pub fn refresh(ui: &DownloaderApp) {
     let downloads = crate::downloads::book_downloads();
     // Saved before the page kept its own list.
     for d in &downloads {
@@ -222,15 +253,15 @@ pub fn refresh(_ui: &DownloaderApp) {
             }
         }
     });
-    let mut books = with_books(|books| books.clone());
-    books.sort_by(|a, b| b.added.cmp(&a.added));
-    let rows: Vec<BookRow> = books
+    let books = with_books(|books| books.clone());
+    // Each row with its size in bytes and when it was first saved, to sort by.
+    let mut rows: Vec<(BookRow, u64, u64)> = books
         .iter()
         .map(|book| {
             let mine: Vec<_> = downloads.iter().filter(|d| d.site == book.site && d.book_id == book.id).collect();
             // The buttons act on its first file (the latest, if saved twice).
             let target = mine.iter().filter(|d| d.first).max_by_key(|d| d.ended).or_else(|| mine.iter().max_by_key(|d| d.ended));
-            BookRow {
+            let row = BookRow {
                 key: key(book.site, &book.id).into(),
                 title: book.title.as_str().into(),
                 author: book.author.as_str().into(),
@@ -251,9 +282,29 @@ pub fn refresh(_ui: &DownloaderApp) {
                 missing_count: if mine.is_empty() { 0 } else { (1..=book.parts).filter(|p| !mine.iter().any(|d| d.part == *p)).count() as i32 },
                 download_id: target.map_or(-1, |d| d.id as i32),
                 checking: mine.iter().any(|d| d.checking),
-            }
+            };
+            (row, mine.iter().map(|d| d.size).sum(), book.added)
         })
         .collect();
+    let library = ui.global::<Library>();
+    let lower = |s: &slint::SharedString| s.to_lowercase();
+    rows.sort_by(|(a, a_size, a_added), (b, b_size, b_added)| {
+        let order = match library.get_sort() {
+            BookSort::Title => lower(&a.title).cmp(&lower(&b.title)),
+            // Those with no author known last either way.
+            BookSort::Author if a.author.is_empty() != b.author.is_empty() => {
+                return a.author.is_empty().cmp(&b.author.is_empty());
+            }
+            BookSort::Author => lower(&a.author).cmp(&lower(&b.author)),
+            BookSort::Size => a_size.cmp(b_size),
+            BookSort::Chapters => a.chapters.cmp(&b.chapters),
+            _ => a_added.cmp(b_added),
+        }
+        // Ties by title, A first.
+        .then_with(|| if library.get_ascending() { lower(&a.title).cmp(&lower(&b.title)) } else { lower(&b.title).cmp(&lower(&a.title)) });
+        if library.get_ascending() { order } else { order.reverse() }
+    });
+    let rows: Vec<BookRow> = rows.into_iter().map(|(row, ..)| row).collect();
     MODEL.with(|model| {
         if model.row_count() != rows.len() || model.iter().zip(&rows).any(|(a, b)| a != *b) {
             model.set_vec(rows);

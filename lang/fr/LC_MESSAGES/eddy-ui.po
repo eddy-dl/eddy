@@ -1052,3 +1052,9 @@ msgstr "Partie {} supprimée"
 
 msgid "Parts {} deleted"
 msgstr "Parties {} supprimées"
+
+msgid "Sort · Books"
+msgstr "Trier · Livres"
+
+msgid "Author"
+msgstr "Auteur"
