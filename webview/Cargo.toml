@@ -1,6 +1,7 @@
 [package]
 name = "eddy-webview"
-version = "0.2.2"
+# No version of its own (a workspace apart, it can't take Eddy's): it goes
+# with Eddy's, which is what Eddy reports for it.
 edition = "2024"
 license = "GPL-3.0-or-later"
 
