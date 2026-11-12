@@ -3,6 +3,8 @@ import { Note } from "../../components/Note.slint";
 import { ThemeSettings } from "../../themes/theme.slint";
 import { Wordmark } from "../../components/Wordmark.slint";
 import { SettingsCard, SettingsLayout } from "../SettingsCard.slint";
+import { SwitchRow } from "../../components/SwitchRow.slint";
+import { WrappedText } from "../../components/WrappedText.slint";
 
 // A row that opens a web page: label, where it goes, and an arrow.
 component LinkRow inherits SettingsCard {
@@ -70,6 +72,15 @@ export component AboutSettings inherits Rectangle {
     // True once the content has scrolled away from the top; tints the settings header.
     out property <bool> scrolled: scroller.content-y < 0;
 
+    // An update is known of (its page opens from the row), and what the
+    // row's button does now ("" for none, while it's busy).
+    private property <bool> update_out: AppSettings.update_state == 3 || AppSettings.update_state == 5 || AppSettings.update_state == 6;
+    private property <string> update_action: AppSettings.update_state == 1 || AppSettings.update_state == 4 ? ""
+        : AppSettings.update_state == 3 ? @tr("Download")
+        : AppSettings.update_state == 5 ? (AppSettings.is_mobile ? @tr("Install") : @tr("Restart"))
+        : AppSettings.update_state == 6 ? @tr("Open")
+        : @tr("Check");
+
     TouchArea { }
 
     scroller := Flickable {
@@ -112,6 +123,105 @@ export component AboutSettings inherits Rectangle {
                     wrap: word-wrap;
                 }
             }
+
+            // Eddy's own updates: looked for, downloaded and put in place
+            // from here.
+            SettingsCard {
+                first: true;
+                last: false;
+                text_color: root.text_color;
+                // An update's page, from the row itself.
+                highlighted: update_ta.has-hover && root.update_out;
+
+                update_ta := TouchArea {
+                    enabled: root.update_out;
+                    clicked => { AppSettings.update_open_page(); }
+                }
+
+                HorizontalLayout {
+                    padding: 8px;
+                    padding-top: 12px;
+                    padding-bottom: 12px;
+                    padding-left: SettingsLayout.inset;
+                    padding-right: SettingsLayout.inset;
+                    spacing: 16px;
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        horizontal-stretch: 1;
+
+                        Text {
+                            text: @tr("Updates");
+                            font-size: 18px;
+                            font-weight: 600;
+                            color: root.text_color;
+                        }
+                        WrappedText {
+                            text: AppSettings.update_state == 1 ? @tr("Checking…")
+                                : AppSettings.update_state == 2 ? @tr("Eddy is up to date")
+                                : AppSettings.update_state == 3 && AppSettings.update_size != "" ? @tr("Eddy {} is out · {}", AppSettings.update_version, AppSettings.update_size)
+                                : AppSettings.update_state == 3 || AppSettings.update_state == 6 ? @tr("Eddy {} is out", AppSettings.update_version)
+                                : AppSettings.update_state == 4 ? @tr("Downloading… {}%", Math.round(AppSettings.update_progress * 100))
+                                : AppSettings.update_state == 5 ? (AppSettings.is_mobile ? @tr("Downloaded · tap to install") : @tr("Downloaded · Eddy restarts to finish, pausing its downloads"))
+                                : AppSettings.update_state == 7 ? @tr("Couldn't check for updates")
+                                : @tr("Version {}", AppSettings.app_version);
+                            font-size: 13px;
+                            color: ThemeSettings.primary_accent.transparentize(30%);
+                        }
+                    }
+
+                    if root.update_action != "": VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: update_label.preferred-width + 24px;
+                            height: 32px;
+                            border-radius: 16px;
+                            background: ThemeSettings.primary_accent;
+                            update_label := Text {
+                                text: root.update_action;
+                                font-size: 13px;
+                                font-weight: 600;
+                                color: #ffffff;
+                                vertical-alignment: center;
+                            }
+                            TouchArea {
+                                clicked => {
+                                    if (AppSettings.update_state == 3) {
+                                        AppSettings.update_download();
+                                    } else if (AppSettings.update_state == 5) {
+                                        AppSettings.update_install();
+                                    } else if (AppSettings.update_state == 6) {
+                                        AppSettings.update_open_page();
+                                    } else {
+                                        AppSettings.update_check();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            SwitchRow {
+                first: false;
+                last: false;
+                title: @tr("Check when Eddy opens");
+                subtitle: @tr("Once a day at most, on GitHub. Nothing is downloaded until you ask");
+                text_color: root.text_color;
+                checked <=> AppSettings.update_check_on_start;
+                toggled => { AppSettings.update_settings_changed(); }
+            }
+            SwitchRow {
+                first: false;
+                last: true;
+                title: @tr("Pre-releases too");
+                subtitle: @tr("Test versions, out before a release");
+                text_color: root.text_color;
+                checked <=> AppSettings.update_prereleases;
+                toggled => { AppSettings.update_settings_changed(); }
+            }
+
+            Rectangle { height: SettingsLayout.group_gap + 14px; }
 
             LinkRow {
                 first: true;

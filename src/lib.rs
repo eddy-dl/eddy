@@ -24,6 +24,7 @@ pub mod novels;
 pub mod platform;
 pub mod preferences;
 pub mod selection;
+pub mod updates;
 pub mod storage;
 pub mod usage;
 pub mod ytdlp_plugin;
@@ -170,6 +171,7 @@ fn android_main(app: AndroidApp) {
     cookies::install(&ui);
     cache::install(&ui);
     backup::install(&ui);
+    updates::install(&ui);
     ui.run().expect("Failed to run Slint app");
     platform::deinit();
 }
@@ -234,6 +236,7 @@ pub fn ios_main() {
     cookies::install(&ui);
     cache::install(&ui);
     backup::install(&ui);
+    updates::install(&ui);
     // Downloads' ends, and their time in the background.
     platform::background::install();
     // yt-dlp and gallery-dl updates (Settings → External packages).

@@ -54,6 +54,10 @@ Downloads go to `Download/Eddy` (by type, if you like) or a folder you pick.
 Settings → General can back up your settings and download list to a file (in the download
 folder's `Backups`; not the files themselves, nor cookies) and restore one, on the same device
 or another: what's already there is kept.
+Settings → About looks for a new Eddy on GitHub (as it opens, once a day at most, unless you turn
+that off; pre-releases only if you ask) and downloads it when you say: Android's installer takes
+its APK, and on Windows and Linux Eddy swaps its own program for the new one and starts again. On
+macOS and iOS it opens the release's page.
 English and French. The French translation was written by an AI model, not a translator, and
 hasn't been checked by a native speaker: corrections are welcome.
 
