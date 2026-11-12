@@ -51,7 +51,7 @@ msgstr "Sauvegarde"
 msgid "Back up"
 msgstr "Sauvegarder"
 
-msgid "Save your settings and download list to a file in your download folder's Backups. Downloaded files and cookies aren't included."
+msgid "Save your settings and download list to a file in your download folder's Backups. Downloaded files and cookies are not included."
 msgstr "Enregistrez vos réglages et la liste des téléchargements dans un fichier, dans le dossier Backups de votre dossier de téléchargement. Les fichiers téléchargés et les cookies n’en font pas partie."
 
 msgid "Restore"
@@ -66,7 +66,7 @@ msgstr "Restaurez depuis une sauvegarde précédente. Cela ne supprime pas les f
 msgid "Include saved chapters"
 msgstr "Inclure les chapitres enregistrés"
 
-msgid "Also back up the book chapters Eddy has already fetched, so they don't need fetching again. This can make backups large."
+msgid "Also back up the book chapters Eddy has already fetched, so they do not need fetching again. This can make backups large."
 msgstr "Sauvegardez aussi les chapitres de livres qu’Eddy a déjà récupérés, pour ne pas avoir à les récupérer de nouveau. Les sauvegardes peuvent alors être volumineuses."
 
 msgid "Enable haptic feedback for some actions"
