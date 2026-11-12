@@ -21,6 +21,8 @@ struct Book {
     url: String,
     title: String,
     #[serde(default)]
+    author: String,
+    #[serde(default)]
     chapters: usize,
     /// When it was first saved (Unix seconds): the newest first on the page.
     #[serde(default)]
@@ -53,21 +55,32 @@ fn now() -> u64 {
 }
 
 /// A book was saved (any thread): onto the page, or brought up to date.
-pub fn remember(site: Site, id: &str, url: &str, title: &str, chapters: usize) {
-    remember_at(site, id, url, title, chapters, now());
+pub fn remember(site: Site, id: &str, url: &str, title: &str, author: &str, chapters: usize) {
+    remember_at(site, id, url, title, author, chapters, now());
 }
 
-fn remember_at(site: Site, id: &str, url: &str, title: &str, chapters: usize, added: u64) {
+fn remember_at(site: Site, id: &str, url: &str, title: &str, author: &str, chapters: usize, added: u64) {
     with_books(|books| {
         let book = match books.iter_mut().find(|b| b.site == site && b.id == id) {
             Some(book) => {
                 book.url = url.to_string();
                 book.title = title.to_string();
+                if !author.is_empty() {
+                    book.author = author.to_string();
+                }
                 book.chapters = chapters;
                 book.clone()
             }
             None => {
-                let book = Book { site, id: id.to_string(), url: url.to_string(), title: title.to_string(), chapters, added };
+                let book = Book {
+                    site,
+                    id: id.to_string(),
+                    url: url.to_string(),
+                    title: title.to_string(),
+                    author: author.to_string(),
+                    chapters,
+                    added,
+                };
                 books.push(book.clone());
                 book
             }
@@ -81,6 +94,50 @@ thread_local! {
     /// Covers loaded, by file and when it was written (a book saved again
     /// may bring a new one).
     static COVERS: std::cell::RefCell<HashMap<(PathBuf, SystemTime), slint::Image>> = std::cell::RefCell::new(HashMap::new());
+    /// Books whose file was looked in for a cover and author (once a run).
+    static TRIED: std::cell::RefCell<std::collections::HashSet<String>> = std::cell::RefCell::new(std::collections::HashSet::new());
+}
+
+/// A book saved before its cover and author were kept: both from its EPUB
+/// (Eddy's own: OEBPS/images/cover.<ext>, dc:creator in content.opf). The
+/// page shows them at its next refresh.
+fn from_epub(site: Site, id: &str, path: &std::path::Path) {
+    let Ok(file) = std::fs::File::open(path) else { return };
+    let Ok(mut zip) = zip::ZipArchive::new(file) else { return };
+    let read = |zip: &mut zip::ZipArchive<std::fs::File>, name: &str| -> Option<Vec<u8>> {
+        let mut entry = zip.by_name(name).ok()?;
+        let mut data = Vec::new();
+        std::io::Read::read_to_end(&mut entry, &mut data).ok()?;
+        Some(data)
+    };
+    if crate::novels::cover_file(site, id).is_none() {
+        for ext in ["jpg", "png", "webp", "gif", "svg"] {
+            if let Some(data) = read(&mut zip, &format!("OEBPS/images/cover.{ext}")) {
+                crate::novels::keep_cover_as(site, id, &data, ext);
+                break;
+            }
+        }
+    }
+    let author = read(&mut zip, "OEBPS/content.opf").and_then(|opf| {
+        let opf = String::from_utf8_lossy(&opf);
+        let start = opf.find("<dc:creator")?;
+        let start = start + opf[start..].find('>')? + 1;
+        let end = start + opf[start..].find("</dc:creator>")?;
+        Some(unescape(opf[start..end].trim()))
+    });
+    if let Some(author) = author.filter(|a| !a.is_empty()) {
+        with_books(|books| {
+            if let Some(book) = books.iter_mut().find(|b| b.site == site && b.id == id && b.author.is_empty()) {
+                book.author = author;
+                store(book);
+            }
+        });
+    }
+}
+
+/// XML's escapes, as clean::escape writes them.
+fn unescape(text: &str) -> String {
+    text.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&")
 }
 
 fn cover(site: Site, id: &str) -> slint::Image {
@@ -127,7 +184,17 @@ pub fn refresh(_ui: &DownloaderApp) {
     for d in &downloads {
         if !with_books(|books| books.iter().any(|b| b.site == d.site && b.id == d.book_id)) {
             let title = if d.named.is_empty() { &d.title } else { &d.named };
-            remember_at(d.site, &d.book_id, &d.url, title, d.chapters, d.ended);
+            remember_at(d.site, &d.book_id, &d.url, title, &d.author, d.chapters, d.ended);
+        }
+    }
+    // Saved before covers and authors were kept: both from the book's file.
+    for d in &downloads {
+        let Some(path) = &d.path else { continue };
+        let missing = crate::novels::cover_file(d.site, &d.book_id).is_none()
+            || with_books(|books| books.iter().any(|b| b.site == d.site && b.id == d.book_id && b.author.is_empty()));
+        if missing && !path.starts_with("content://") && TRIED.with(|t| t.borrow_mut().insert(key(d.site, &d.book_id))) {
+            let (site, id, path) = (d.site, d.book_id.clone(), PathBuf::from(path));
+            std::thread::spawn(move || from_epub(site, &id, &path));
         }
     }
     let mut books = with_books(|books| books.clone());
@@ -141,6 +208,11 @@ pub fn refresh(_ui: &DownloaderApp) {
             BookRow {
                 key: key(book.site, &book.id).into(),
                 title: book.title.as_str().into(),
+                author: book.author.as_str().into(),
+                size: match mine.iter().map(|d| d.size).sum::<u64>() {
+                    0 => "".into(),
+                    n => crate::links::format_size(n).into(),
+                },
                 site: book.site.label().into(),
                 chapters: mine.iter().map(|d| d.chapters).max().unwrap_or(book.chapters) as i32,
                 cover: cover(book.site, &book.id),

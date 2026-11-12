@@ -283,7 +283,7 @@ pub fn book_saved(id: i64, book: crate::novels::SavedBook) {
     if let Some(request) = saved {
         let options = serde_json::from_str::<crate::novels::NovelOptions>(&request.format).unwrap_or_default();
         let title = if options.title.trim().is_empty() { book.title.clone() } else { options.title.trim().to_string() };
-        crate::library::remember(book.site, &book.id, &request.url, &title, book.chapters);
+        crate::library::remember(book.site, &book.id, &request.url, &title, &book.author, book.chapters);
     }
 }
 
@@ -296,11 +296,16 @@ pub struct BookDownload {
     /// Its title on the site, and as it was named (its own title).
     pub title: String,
     pub named: String,
+    pub author: String,
     pub chapters: usize,
     /// The book's first file (not a part added since).
     pub first: bool,
     pub ended: u64,
     pub checking: bool,
+    /// The saved file and its size, once it's saved (not while it's being
+    /// saved again).
+    pub path: Option<String>,
+    pub size: u64,
 }
 
 /// Every download that saved a book (finished, or being saved again).
@@ -319,10 +324,13 @@ pub fn book_downloads() -> Vec<BookDownload> {
                     url: e.saved.request.url.clone(),
                     title: book.title.clone(),
                     named: options.title.trim().to_string(),
+                    author: book.author.clone(),
                     chapters: book.chapters,
                     first: options.part == 0,
                     ended: e.saved.ended,
                     checking: checking.contains(&e.id),
+                    path: e.saved.path.clone().filter(|_| e.saved.state == State::Completed),
+                    size: if e.saved.state == State::Completed { e.saved.total } else { 0 },
                 })
             })
             .collect()
@@ -366,9 +374,9 @@ fn update_book(id: i64) {
         // The last chapter saved, rather than how many the book had then:
         // locked ones at its end (early access) count as new once they open.
         let chapters = parts.iter().filter_map(|e| e.saved.book.as_ref().map(|b| if b.last > 0 { b.last } else { b.chapters })).max();
-        Some((entry.saved.request.clone(), chapters, parts.len(), stem))
+        Some((entry.saved.request.clone(), chapters, next_part(entries, &members), stem))
     });
-    let Some((request, chapters, count, stem)) = found else {
+    let Some((request, chapters, next, stem)) = found else {
         return;
     };
     // Once at a time: its button waits until the check's done.
@@ -404,7 +412,7 @@ fn update_book(id: i64) {
                 let mut request = request;
                 request.choices = book_choices(&book);
                 let new = (known + 1..=book.chapters.len()).filter(|&n| !book.chapters[n - 1].locked).collect();
-                let request = part_request(&request, new, count + 1, &stem);
+                let request = part_request(&request, new, next, &stem);
                 // The others keep the chapters they have now.
                 with_entries(|entries| {
                     for i in book_members(entries, id) {
@@ -1738,7 +1746,22 @@ fn first_part_stem(entries: &[Entry], members: &[usize]) -> String {
         .map(|&i| &entries[i])
         .find(|e| serde_json::from_str::<crate::novels::NovelOptions>(&e.saved.request.format).is_ok_and(|o| o.part == 0))
         .or_else(|| members.first().map(|&i| &entries[i]));
-    first.map(|e| e.saved.name.trim_end_matches(".epub").to_string()).unwrap_or_default()
+    let name = first.map(|e| e.saved.name.trim_end_matches(".epub").to_string()).unwrap_or_default();
+    // The first file deleted: a part's name, without what makes it one.
+    static PART: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r" \(part \d+, ch [^)]*\)$").unwrap());
+    PART.replace(&name, "").into_owned()
+}
+
+/// The number a book's next part gets: after its highest (the book's
+/// first file is part 1), so a deleted part's number isn't given twice.
+fn next_part(entries: &[Entry], members: &[usize]) -> usize {
+    members
+        .iter()
+        .filter_map(|&i| serde_json::from_str::<crate::novels::NovelOptions>(&entries[i].saved.request.format).ok())
+        .map(|o| o.part.max(1))
+        .max()
+        .unwrap_or(0)
+        + 1
 }
 
 /// Choose chapters on a book in parts (`id`: any of them): a part that lost
@@ -1777,7 +1800,7 @@ fn choose_parts(id: i64, ticked: &[usize], retitled: bool) {
         let opened = entries.iter().find(|e| e.id == id)?;
         let locked = |n: &usize| opened.saved.request.choices.iter().any(|c| c.index == *n && c.locked);
         let new: Vec<usize> = ticked.iter().copied().filter(|n| !covered.contains(n) && !locked(n)).collect();
-        let part = (!new.is_empty()).then(|| part_request(&opened.saved.request, new, members.len() + 1, &stem));
+        let part = (!new.is_empty()).then(|| part_request(&opened.saved.request, new, next_part(entries, &members), &stem));
         if part.is_some() {
             // The others keep the chapters they have now.
             for &i in &members {

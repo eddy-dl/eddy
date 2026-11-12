@@ -53,7 +53,7 @@ component BookCard inherits Rectangle {
     callback save_again();
     callback remove();
 
-    height: 88px;
+    height: 92px;
     border-radius: 12px;
     background: ta.pressed ? ThemeSettings.surface.darker(0.08) : ThemeSettings.surface;
     animate background { duration: ta.pressed ? 150ms : ThemeSettings.fade; easing: ease-in-out; }
@@ -101,7 +101,7 @@ component BookCard inherits Rectangle {
         VerticalLayout {
             horizontal-stretch: 1;
             alignment: center;
-            spacing: 6px;
+            spacing: 4px;
 
             Rectangle {
                 height: title.preferred-height;
@@ -124,10 +124,18 @@ component BookCard inherits Rectangle {
                 }
             }
 
+            if root.book.author != "": Text {
+                text: root.book.author;
+                color: ThemeSettings.text_color.transparentize(root.book.deleted ? 55% : 25%);
+                font-size: 13px;
+                overflow: elide;
+            }
+
             Text {
                 text: root.book.deleted ? @tr("Deleted")
                     : root.book.checking ? @tr("Checking for new chapters…")
-                    : root.book.site + " · " + @tr("{n} chapter" | "{n} chapters" % root.book.chapters);
+                    : root.book.site + " · " + @tr("{n} chapter" | "{n} chapters" % root.book.chapters)
+                        + (root.book.size != "" ? " · " + root.book.size : "");
                 color: root.book.deleted ? BookColors.deleted : ThemeSettings.text_color.transparentize(35%);
                 font-size: 12px;
                 overflow: elide;

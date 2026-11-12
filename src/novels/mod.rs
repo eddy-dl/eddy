@@ -256,12 +256,17 @@ fn keep_cover(book: &Book, data: &[u8], content_type: &str) {
         "image/svg+xml" => "svg",
         _ => "jpg",
     };
-    let dir = cache_dir(book);
+    keep_cover_as(book.site, &book.id, data, ext);
+}
+
+/// Keeps `data` as a book's cover, of type `ext` (one of COVER_TYPES).
+pub fn keep_cover_as(site: Site, id: &str, data: &[u8], ext: &str) {
+    let dir = book_dir(site, id);
     for old in COVER_TYPES {
         let _ = std::fs::remove_file(dir.join(format!("cover.{old}")));
     }
     if let Err(e) = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(dir.join(format!("cover.{ext}")), data)) {
-        log::warn!(target: "books", "couldn't keep {}'s cover: {e}", book.title);
+        log::warn!(target: "books", "couldn't keep {id}'s cover: {e}");
     }
 }
 
@@ -295,6 +300,9 @@ pub struct SavedBook {
     /// ones are those after it.
     #[serde(default)]
     pub last: usize,
+    /// Its author ("" if the site gives none, or from before it was kept).
+    #[serde(default)]
+    pub author: String,
 }
 
 /// Saves the book as `<dir>/<name>.epub`, reporting (chapters done, total).
@@ -353,7 +361,14 @@ pub async fn download(
     let series = options.parts.then_some(options.part.max(1));
     let bytes = epub::pack(&book, &packed, cover, collected.into_images(), series)?;
     tokio::fs::write(&path, bytes).await.map_err(|e| e.to_string())?;
-    Ok((path, SavedBook { site: book.site, id: book.id.clone(), chapters: book.chapters.len(), title: site_title, last }))
+    Ok((path, SavedBook {
+        site: book.site,
+        id: book.id.clone(),
+        chapters: book.chapters.len(),
+        title: site_title,
+        last,
+        author: book.author.clone().unwrap_or_default(),
+    }))
 }
 
 /// The book's cover (the first of its covers that comes, each tried a few

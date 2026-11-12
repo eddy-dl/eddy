@@ -274,7 +274,11 @@ export component DownloaderApp inherits Window {
     }
 
     // Room below the last card: clear of the bottom bar and the + button.
-    private property <length> list_bottom_padding: root.bottom_bar_height + 64px + 32px;
+    // Scrolled to the end, the last card clears the FABs (and the Books
+    // one above +, once there are books: 40 and its 16 gap; not changed by
+    // selecting, which hides it, so the list doesn't jump).
+    private property <length> list_bottom_padding: root.bottom_bar_height + 64px + 32px + (Library.books.length > 0 ? 56px : 0px);
+    private property <bool> books_fab_shown: Library.books.length > 0 && !root.selection_mode;
 
     // A tab's sort & filter sheet goes with it (the bar isn't covered by its
     // dimming, so tapping or swiping to another tab doesn't dismiss it).
@@ -902,7 +906,7 @@ export component DownloaderApp inherits Window {
                     // The Books page: an MD3 small FAB (40, 12 corners, a 24
                     // icon) centred above +, once a book has been saved.
                     Rectangle {
-                        property <bool> shown: Library.books.length > 0 && !root.selection_mode;
+                        property <bool> shown: root.books_fab_shown;
                         width: 40px;
                         height: 40px;
                         border-radius: 12px;
