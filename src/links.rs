@@ -258,10 +258,50 @@ fn add_url(url: &str, remember: bool) -> Option<i32> {
 
     let url = url.to_string();
     crate::downloader::runtime().spawn(async move {
+        // A Spotify track: the same song on YouTube Music, which is what's
+        // checked, kept and downloaded from here on.
+        let url = if extractors::spotify::is_track_link(&url) {
+            match extractors::spotify::youtube_music_link(&url).await {
+                Ok(found) => {
+                    let (old, new) = (url, found.clone());
+                    let _ = slint::invoke_from_event_loop(move || retarget(id, &old, &new));
+                    found
+                }
+                Err(e) => {
+                    let _ = slint::invoke_from_event_loop(move || apply_probe(id, Err(e)));
+                    return;
+                }
+            }
+        } else {
+            url
+        };
         let result = probe(&url).await;
         let _ = slint::invoke_from_event_loop(move || apply_probe(id, result));
     });
     Some(id)
+}
+
+/// A pending link becomes another (a Spotify track, the song found for it):
+/// the new one is what's kept and shown. Dropped if that one's pending
+/// already; nothing happens if it was skipped meanwhile.
+fn retarget(id: i32, old: &str, new: &str) {
+    if !PENDING.with(|m| m.iter().any(|l| l.id == id)) {
+        return;
+    }
+    crate::db::remove_pending(old);
+    if is_pending(new) {
+        take_pending(id);
+        return;
+    }
+    crate::db::add_pending(new);
+    PENDING.with(|m| {
+        if let Some(index) = m.iter().position(|l| l.id == id) {
+            let mut link = m.row_data(index).unwrap();
+            link.url = new.into();
+            link.source = host_of(new).into();
+            m.set_row_data(index, link);
+        }
+    });
 }
 
 /// Adds every link in `text` to the pending list; returns the new links' ids.

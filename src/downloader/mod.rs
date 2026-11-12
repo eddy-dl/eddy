@@ -618,6 +618,17 @@ fn launch(request: &DownloadRequest) -> Result<Option<Handle>, String> {
             }
             let mut request = request.clone();
             runtime().spawn(async move {
+                // A Spotify track: the same song on YouTube Music (see
+                // extractors::spotify), which the record keeps.
+                if crate::extractors::spotify::is_track_link(&request.url) {
+                    match crate::extractors::spotify::youtube_music_link(&request.url).await {
+                        Ok(link) => request.url = link,
+                        Err(e) => {
+                            choosing().retain(|&id| id != request.id);
+                            return finished(request.id, label_for(&request), false, e, None, None);
+                        }
+                    }
+                }
                 (request.backend, request.format) = crate::links::pick_backend(&request.url).await;
                 // The record keeps what was picked, for resuming.
                 crate::downloads::update_request(&request);

@@ -59,7 +59,7 @@ pub fn fresh_info(path: &Path) -> Option<PathBuf> {
 }
 
 /// The cookies.txt the user may have put in the app's folder.
-fn cookie_args() -> Vec<String> {
+pub(super) fn cookie_args() -> Vec<String> {
     let file = super::http::cookie_file();
     if file.is_file() {
         vec!["--cookies".to_string(), file.to_string_lossy().into_owned()]

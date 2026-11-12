@@ -12,6 +12,7 @@ pub mod instagram;
 pub mod mega;
 pub mod packed;
 pub mod pinterest;
+pub mod spotify;
 pub mod tikmate;
 pub mod tiktok;
 pub mod ytdlp;
