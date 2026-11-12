@@ -675,18 +675,7 @@ fn link_category(link: &PendingLink, audio: bool) -> &'static str {
         Some(LinkBackend::Drive | LinkBackend::Mega) if link.file_type == FileType::Folder => category_folder(FileType::Other),
         // A page of galleries (a user's): pictures, mostly.
         Some(LinkBackend::Gallery) if link.file_type == FileType::Folder => category_folder(FileType::Image),
-        _ => file_category(link.file_type, &link.filename),
-    }
-}
-
-/// `category_folder`, with e-books (Documents, but kept with the saved
-/// books) in Books.
-pub fn file_category(file_type: FileType, name: &str) -> &'static str {
-    let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
-    match ext.as_str() {
-        _ if file_type == FileType::Folder => category_folder(file_type),
-        "epub" | "mobi" | "azw" | "azw3" | "kfx" | "fb2" | "djvu" | "cbz" | "cbr" => "Books",
-        _ => category_folder(file_type),
+        _ => category_folder(link.file_type),
     }
 }
 
