@@ -1541,9 +1541,19 @@ export component DownloaderApp inherits Window {
             height: 100%;
             opacity: root.show_books ? 1.0 : 0.0;
             y: root.show_books ? 0px : 40px;
+            // iOS's back swipe moves it when it's what Back would close (no
+            // sheet over it), as Settings; closed by one, it keeps its place
+            // as it fades.
+            property <bool> on_top: !books_page.sort_open && !ChooseFiles.open && !FolderFiles.open && !DownloadInfo.open
+                && !FolderBrowser.open && !root.delete_confirm_open && !root.item_options_open;
+            x: !root.show_books || (BackGesture.dragging && self.on_top) ? BackGesture.offset : 0px;
             visible: self.opacity > 0;
             animate opacity, y {
                 duration: 250ms;
+                easing: ease-out-quad;
+            }
+            animate x {
+                duration: BackGesture.dragging ? 0ms : 250ms;
                 easing: ease-out-quad;
             }
 
