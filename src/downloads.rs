@@ -298,6 +298,10 @@ pub struct BookDownload {
     pub named: String,
     pub author: String,
     pub chapters: usize,
+    /// The last chapter it saved (or how many the book had, from before
+    /// that was kept), and its part (the book's first file is part 1).
+    pub last: usize,
+    pub part: usize,
     /// The book's first file (not a part added since).
     pub first: bool,
     pub ended: u64,
@@ -326,6 +330,8 @@ pub fn book_downloads() -> Vec<BookDownload> {
                     named: options.title.trim().to_string(),
                     author: book.author.clone(),
                     chapters: book.chapters,
+                    last: if book.last > 0 { book.last } else { book.chapters },
+                    part: options.part.max(1),
                     first: options.part == 0,
                     ended: e.saved.ended,
                     checking: checking.contains(&e.id),
@@ -374,10 +380,17 @@ fn update_book(id: i64) {
         // The last chapter saved, rather than how many the book had then:
         // locked ones at its end (early access) count as new once they open.
         let chapters = parts.iter().filter_map(|e| e.saved.book.as_ref().map(|b| if b.last > 0 { b.last } else { b.chapters })).max();
-        Some((entry.saved.request.clone(), chapters, next_part(entries, &members), stem))
+        let key = book.map(|b| (b.site, b.id.clone()));
+        Some((entry.saved.request.clone(), chapters, next_part(entries, &members), stem, key))
     });
-    let Some((request, chapters, next, stem)) = found else {
+    let Some((request, chapters, next, stem, key)) = found else {
         return;
+    };
+    // Counted from the last chapter ever saved: a newest part deleted
+    // (read, say) isn't saved again.
+    let chapters = match key.map_or(0, |(site, id)| crate::library::saved_so_far(site, &id).0) {
+        0 => chapters,
+        last => Some(chapters.map_or(last, |c| c.max(last))),
     };
     // Once at a time: its button waits until the check's done.
     if !CHECKING.with(|c| c.borrow_mut().insert(id)) {
@@ -1755,12 +1768,15 @@ fn first_part_stem(entries: &[Entry], members: &[usize]) -> String {
 /// The number a book's next part gets: after its highest (the book's
 /// first file is part 1), so a deleted part's number isn't given twice.
 fn next_part(entries: &[Entry], members: &[usize]) -> usize {
+    // Deleted ones too, as the Books page remembers them.
+    let known = members.iter().find_map(|&i| entries[i].saved.book.as_ref()).map_or(0, |b| crate::library::saved_so_far(b.site, &b.id).1);
     members
         .iter()
         .filter_map(|&i| serde_json::from_str::<crate::novels::NovelOptions>(&entries[i].saved.request.format).ok())
         .map(|o| o.part.max(1))
         .max()
         .unwrap_or(0)
+        .max(known)
         + 1
 }
 

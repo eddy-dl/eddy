@@ -1046,3 +1046,9 @@ msgstr "Retirer des livres"
 
 msgid "No books yet"
 msgstr "Aucun livre pour l’instant"
+
+msgid "Part {} deleted"
+msgstr "Partie {} supprimée"
+
+msgid "Parts {} deleted"
+msgstr "Parties {} supprimées"

@@ -24,6 +24,12 @@ struct Book {
     author: String,
     #[serde(default)]
     chapters: usize,
+    /// The last chapter ever saved, and the highest part: new chapters and
+    /// parts count from them, even after those files are deleted.
+    #[serde(default)]
+    last: usize,
+    #[serde(default)]
+    parts: usize,
     /// When it was first saved (Unix seconds): the newest first on the page.
     #[serde(default)]
     added: u64,
@@ -79,6 +85,8 @@ fn remember_at(site: Site, id: &str, url: &str, title: &str, author: &str, chapt
                     title: title.to_string(),
                     author: author.to_string(),
                     chapters,
+                    last: 0,
+                    parts: 0,
                     added,
                 };
                 books.push(book.clone());
@@ -87,6 +95,12 @@ fn remember_at(site: Site, id: &str, url: &str, title: &str, author: &str, chapt
         };
         store(&book);
     });
+}
+
+/// The last chapter ever saved of a book, and its highest part (0, 0 if
+/// it isn't known).
+pub fn saved_so_far(site: Site, id: &str) -> (usize, usize) {
+    with_books(|books| books.iter().find(|b| b.site == site && b.id == id).map_or((0, 0), |b| (b.last, b.parts)))
 }
 
 thread_local! {
@@ -197,6 +211,17 @@ pub fn refresh(_ui: &DownloaderApp) {
             std::thread::spawn(move || from_epub(site, &id, &path));
         }
     }
+    // How far each got, kept for when its files are gone.
+    with_books(|books| {
+        for book in books.iter_mut() {
+            let mine = downloads.iter().filter(|d| d.site == book.site && d.book_id == book.id);
+            let (last, parts) = mine.fold((book.last, book.parts), |(l, p), d| (l.max(d.last), p.max(d.part)));
+            if (last, parts) != (book.last, book.parts) {
+                (book.last, book.parts) = (last, parts);
+                store(book);
+            }
+        }
+    });
     let mut books = with_books(|books| books.clone());
     books.sort_by(|a, b| b.added.cmp(&a.added));
     let rows: Vec<BookRow> = books
@@ -217,6 +242,13 @@ pub fn refresh(_ui: &DownloaderApp) {
                 chapters: mine.iter().map(|d| d.chapters).max().unwrap_or(book.chapters) as i32,
                 cover: cover(book.site, &book.id),
                 deleted: mine.is_empty(),
+                // Parts whose files were deleted (while some are left).
+                missing_parts: if mine.is_empty() {
+                    "".into()
+                } else {
+                    (1..=book.parts).filter(|p| !mine.iter().any(|d| d.part == *p)).map(|p| p.to_string()).collect::<Vec<_>>().join(", ").into()
+                },
+                missing_count: if mine.is_empty() { 0 } else { (1..=book.parts).filter(|p| !mine.iter().any(|d| d.part == *p)).count() as i32 },
                 download_id: target.map_or(-1, |d| d.id as i32),
                 checking: mine.iter().any(|d| d.checking),
             }

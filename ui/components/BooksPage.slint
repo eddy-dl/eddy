@@ -53,7 +53,7 @@ component BookCard inherits Rectangle {
     callback save_again();
     callback remove();
 
-    height: 92px;
+    height: Math.max(92px, row.preferred-height);
     border-radius: 12px;
     background: ta.pressed ? ThemeSettings.surface.darker(0.08) : ThemeSettings.surface;
     animate background { duration: ta.pressed ? 150ms : ThemeSettings.fade; easing: ease-in-out; }
@@ -64,7 +64,7 @@ component BookCard inherits Rectangle {
         clicked => { root.open(); }
     }
 
-    HorizontalLayout {
+    row := HorizontalLayout {
         padding: 12px;
         // Room for the two buttons over the right end.
         padding-right: 12px + 2 * 48px;
@@ -137,6 +137,13 @@ component BookCard inherits Rectangle {
                     : root.book.site + " · " + @tr("{n} chapter" | "{n} chapters" % root.book.chapters)
                         + (root.book.size != "" ? " · " + root.book.size : "");
                 color: root.book.deleted ? BookColors.deleted : ThemeSettings.text_color.transparentize(35%);
+                font-size: 12px;
+                overflow: elide;
+            }
+
+            if root.book.missing_count > 0: Text {
+                text: root.book.missing_count == 1 ? @tr("Part {} deleted", root.book.missing_parts) : @tr("Parts {} deleted", root.book.missing_parts);
+                color: BookColors.deleted;
                 font-size: 12px;
                 overflow: elide;
             }

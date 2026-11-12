@@ -14,6 +14,9 @@ export struct BookRow {
     // The download the row's buttons act on (its first file), -1 if deleted.
     download_id: int,
     checking: bool, // checking for new chapters
+    // Parts whose files were deleted, e.g. "2, 3", and how many.
+    missing_parts: string,
+    missing_count: int,
 }
 
 export global Library {
@@ -23,7 +26,8 @@ export global Library {
         // A drawn cover (an SVG, small in the app), to see how one looks.
         { key: "royalroad:1", title: "Mother of Learning", author: "nobody103", site: "Royal Road", size: "3.1 MB", chapters: 108, download_id: 1,
           cover: @image-url("sample-cover.svg") },
-        { key: "ranobes:2", title: "Salvos (A Monster Evolution LitRPG)", author: "MelasD", site: "Ranobes", size: "14.8 MB", chapters: 812, download_id: 2, checking: true },
+        { key: "ranobes:2", title: "Salvos (A Monster Evolution LitRPG)", author: "MelasD", site: "Ranobes", size: "14.8 MB", chapters: 812, download_id: 2, checking: true,
+          missing_parts: "2", missing_count: 1 },
         { key: "ao3:3", title: "The Last Ship Out of Somewhere Very Far Away", author: "", site: "AO3", chapters: 24, deleted: true, download_id: -1 },
     ];
     // Opens the preview for the book's link, to save it again.
