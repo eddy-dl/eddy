@@ -156,6 +156,19 @@ tasks.register<Copy>("copyRustLibs") {
                 eachFile { path = "$abi/$name" }
             }
         }
+        // The NDK's copy keeps its debug symbols: 9 MB, about 1 MB stripped.
+        val strip = fileTree("$ndk/toolchains/llvm/prebuilt").matching { include("*/bin/llvm-strip") }.files.firstOrNull()
+        val libs = listOf("arm64-v8a", "armeabi-v7a").map { File(jniLibsDir, "$it/libc++_shared.so") }
+        doLast {
+            if (strip == null) {
+                logger.warn("No llvm-strip in the NDK: libc++_shared.so goes in unstripped")
+                return@doLast
+            }
+            for (lib in libs.filter { it.exists() }) {
+                val code = ProcessBuilder(strip.absolutePath, "--strip-unneeded", lib.absolutePath).inheritIO().start().waitFor()
+                if (code != 0) throw GradleException("llvm-strip failed on $lib")
+            }
+        }
     } else {
         logger.warn("No ANDROID_NDK_HOME: the APK goes without libc++_shared.so, which the ffmpeg helper needs")
     }
