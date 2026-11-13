@@ -91,6 +91,23 @@
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:exported="false" />
 
+        <!-- "Convert to audio": a shared video's sound, saved with the ffmpeg
+             helper app. Plain dialogs over the app it came from. -->
+        <activity
+            android:name=".AudioConvertActivity"
+            android:label="@string/audio_convert"
+            android:theme="@style/Theme.Eddy.Popup"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard|smallestScreenSize|density|uiMode"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+        </activity>
+
         <!-- Share targets: what another app shares (text, or a .txt / .torrent
              file) reaches one of these three entries in the share sheet. -->
         <activity

@@ -39,4 +39,16 @@
     <string name="check_hint">This site checks it\'s a browser first. Wait a moment, or tap its box if it shows one; this closes by itself once it\'s through.</string>
     <string name="browser_hint">Tap the site\'s download button (wait or solve its check if it asks); Eddy downloads the file from there.</string>
     <string name="browser_made_in_page">This site makes the file inside the page, so there\'s no link for Eddy to download</string>
+    <string name="audio_convert">Convert to audio</string>
+    <string name="audio_convert_button">Convert</string>
+    <string name="audio_original">Original audio (no re-encoding, fastest)</string>
+    <string name="audio_mp3">MP3</string>
+    <string name="audio_aac">AAC (.m4a)</string>
+    <string name="audio_converting">Converting to audio…</string>
+    <string name="audio_saved">Saved as %1$s</string>
+    <string name="audio_open">Open</string>
+    <string name="audio_failed">Couldn\'t convert it: %1$s</string>
+    <string name="audio_no_video">Couldn\'t read the shared video</string>
+    <string name="audio_no_sound">This video has no sound</string>
+    <string name="audio_no_ffmpeg">Install the ffmpeg helper app first (Settings → Downloads in Eddy)</string>
 </resources>
