@@ -967,6 +967,10 @@ export component LinkPreviewSheet inherits Rectangle {
                         }
                     }
                 }
+                if root.is_media && root.link.from_spotify: Note {
+                    text: @tr("Spotify's own songs are protected: each one is downloaded from YouTube Music, the first song found for its title and artists");
+                    font_size: 12px;
+                }
                 if root.backend == LinkBackend.Direct && !root.torrent_link: Note {
                     text: @tr("For a page with its own download button: click it there, and the file downloads here");
                     font_size: 12px;

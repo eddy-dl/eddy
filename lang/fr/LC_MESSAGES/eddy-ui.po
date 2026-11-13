@@ -936,6 +936,9 @@ msgstr "Titre"
 msgid "Open in browser"
 msgstr "Ouvrir dans le navigateur"
 
+msgid "Spotify's own songs are protected: each one is downloaded from YouTube Music, the first song found for its title and artists"
+msgstr "Les morceaux de Spotify sont protégés : chacun est téléchargé depuis YouTube Music, la première chanson trouvée pour son titre et ses artistes"
+
 msgid "For a page with its own download button: click it there, and the file downloads here"
 msgstr "Pour une page avec son propre bouton de téléchargement : touchez-le là-bas, et le fichier se télécharge ici"
 

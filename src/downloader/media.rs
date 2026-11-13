@@ -193,7 +193,7 @@ pub fn start(request: &DownloadRequest, dir: &str, name: Option<String>, deliver
     let label = super::label_for(request);
     let record = request.id;
     match service {
-        Service::YtDlp => start_ytdlp(record, &request.url, &media, dir, name, label, deliver, &request.settings),
+        Service::YtDlp | Service::Spotify => start_ytdlp(record, &request.url, &media, dir, name, label, deliver, &request.settings),
         native => {
             let (job, cancelled) = begin(&label);
             let (url, dir) = (request.url.clone(), PathBuf::from(dir));

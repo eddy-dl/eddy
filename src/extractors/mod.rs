@@ -27,6 +27,9 @@ pub enum Service {
     Instagram,
     Pinterest,
     YtDlp,
+    /// A Spotify playlist or album: its tracks, found on YouTube Music and
+    /// downloaded by yt-dlp (see spotify.rs).
+    Spotify,
 }
 
 impl Service {
@@ -37,6 +40,8 @@ impl Service {
             Service::Instagram => "Instagram",
             Service::Pinterest => "Pinterest",
             Service::YtDlp => "yt-dlp",
+            // Where the songs come from: Spotify's own are protected.
+            Service::Spotify => "YouTube Music",
         }
     }
 }
@@ -125,6 +130,9 @@ pub struct MediaRequest {
     pub info_json: Option<PathBuf>,
     /// The items are images (yt-dlp picks formats differently for them).
     pub image: bool,
+    /// A Spotify playlist's or album's tracks (by item): what YouTube Music
+    /// is searched for, each one's first song downloaded.
+    pub searches: Vec<String>,
 }
 
 /// Finds a link's media: the matching native extractor first, then yt-dlp
@@ -187,7 +195,7 @@ pub async fn resolve(service: Service, url: &str, request: &MediaRequest) -> Res
         Service::TikTok => tiktok::resolve(url, request).await,
         Service::Instagram => instagram::resolve(url, request).await,
         Service::Pinterest => pinterest::resolve(url, request).await,
-        Service::YtDlp => Err("yt-dlp downloads itself".to_string()),
+        Service::YtDlp | Service::Spotify => Err("yt-dlp downloads itself".to_string()),
     }
 }
 

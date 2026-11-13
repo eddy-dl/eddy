@@ -258,13 +258,29 @@ fn add_url(url: &str, remember: bool) -> Option<i32> {
 
     let url = url.to_string();
     crate::downloader::runtime().spawn(async move {
+        // A Spotify short link: where it leads (a track, a playlist…).
+        let url = if extractors::spotify::is_short_link(&url) {
+            match extractors::spotify::expand(&url).await {
+                Ok(landed) if landed != url => {
+                    let (old, new) = (url, landed.clone());
+                    let _ = slint::invoke_from_event_loop(move || retarget(id, &old, &new));
+                    landed
+                }
+                _ => url,
+            }
+        } else {
+            url
+        };
         // A Spotify track: the same song on YouTube Music, which is what's
         // checked, kept and downloaded from here on.
         let url = if extractors::spotify::is_track_link(&url) {
             match extractors::spotify::youtube_music_link(&url).await {
                 Ok(found) => {
                     let (old, new) = (url, found.clone());
-                    let _ = slint::invoke_from_event_loop(move || retarget(id, &old, &new));
+                    let _ = slint::invoke_from_event_loop(move || {
+                        retarget(id, &old, &new);
+                        mark_from_spotify(id);
+                    });
                     found
                 }
                 Err(e) => {
@@ -317,6 +333,18 @@ fn retarget(id: i32, old: &str, new: &str) {
             let mut link = m.row_data(index).unwrap();
             link.url = new.into();
             link.source = host_of(new).into();
+            m.set_row_data(index, link);
+        }
+    });
+}
+
+/// A pending link found from a Spotify one: its preview says the songs
+/// come from YouTube Music.
+fn mark_from_spotify(id: i32) {
+    PENDING.with(|m| {
+        if let Some(index) = m.iter().position(|l| l.id == id) {
+            let mut link = m.row_data(index).unwrap();
+            link.from_spotify = true;
             m.set_row_data(index, link);
         }
     });
@@ -616,7 +644,7 @@ fn start_link(id: i32, backend: Backend, format: String, filename: String, optio
         Vec::new()
     };
     // A torrent's files and a yt-dlp playlist's items, to pick again later.
-    let ytdlp = MEDIA.with(|m| m.borrow().get(&id).is_some_and(|m| m.service == extractors::Service::YtDlp));
+    let ytdlp = MEDIA.with(|m| m.borrow().get(&id).is_some_and(|m| matches!(m.service, Service::YtDlp | Service::Spotify)));
     let choices = if link.files.row_count() > 1 && (matches!(backend, Backend::Torrent | Backend::Book) || (backend == Backend::Media && ytdlp)) {
         link.files
             .iter()
@@ -1034,6 +1062,8 @@ struct MediaMeta {
     audio_formats: Vec<(String, String, String)>,
     thumbnail: Option<PathBuf>,
     info_json: Option<PathBuf>,
+    /// A Spotify list's tracks' YouTube Music searches (MediaRequest's).
+    searches: Vec<String>,
 }
 
 struct Format {
@@ -1083,6 +1113,12 @@ fn apply_probe(id: i32, result: Result<Probe, String>) {
                 }
                 if let Some(media) = probe.media {
                     link.service = media.service.label().into();
+                    // Spotify's songs: what the chip and the note say they
+                    // come from, a track's (its YouTube Music link's) too.
+                    link.from_spotify |= media.service == Service::Spotify;
+                    if link.from_spotify {
+                        link.service = Service::Spotify.label().into();
+                    }
                     link.media_kind = match media.kind {
                         MediaKind::Video => 1,
                         MediaKind::Audio => 2,
@@ -1270,6 +1306,11 @@ async fn probe_now(url: &str) -> Result<Probe, String> {
     // folder's files.
     if let Some(link) = extractors::gdrive::identify(url).await {
         return drive_probe(link).await;
+    }
+
+    // A Spotify playlist or album: its tracks, each found on YouTube Music.
+    if extractors::spotify::is_collection_link(url) {
+        return Ok(media_probe(extractors::spotify::collection(url).await?).await);
     }
 
     // TikTok, Instagram, Pinterest: their own extractors (yt-dlp if those
@@ -1904,7 +1945,7 @@ async fn media_probe(info: MediaInfo) -> Probe {
                 };
                 let name = item.caption.as_deref().map(clean_name).filter(|c| !c.is_empty());
                 let name = match name {
-                    Some(c) if info.service == Service::YtDlp => c,
+                    Some(c) if matches!(info.service, Service::YtDlp | Service::Spotify) => c,
                     _ => format!("{} {} · {kind}", info.service.label(), item.index + 1),
                 };
                 (item.index + 1, name, item.qualities.first().map(|q| q.size).unwrap_or(0))
@@ -1948,7 +1989,7 @@ async fn media_probe(info: MediaInfo) -> Probe {
             service: info.service,
             kind: first.kind,
             // Even one item of a playlist is fetched as an item of it.
-            playlist: info.playlist && info.service == Service::YtDlp,
+            playlist: info.playlist && matches!(info.service, Service::YtDlp | Service::Spotify),
             entries: info.items.len(),
             available: info.items.iter().map(|i| i.index).collect(),
             items,
@@ -1958,6 +1999,10 @@ async fn media_probe(info: MediaInfo) -> Probe {
             audio_formats,
             thumbnail,
             info_json: info.info_json,
+            searches: match info.service {
+                Service::Spotify => info.items.iter().map(|i| i.caption.clone().unwrap_or_default()).collect(),
+                _ => Vec::new(),
+            },
         }),
         book: None,
         drive: None,
@@ -2079,15 +2124,24 @@ async fn item_metas(items: &[extractors::MediaItem]) -> Vec<ItemMeta> {
             duration: item.duration,
         })
         .collect();
-    let urls: Vec<(usize, String)> =
-        items.iter().enumerate().filter(|(_, i)| !i.thumbnail.is_empty()).take(100).map(|(n, i)| (n, i.thumbnail.clone())).collect();
+    // Each picture once: a Spotify list's tracks share its cover.
+    let mut urls: Vec<String> = Vec::new();
+    for item in items.iter().filter(|i| !i.thumbnail.is_empty()).take(100) {
+        if !urls.contains(&item.thumbnail) {
+            urls.push(item.thumbnail.clone());
+        }
+    }
     for batch in urls.chunks(8) {
         let mut set = tokio::task::JoinSet::new();
-        for (n, url) in batch.iter().cloned() {
-            set.spawn(async move { (n, fetch_thumbnail(&url).await) });
+        for url in batch.iter().cloned() {
+            set.spawn(async move { (fetch_thumbnail(&url).await, url) });
         }
-        while let Some(Ok((n, path))) = set.join_next().await {
-            metas[n].thumbnail = path;
+        while let Some(Ok((path, url))) = set.join_next().await {
+            for (meta, item) in metas.iter_mut().zip(items).take(100) {
+                if item.thumbnail == url {
+                    meta.thumbnail = path.clone();
+                }
+            }
         }
     }
     metas
@@ -2169,6 +2223,7 @@ fn media_request(id: i32, link: &PendingLink, format: &str) -> MediaRequest {
     request.playlist = meta.as_ref().is_some_and(|m| m.playlist);
     request.entries = meta.as_ref().map(|m| m.entries).unwrap_or(0);
     request.square_covers = meta.as_ref().map(|m| m.square_covers.clone()).unwrap_or_default();
+    request.searches = meta.as_ref().map(|m| m.searches.clone()).unwrap_or_default();
     match format.split('|').collect::<Vec<_>>().as_slice() {
         ["audio", kbps, codec] => {
             request.audio_codec = codec.to_string();

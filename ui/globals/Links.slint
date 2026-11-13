@@ -89,6 +89,7 @@ export struct PendingLink {
     folder_uri: string, // a folder picked for this link; "" for the usual one
     // Media links (LinkBackend.Media):
     service: string, // the extractor, e.g. "yt-dlp", "TikTok"
+    from_spotify: bool, // a Spotify link: its songs come from YouTube Music
     thumbnail: image, // empty when there's none
     media_kind: int, // 0 = not media, 1 = video, 2 = audio, 3 = image
     // Bitrates for saving as audio (selector: kbps, e.g. "128").
