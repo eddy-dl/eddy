@@ -843,6 +843,11 @@ pub fn set_name(id: i64, name: &str) {
     });
 }
 
+/// The name a download goes by (a book's title, once read), if it has one.
+pub fn known_name(id: i64) -> Option<String> {
+    with_entries(|entries| entries.iter().find(|e| e.id == id).map(|e| e.saved.name.clone())).filter(|n| !n.is_empty())
+}
+
 /// A finished download's copy in its picked folder (Android: a document
 /// URI), which opening it uses.
 pub fn delivered(id: i64, uri: &str) {
