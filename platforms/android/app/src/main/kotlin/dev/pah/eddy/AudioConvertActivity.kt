@@ -136,7 +136,7 @@ class AudioConvertActivity : AppCompatActivity() {
             if (duration != null && duration > 0 && line.startsWith("out_time_us=")) {
                 line.substringAfter('=').toLongOrNull()?.let { done ->
                     val permille = (done * 1000 / duration).toInt().coerceIn(0, 1000)
-                    runOnUiThread { setProgress(permille) }
+                    runOnUiThread { showPercent(permille) }
                 }
             }
         }
@@ -214,7 +214,7 @@ class AudioConvertActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun setProgress(permille: Int) {
+    private fun showPercent(permille: Int) {
         progressBar?.apply {
             isIndeterminate = false
             progress = permille
