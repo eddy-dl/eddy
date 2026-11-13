@@ -2323,6 +2323,13 @@ pub fn install(ui: &DownloaderApp) {
         refresh_now();
     });
     refresh();
+    // The tab the app starts on: Stopped if anything's stopped, else
+    // Completed.
+    let stopped_any = with_entries(|entries| {
+        entries.iter().any(|e| matches!(e.saved.state, State::Paused | State::Failed | State::Cancelled))
+    });
+    let start_tab = if stopped_any { 1 } else { 2 };
+    ui.set_active_tab(start_tab);
     REFRESH.with(|r| *r.borrow_mut() = Some(Box::new(refresh.clone())));
     let timer = slint::Timer::default();
     timer.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(1), refresh);
