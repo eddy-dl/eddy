@@ -146,6 +146,34 @@ tasks.register<Copy>("copyRustLibs") {
         into("armeabi-v7a")
     }
 
+    // The NDK's libc++_shared.so, for the YTDLnis ffmpeg package: its
+    // libraries need it and don't carry it (see YtdlRuntime.kt). The newest
+    // NDK there is: an older libc++ may lack what they were built against.
+    val ndk = listOf("ANDROID_NDK_LATEST_HOME", "ANDROID_NDK_HOME", "ANDROID_NDK_ROOT").firstNotNullOfOrNull { System.getenv(it) }
+    if (ndk != null) {
+        for ((triple, abi) in listOf("aarch64-linux-android" to "arm64-v8a", "arm-linux-androideabi" to "armeabi-v7a")) {
+            from(fileTree("$ndk/toolchains/llvm/prebuilt").matching { include("*/sysroot/usr/lib/$triple/libc++_shared.so") }) {
+                eachFile { path = "$abi/$name" }
+            }
+        }
+        // The NDK's copy keeps its debug symbols: 9.5 MB, 1.4 MB stripped.
+        val strip = fileTree("$ndk/toolchains/llvm/prebuilt").matching { include("*/bin/llvm-strip") }.files.firstOrNull()
+        val libs = listOf("arm64-v8a", "armeabi-v7a").map { File(jniLibsDir, "$it/libc++_shared.so") }
+        doLast {
+            if (strip == null) {
+                logger.warn("No llvm-strip in the NDK: libc++_shared.so goes in unstripped")
+                return@doLast
+            }
+            for (lib in libs.filter { it.exists() }) {
+                val code = ProcessBuilder(strip.absolutePath, "--strip-unneeded", lib.absolutePath).inheritIO().start().waitFor()
+                if (code != 0) throw GradleException("llvm-strip failed on $lib")
+            }
+        }
+    } else {
+        logger.warn("No ANDROID_NDK_HOME: the APK goes without libc++_shared.so, which the ffmpeg helper needs")
+    }
+
+    includeEmptyDirs = false
     into(jniLibsDir)
 }
 

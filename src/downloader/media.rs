@@ -233,6 +233,8 @@ fn start_ytdlp(
     let runs = extractors::ytdlp::download_args(url, media, dir, name.as_deref(), settings);
     // A playlist's files, for "3 of 12" (yt-dlp says when each starts).
     let count = if media.playlist { if media.items.is_empty() { media.entries } else { media.items.len() } } else { 0 };
+    // The info saved when the link was checked, with its media links.
+    let info_json = media.info_json.clone();
     if !crate::children::available(crate::children::Tool::Ytdlp) {
         return Err("yt-dlp isn't available".to_string());
     }
@@ -257,6 +259,16 @@ fn start_ytdlp(
                 }
             };
             let stdout = running.stdout.take();
+            // Read alongside stdout: with its warnings on, yt-dlp could fill
+            // the pipe and stall.
+            let stderr = running.stderr.take().map(|mut err| {
+                std::thread::spawn(move || {
+                    let mut text = Vec::new();
+                    let _ = std::io::Read::read_to_end(&mut err, &mut text);
+                    String::from_utf8_lossy(&text).into_owned()
+                })
+            });
+            let first_new = files.len();
             *child.lock().unwrap_or_else(|e| e.into_inner()) = Some(running);
             if cancelled.load(Ordering::SeqCst) {
                 // Cancelled between two runs: this one goes too.
@@ -285,10 +297,26 @@ fn start_ytdlp(
             let Some(taken) = taken else {
                 break;
             };
+            let stderr = stderr.and_then(|t| t.join().ok()).unwrap_or_default();
             match taken.wait_with_output() {
-                Ok(output) if output.success => {}
-                Ok(output) => {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
+                Ok(output) if output.success => {
+                    // yt-dlp names the file it meant to make even when it
+                    // didn't (formats left unmerged without a working
+                    // ffmpeg): its warnings say why.
+                    if let Some(missing) = files[first_new..].iter().find(|f| !f.exists()) {
+                        log_stderr(&label, &stderr);
+                        let warning = stderr.lines().rev().find_map(|l| l.trim().strip_prefix("WARNING: "));
+                        if warning.is_some_and(|w| w.contains("ffmpeg is not installed")) {
+                            log_ffmpeg_check();
+                        }
+                        failure = Some(match warning {
+                            Some(warning) => warning.to_string(),
+                            None => format!("yt-dlp didn't save {}", missing.display()),
+                        });
+                        break;
+                    }
+                }
+                Ok(_) => {
                     log_stderr(&label, &stderr);
                     let last = stderr.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("yt-dlp failed");
                     failure = Some(last.trim_start_matches("ERROR: ").to_string());
@@ -306,7 +334,14 @@ fn start_ytdlp(
         }
         match failure {
             None => finished(record, saved_name(&files, label), true, String::new(), deliver, files.first().cloned()),
-            Some(message) => finished(record, label, false, message, None, None),
+            Some(message) => {
+                // Its media links may be what failed (expired, or refused):
+                // a retry reads the page again rather than reusing them.
+                if let Some(info) = &info_json {
+                    let _ = std::fs::remove_file(info);
+                }
+                finished(record, label, false, message, None, None)
+            }
         }
     });
     Ok(job)
@@ -406,6 +441,37 @@ pub fn log_stderr(what: &str, stderr: &str) {
     let tail = &lines[lines.len().saturating_sub(30)..];
     log::error!(target: "ytdlp", "{what} failed:\n    {}", tail.join("\n    "));
 }
+
+/// Why yt-dlp found no ffmpeg: the helper's ffmpeg run straight from Eddy,
+/// then through Python as yt-dlp runs it, each one's outcome logged.
+#[cfg(target_os = "android")]
+fn log_ffmpeg_check() {
+    let Some(mut ffmpeg) = crate::platform::ffmpeg_command() else {
+        log::error!(target: "ytdlp", "ffmpeg check: no ffmpeg helper found");
+        return;
+    };
+    let path = ffmpeg.get_program().to_string_lossy().into_owned();
+    let tail = |out: &[u8]| {
+        let text = String::from_utf8_lossy(out);
+        let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+        lines[lines.len().saturating_sub(15)..].join("\n    ")
+    };
+    match ffmpeg.args(["-hide_banner", "-bsfs"]).output() {
+        Ok(out) => log::error!(target: "ytdlp", "ffmpeg check: {path} from Eddy: {}\n    {}", out.status, tail(&out.stderr)),
+        Err(e) => log::error!(target: "ytdlp", "ffmpeg check: {path} from Eddy: {e}"),
+    }
+    let script = "import subprocess, sys\n\
+        try:\n    r = subprocess.run([sys.argv[1], '-hide_banner', '-bsfs'], stdin=subprocess.PIPE, capture_output=True, text=True)\n    print('exit', r.returncode)\n    print(r.stderr[-3000:])\n\
+        except OSError as e:\n    print('OSError', e)\n";
+    match crate::platform::python_command().map(|mut c| c.args(["-c", script, &path]).output()) {
+        Some(Ok(out)) => log::error!(target: "ytdlp", "ffmpeg check: through Python: {}\n    {}\n    {}", out.status, tail(&out.stdout), tail(&out.stderr)),
+        Some(Err(e)) => log::error!(target: "ytdlp", "ffmpeg check: through Python: {e}"),
+        None => log::error!(target: "ytdlp", "ffmpeg check: no Python helper found"),
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+fn log_ffmpeg_check() {}
 
 /// What the notification calls a finished download: the file's name, with
 /// its extension, when it made one file; otherwise the download's label.
