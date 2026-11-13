@@ -233,6 +233,8 @@ fn start_ytdlp(
     let runs = extractors::ytdlp::download_args(url, media, dir, name.as_deref(), settings);
     // A playlist's files, for "3 of 12" (yt-dlp says when each starts).
     let count = if media.playlist { if media.items.is_empty() { media.entries } else { media.items.len() } } else { 0 };
+    // The info saved when the link was checked, with its media links.
+    let info_json = media.info_json.clone();
     if !crate::children::available(crate::children::Tool::Ytdlp) {
         return Err("yt-dlp isn't available".to_string());
     }
@@ -306,7 +308,14 @@ fn start_ytdlp(
         }
         match failure {
             None => finished(record, saved_name(&files, label), true, String::new(), deliver, files.first().cloned()),
-            Some(message) => finished(record, label, false, message, None, None),
+            Some(message) => {
+                // Its media links may be what failed (expired, or refused):
+                // a retry reads the page again rather than reusing them.
+                if let Some(info) = &info_json {
+                    let _ = std::fs::remove_file(info);
+                }
+                finished(record, label, false, message, None, None)
+            }
         }
     });
     Ok(job)
