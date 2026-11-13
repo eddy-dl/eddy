@@ -2323,6 +2323,19 @@ pub fn install(ui: &DownloaderApp) {
         refresh_now();
     });
     refresh();
+    // The app opens where there's something to do: Downloading while
+    // anything runs, then Stopped if anything's stopped, else Completed.
+    let start_tab = with_entries(|entries| {
+        let any = |states: &[State]| entries.iter().any(|e| states.contains(&e.saved.state));
+        if any(&[State::Active, State::Queued]) {
+            0
+        } else if any(&[State::Paused, State::Failed, State::Cancelled]) {
+            1
+        } else {
+            2
+        }
+    });
+    ui.set_active_tab(start_tab);
     REFRESH.with(|r| *r.borrow_mut() = Some(Box::new(refresh.clone())));
     let timer = slint::Timer::default();
     timer.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(1), refresh);
