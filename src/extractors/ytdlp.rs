@@ -438,11 +438,12 @@ fn run_args(
     settings: &crate::downloader::DownloadSettings,
 ) -> Vec<String> {
     // --print makes yt-dlp quiet; --progress keeps the progress lines.
+    // Warnings stay on: they say why a file didn't turn out (start_ytdlp).
     let saved = format!("after_move:{SAVED_PREFIX}%(filepath)s");
     let item = format!("before_dl:{ITEM_PREFIX}%(title)s");
     let target = format!("before_dl:{TARGET_PREFIX}%(filename)s");
     let mut args: Vec<String> =
-        ["--newline", "--no-warnings", "--progress", "--progress-template", PROGRESS_TEMPLATE, "--print", &saved, "--print", &item, "--print", &target]
+        ["--newline", "--progress", "--progress-template", PROGRESS_TEMPLATE, "--print", &saved, "--print", &item, "--print", &target]
             .iter()
             .map(|s| s.to_string())
             .collect();

@@ -259,6 +259,16 @@ fn start_ytdlp(
                 }
             };
             let stdout = running.stdout.take();
+            // Read alongside stdout: with its warnings on, yt-dlp could fill
+            // the pipe and stall.
+            let stderr = running.stderr.take().map(|mut err| {
+                std::thread::spawn(move || {
+                    let mut text = Vec::new();
+                    let _ = std::io::Read::read_to_end(&mut err, &mut text);
+                    String::from_utf8_lossy(&text).into_owned()
+                })
+            });
+            let first_new = files.len();
             *child.lock().unwrap_or_else(|e| e.into_inner()) = Some(running);
             if cancelled.load(Ordering::SeqCst) {
                 // Cancelled between two runs: this one goes too.
@@ -287,10 +297,23 @@ fn start_ytdlp(
             let Some(taken) = taken else {
                 break;
             };
+            let stderr = stderr.and_then(|t| t.join().ok()).unwrap_or_default();
             match taken.wait_with_output() {
-                Ok(output) if output.success => {}
-                Ok(output) => {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
+                Ok(output) if output.success => {
+                    // yt-dlp names the file it meant to make even when it
+                    // didn't (formats left unmerged without a working
+                    // ffmpeg): its warnings say why.
+                    if let Some(missing) = files[first_new..].iter().find(|f| !f.exists()) {
+                        log_stderr(&label, &stderr);
+                        let warning = stderr.lines().rev().find_map(|l| l.trim().strip_prefix("WARNING: "));
+                        failure = Some(match warning {
+                            Some(warning) => warning.to_string(),
+                            None => format!("yt-dlp didn't save {}", missing.display()),
+                        });
+                        break;
+                    }
+                }
+                Ok(_) => {
                     log_stderr(&label, &stderr);
                     let last = stderr.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("yt-dlp failed");
                     failure = Some(last.trim_start_matches("ERROR: ").to_string());
