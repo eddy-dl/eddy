@@ -156,7 +156,7 @@ tasks.register<Copy>("copyRustLibs") {
                 eachFile { path = "$abi/$name" }
             }
         }
-        // The NDK's copy keeps its debug symbols: 9 MB, about 1 MB stripped.
+        // The NDK's copy keeps its debug symbols: 9.5 MB, 1.4 MB stripped.
         val strip = fileTree("$ndk/toolchains/llvm/prebuilt").matching { include("*/bin/llvm-strip") }.files.firstOrNull()
         val libs = listOf("arm64-v8a", "armeabi-v7a").map { File(jniLibsDir, "$it/libc++_shared.so") }
         doLast {
