@@ -329,6 +329,9 @@ pub fn download_args(
     name: Option<&str>,
     settings: &crate::downloader::DownloadSettings,
 ) -> Vec<Vec<String>> {
+    if !request.searches.is_empty() {
+        return search_runs(request, dir, name, settings);
+    }
     if !request.playlist {
         let audio = !request.audio_codec.is_empty();
         let template = match name {
@@ -367,6 +370,28 @@ pub fn download_args(
         .into_iter()
         .filter(|(items, _)| !items.is_empty())
         .map(|(items, as_audio)| run_args(url, request, as_audio, false, &template, Playlist::Items(items), settings))
+        .collect()
+}
+
+/// A Spotify playlist or album (extractors::spotify): a run for each track,
+/// downloading the first song of its YouTube Music search, numbered as it
+/// is in the list, all in the list's folder.
+fn search_runs(request: &MediaRequest, dir: &str, name: Option<&str>, settings: &crate::downloader::DownloadSettings) -> Vec<Vec<String>> {
+    let folder = format!("{dir}/{}", name.unwrap_or("Spotify"));
+    let chosen: Vec<usize> = if request.items.is_empty() { (0..request.searches.len()).collect() } else { request.items.clone() };
+    chosen
+        .into_iter()
+        .filter_map(|item| {
+            let search = request.searches.get(item)?;
+            let mut one = request.clone();
+            // A bitrate of its own.
+            if let Some((_, kbps)) = request.item_qualities.iter().find(|(i, _)| *i == item) {
+                one.audio_kbps = kbps.parse().unwrap_or(0);
+            }
+            let audio = super::as_audio(request, item);
+            let template = format!("{folder}/{:03} %(title)s.%(ext)s", item + 1);
+            Some(run_args(&super::spotify::search_url(search), &one, audio, false, &template, Playlist::Items(vec![0]), settings))
+        })
         .collect()
 }
 
