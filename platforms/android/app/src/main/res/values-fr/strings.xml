@@ -40,4 +40,16 @@
     <string name="check_hint">Ce site vérifie d\'abord qu\'il s\'agit d\'un navigateur. Patientez, ou touchez sa case s\'il en montre une ; cet écran se ferme seul une fois la vérification passée.</string>
     <string name="browser_hint">Touchez le bouton de téléchargement du site (patientez ou passez sa vérification s\'il en demande une) ; Eddy télécharge le fichier à partir de là.</string>
     <string name="browser_made_in_page">Ce site crée le fichier dans la page : il n\'y a pas de lien qu\'Eddy puisse télécharger</string>
+    <string name="audio_convert">Convertir en audio</string>
+    <string name="audio_convert_button">Convertir</string>
+    <string name="audio_original">Audio d\'origine (sans réencodage, le plus rapide)</string>
+    <string name="audio_mp3">MP3</string>
+    <string name="audio_aac">AAC (.m4a)</string>
+    <string name="audio_converting">Conversion en audio…</string>
+    <string name="audio_saved">Enregistré sous %1$s</string>
+    <string name="audio_open">Ouvrir</string>
+    <string name="audio_failed">Impossible de le convertir : %1$s</string>
+    <string name="audio_no_video">Impossible de lire la vidéo partagée</string>
+    <string name="audio_no_sound">Cette vidéo n\'a pas de son</string>
+    <string name="audio_no_ffmpeg">Installez d\'abord l\'application d\'aide ffmpeg (Paramètres → Téléchargements dans Eddy)</string>
 </resources>
