@@ -146,6 +146,21 @@ tasks.register<Copy>("copyRustLibs") {
         into("armeabi-v7a")
     }
 
+    // The NDK's libc++_shared.so, for the YTDLnis ffmpeg package: its
+    // libraries need it and don't carry it (see YtdlRuntime.kt). The newest
+    // NDK there is: an older libc++ may lack what they were built against.
+    val ndk = listOf("ANDROID_NDK_LATEST_HOME", "ANDROID_NDK_HOME", "ANDROID_NDK_ROOT").firstNotNullOfOrNull { System.getenv(it) }
+    if (ndk != null) {
+        for ((triple, abi) in listOf("aarch64-linux-android" to "arm64-v8a", "arm-linux-androideabi" to "armeabi-v7a")) {
+            from(fileTree("$ndk/toolchains/llvm/prebuilt").matching { include("*/sysroot/usr/lib/$triple/libc++_shared.so") }) {
+                eachFile { path = "$abi/$name" }
+            }
+        }
+    } else {
+        logger.warn("No ANDROID_NDK_HOME: the APK goes without libc++_shared.so, which the ffmpeg helper needs")
+    }
+
+    includeEmptyDirs = false
     into(jniLibsDir)
 }
 

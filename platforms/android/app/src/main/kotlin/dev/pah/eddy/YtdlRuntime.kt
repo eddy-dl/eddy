@@ -97,6 +97,29 @@ object YtdlRuntime {
         return script
     }
 
+    // libc++_shared.so, copied out of Eddy's APK. The ffmpeg package's
+    // libraries need it without carrying it: they found the Python package's
+    // copy until its packages were trimmed (deniscerri/ytdlnis-packages
+    // 72d412b), then ffmpeg couldn't start and yt-dlp merged nothing.
+    // Null if this build hasn't one.
+    private fun cxxDir(context: Context): File? {
+        val dir = File(context.noBackupFilesDir, "$BASE/cxx")
+        val lib = File(dir, "libc++_shared.so")
+        return try {
+            java.util.zip.ZipFile(context.applicationInfo.sourceDir).use { apk ->
+                val entry = android.os.Build.SUPPORTED_ABIS.firstNotNullOfOrNull { apk.getEntry("lib/$it/libc++_shared.so") }
+                    ?: return null
+                if (!lib.exists() || lib.length() != entry.size) {
+                    dir.mkdirs()
+                    apk.getInputStream(entry).use { input -> lib.outputStream().use { input.copyTo(it) } }
+                }
+            }
+            dir
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     // Everything Rust needs to run yt-dlp and ffmpeg, as JSON (empty
     // object when Python isn't there). One unpack at a time: the app, the
     // service and the share popup (another process) can all get here.
@@ -115,10 +138,11 @@ object YtdlRuntime {
         val deno = find(context, "libdeno.so", "libdeno.zip.so", DENO_APP, "deno")
         val script = ytdlpScript(context)
 
+        // Eddy's libc++ last: a package's own comes first.
         val libDirs = listOfNotNull(python, ffmpeg, deno).flatMap {
             val usrLib = File(it.ldDir, "usr/lib")
             listOf(if (usrLib.exists()) usrLib.absolutePath else it.ldDir.absolutePath, it.binDir.absolutePath)
-        }
+        } + listOfNotNull(cxxDir(context)?.absolutePath)
         val binDirs = listOfNotNull(python, ffmpeg, deno).map { it.binDir.absolutePath } + (System.getenv("PATH") ?: "/system/bin")
         val env = JSONObject()
             .put("LD_LIBRARY_PATH", libDirs.distinct().joinToString(":"))
