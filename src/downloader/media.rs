@@ -306,6 +306,9 @@ fn start_ytdlp(
                     if let Some(missing) = files[first_new..].iter().find(|f| !f.exists()) {
                         log_stderr(&label, &stderr);
                         let warning = stderr.lines().rev().find_map(|l| l.trim().strip_prefix("WARNING: "));
+                        if warning.is_some_and(|w| w.contains("ffmpeg is not installed")) {
+                            log_ffmpeg_check();
+                        }
                         failure = Some(match warning {
                             Some(warning) => warning.to_string(),
                             None => format!("yt-dlp didn't save {}", missing.display()),
@@ -438,6 +441,37 @@ pub fn log_stderr(what: &str, stderr: &str) {
     let tail = &lines[lines.len().saturating_sub(30)..];
     log::error!(target: "ytdlp", "{what} failed:\n    {}", tail.join("\n    "));
 }
+
+/// Why yt-dlp found no ffmpeg: the helper's ffmpeg run straight from Eddy,
+/// then through Python as yt-dlp runs it, each one's outcome logged.
+#[cfg(target_os = "android")]
+fn log_ffmpeg_check() {
+    let Some(mut ffmpeg) = crate::platform::ffmpeg_command() else {
+        log::error!(target: "ytdlp", "ffmpeg check: no ffmpeg helper found");
+        return;
+    };
+    let path = ffmpeg.get_program().to_string_lossy().into_owned();
+    let tail = |out: &[u8]| {
+        let text = String::from_utf8_lossy(out);
+        let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+        lines[lines.len().saturating_sub(15)..].join("\n    ")
+    };
+    match ffmpeg.args(["-hide_banner", "-bsfs"]).output() {
+        Ok(out) => log::error!(target: "ytdlp", "ffmpeg check: {path} from Eddy: {}\n    {}", out.status, tail(&out.stderr)),
+        Err(e) => log::error!(target: "ytdlp", "ffmpeg check: {path} from Eddy: {e}"),
+    }
+    let script = "import subprocess, sys\n\
+        try:\n    r = subprocess.run([sys.argv[1], '-hide_banner', '-bsfs'], stdin=subprocess.PIPE, capture_output=True, text=True)\n    print('exit', r.returncode)\n    print(r.stderr[-3000:])\n\
+        except OSError as e:\n    print('OSError', e)\n";
+    match crate::platform::python_command().map(|mut c| c.args(["-c", script, &path]).output()) {
+        Some(Ok(out)) => log::error!(target: "ytdlp", "ffmpeg check: through Python: {}\n    {}\n    {}", out.status, tail(&out.stdout), tail(&out.stderr)),
+        Some(Err(e)) => log::error!(target: "ytdlp", "ffmpeg check: through Python: {e}"),
+        None => log::error!(target: "ytdlp", "ffmpeg check: no Python helper found"),
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+fn log_ffmpeg_check() {}
 
 /// What the notification calls a finished download: the file's name, with
 /// its extension, when it made one file; otherwise the download's label.
