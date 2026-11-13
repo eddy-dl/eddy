@@ -15,7 +15,8 @@ pub fn start(request: &DownloadRequest, dir: &str, name: Option<String>, deliver
     } else {
         serde_json::from_str(&request.format).map_err(|e| format!("Bad book request: {e}"))?
     };
-    let mut label = super::label_for(request);
+    // Resumed, it has its title already (the saved request doesn't).
+    let mut label = crate::downloads::known_name(request.id).unwrap_or_else(|| super::label_for(request));
     let record = request.id;
     let (job, cancelled) = media::begin(&label);
     let (url, dir) = (request.url.clone(), PathBuf::from(dir));
