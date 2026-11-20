@@ -33,6 +33,13 @@ export global ListOptions {
     // Tab index: 0 = Downloading, 1 = Stopped, 2 = Completed.
     callback options_changed(int);
 
+    // The header's search: only downloads whose name has every word in
+    // `search` are listed (or their link too, with `search_links`). Not
+    // kept: closing the search clears it.
+    in-out property <string> search;
+    in-out property <bool> search_links: false;
+    callback search_changed();
+
     // Whether `which` is one of the types shown.
     public pure function shows(f: FileFilters, which: FileFilter) -> bool {
         which == FileFilter.Video ? f.video

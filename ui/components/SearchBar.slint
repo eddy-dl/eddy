@@ -1,0 +1,158 @@
+import { ThemeSettings } from "../themes/theme.slint";
+import { ListOptions } from "../globals/ListOptions.slint";
+import { ActionIcon } from "SelectionActions.slint";
+import { HoldTouchArea, HintBubble } from "HoldHint.slint";
+
+// The header's search (MD3 search bar): a pill with Close, the field, Clear
+// and a toggle that searches links too. It writes what's typed to
+// ListOptions.search as it's typed, the keyboard's unfinished word with it
+// (Samsung Keyboard only hands that over when the field lets go).
+export component SearchBar inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    in property <string> placeholder-text;
+    // Takes the focus (keyboard up) as it's made: on opening, not when it
+    // comes back after selecting.
+    in property <bool> autofocus;
+    // The pill's colour, set apart from the header behind it.
+    in property <brush> fill;
+    callback close();
+
+    // What the lists are searched for.
+    private property <string> query: input.text + input.preedit-text;
+    changed query => {
+        ListOptions.search = self.query;
+        ListOptions.search_changed();
+    }
+
+    init => {
+        if (root.autofocus) {
+            input.focus();
+        }
+    }
+
+    height: 48px;
+    border-radius: 24px;
+    background: root.fill;
+    animate background { duration: ThemeSettings.fade; easing: ease-in-out; }
+
+    // Holds the focus once the field lets go of it, so Back carries on up
+    // to the page (which closes the search).
+    park := FocusScope {
+        x: 0;
+        y: 0;
+        width: 0;
+        height: 0;
+    }
+
+    HorizontalLayout {
+        ActionIcon {
+            label: @tr("Close search");
+            icon: @image-url("../icons/rounded/arrow_back.svg");
+            clicked => { root.close(); }
+        }
+
+        area := Rectangle {
+            horizontal-stretch: 1;
+            min-width: 1px;
+            clip: true;
+
+            Text {
+                width: 100%;
+                height: 100%;
+                vertical-alignment: center;
+                text: input.text == "" && input.preedit-text == "" ? root.placeholder-text : "";
+                font-size: 16px;
+                color: ThemeSettings.text_color.transparentize(40%);
+                overflow: elide;
+            }
+
+            input := TextInput {
+                property <length> scroll-x;
+
+                x: min(0px, max(parent.width - self.width - self.text-cursor-width, self.scroll-x));
+                width: max(parent.width - self.text-cursor-width, self.preferred-width);
+                height: 100%;
+                vertical-alignment: center;
+                single-line: true;
+                font-size: 16px;
+                color: ThemeSettings.text_color;
+                selection-background-color: ThemeSettings.primary_accent.transparentize(60%);
+                selection-foreground-color: ThemeSettings.text_color;
+
+                cursor-position-changed(position) => {
+                    if position.x + self.scroll-x < 0px {
+                        self.scroll-x = -position.x;
+                    } else if position.x + self.scroll-x > parent.width - self.text-cursor-width {
+                        self.scroll-x = parent.width - position.x - self.text-cursor-width;
+                    }
+                }
+                // Back puts the keyboard away first; the next Back closes
+                // the search.
+                key-pressed(event) => {
+                    if (event.text == Key.Back || event.text == Key.Escape) {
+                        park.focus();
+                        return accept;
+                    }
+                    return reject;
+                }
+                // The keyboard's search key: the list's already filtered,
+                // so it just goes away.
+                accepted => { park.focus(); }
+            }
+        }
+
+        if input.text != "" || input.preedit-text != "": ActionIcon {
+            label: @tr("Clear");
+            icon: @image-url("../icons/rounded/close.svg");
+            clicked => {
+                input.text = "";
+                input.focus();
+            }
+        }
+
+        // Searches the links too; off again on every new search. MD3
+        // toggle icon button: filled tonal while on.
+        Rectangle {
+            width: 48px;
+            height: 48px;
+
+            Rectangle {
+                width: 40px;
+                height: 40px;
+                border-radius: 20px;
+                background: ListOptions.search_links ? ThemeSettings.secondary_container : transparent;
+                animate background { duration: 150ms; }
+
+                Rectangle {
+                    border-radius: parent.border-radius;
+                    background: links_ta.pressed && !links_ta.holding ? ThemeSettings.text_color.transparentize(88%) : transparent;
+                    animate background { duration: 150ms; }
+                }
+            }
+
+            Image {
+                source: @image-url("../icons/rounded/link.svg");
+                width: 24px;
+                height: 24px;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                colorize: ListOptions.search_links ? ThemeSettings.on_secondary_container : ThemeSettings.text_color.transparentize(25%);
+            }
+
+            links_ta := HoldTouchArea {
+                tapped => {
+                    ListOptions.search_links = !ListOptions.search_links;
+                    ListOptions.search_changed();
+                }
+            }
+
+            // Kept to the screen's right edge, as the Settings one is.
+            HintBubble {
+                text: ListOptions.search_links ? @tr("Searching links too") : @tr("Search links too");
+                shown: links_ta.holding;
+                x: parent.width - self.width;
+                y: parent.height + 8px;
+            }
+        }
+    }
+}
