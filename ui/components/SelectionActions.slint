@@ -14,6 +14,9 @@ export component ActionIcon inherits Rectangle {
     // Some glyphs are drawn smaller in their box than others (pause, play):
     // a larger size evens them out with their neighbours.
     in property <length> icon_size: 24px;
+    // On-surface-variant, as MD3 has it; the header's own icons use the
+    // full text colour, as Settings does.
+    in property <brush> icon_color: ThemeSettings.text_color.transparentize(25%);
     callback clicked();
 
     width: 48px;
@@ -33,7 +36,7 @@ export component ActionIcon inherits Rectangle {
         height: root.icon_size;
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
-        colorize: ThemeSettings.text_color.transparentize(25%);
+        colorize: root.icon_color;
     }
 
     ta := HoldTouchArea {

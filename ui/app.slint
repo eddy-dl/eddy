@@ -572,6 +572,7 @@ export component DownloaderApp inherits Window {
                         if !root.selection_mode && !root.search_open: ActionIcon {
                             label: @tr("Search");
                             icon: @image-url("icons/rounded/search.svg");
+                            icon_color: ThemeSettings.text_color;
                             clicked => { root.open_search(); }
                         }
 
