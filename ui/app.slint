@@ -31,6 +31,8 @@ import { BackGesture } from "globals/BackGesture.slint";
 import { AppSettings } from "globals/AppSettings.slint";
 import { Library } from "globals/Library.slint";
 import { BooksPage } from "components/BooksPage.slint";
+import { SearchBar } from "components/SearchBar.slint";
+import { ListOptions } from "globals/ListOptions.slint";
 
 export { AccentColor, ThemeMode, ThemeSettings }from "themes/theme.slint";
 export { AppSettings, HelperPackage }from "globals/AppSettings.slint";
@@ -144,6 +146,38 @@ export component DownloaderApp inherits Window {
     in-out property <bool> show_settings: false;
     // The Books page (the small FAB above +).
     in-out property <bool> show_books: false;
+
+    // --- Search ---
+    // The header's search icon turns it into a search bar; the lists then
+    // only show downloads whose names match (see ListOptions.search).
+    // Selecting puts the header's selection actions in its place for a
+    // while, the search still applied.
+    in-out property <bool> search_open: false;
+    private property <string> search_text;
+    // The bar takes the focus when it's opened, not when it comes back.
+    private property <bool> search_fresh: false;
+    function open_search() {
+        root.options_open = false;
+        ListOptions.search_links = false;
+        root.search_fresh = true;
+        root.search_open = true;
+    }
+    function close_search() {
+        root.search_open = false;
+        root.search_text = "";
+        ListOptions.search = "";
+        ListOptions.search_links = false;
+        ListOptions.search_changed();
+        // The field may have had focus; keep Back working.
+        back_scope.focus();
+    }
+    changed selection_mode => {
+        if (self.selection_mode && self.search_open) {
+            root.search_fresh = false;
+            // The bar (and the focus in it) goes for the selection header.
+            back_scope.focus();
+        }
+    }
 
     // Space the bottom bar takes (or just the inset when the top bar is used).
     private property <length> bottom_bar_height: AppSettings.top_navigation_bar ? root.safe-area-insets.bottom : 80px + root.safe-area-insets.bottom;
@@ -440,6 +474,10 @@ export component DownloaderApp inherits Window {
             root.options_open = false;
             return true;
         }
+        if (root.search_open) {
+            root.close_search();
+            return true;
+        }
     
         return false;
     }
@@ -494,8 +532,17 @@ export component DownloaderApp inherits Window {
                                 clicked => { root.clear_selection(); }
                             }
 
+                            if root.search_open && !root.selection_mode: SearchBar {
+                                horizontal-stretch: 1;
+                                text <=> root.search_text;
+                                autofocus: root.search_fresh;
+                                fill: AppSettings.top_navigation_bar ? ThemeSettings.background : ThemeSettings.surface;
+                                placeholder-text: @tr("Search {}", root.active_tab == 0 ? @tr("Downloading") : (root.active_tab == 1 ? @tr("Stopped") : @tr("Completed")));
+                                close => { root.close_search(); }
+                            }
+
                             // The app's logo; the count while selecting.
-                            if !root.selection_mode: VerticalLayout {
+                            if !root.selection_mode && !root.search_open: VerticalLayout {
                                 alignment: center;
                                 horizontal-stretch: 1;
                                 HorizontalLayout {
@@ -522,9 +569,15 @@ export component DownloaderApp inherits Window {
                             action(action) => { root.run_selection_action(action); }
                         }
 
+                        if !root.selection_mode && !root.search_open: ActionIcon {
+                            label: @tr("Search");
+                            icon: @image-url("icons/rounded/search.svg");
+                            clicked => { root.open_search(); }
+                        }
+
                         // Settings; while selecting, a menu of Select all and
-                        // Invert.
-                        Rectangle {
+                        // Invert. Not while searching: the bar takes its place.
+                        if !root.search_open || root.selection_mode: Rectangle {
                             width: 48px;
                             height: 48px;
                             border-radius: 24px;
@@ -635,6 +688,16 @@ export component DownloaderApp inherits Window {
                                 width: parent.width;
                                 height: parent.height;
 
+                                // A search that finds nothing here says so.
+                                if ListOptions.search != "" && root.downloading_items.length == 0: Text {
+                                    y: 48px;
+                                    width: 100%;
+                                    horizontal-alignment: center;
+                                    text: @tr("No matches");
+                                    font-size: 14px;
+                                    color: ThemeSettings.text_color.transparentize(35%);
+                                }
+
                                 flick_0 := Flickable {
                                     width: 100%;
                                     height: 100%;
@@ -721,6 +784,16 @@ export component DownloaderApp inherits Window {
                                 width: parent.width;
                                 height: parent.height;
 
+                                // A search that finds nothing here says so.
+                                if ListOptions.search != "" && root.stopped_items.length == 0: Text {
+                                    y: 48px;
+                                    width: 100%;
+                                    horizontal-alignment: center;
+                                    text: @tr("No matches");
+                                    font-size: 14px;
+                                    color: ThemeSettings.text_color.transparentize(35%);
+                                }
+
                                 flick_1 := Flickable {
                                     width: 100%;
                                     height: 100%;
@@ -788,6 +861,16 @@ export component DownloaderApp inherits Window {
                                 x: 2 * parent.width;
                                 width: parent.width;
                                 height: parent.height;
+
+                                // A search that finds nothing here says so.
+                                if ListOptions.search != "" && root.completed_items.length == 0: Text {
+                                    y: 48px;
+                                    width: 100%;
+                                    horizontal-alignment: center;
+                                    text: @tr("No matches");
+                                    font-size: 14px;
+                                    color: ThemeSettings.text_color.transparentize(35%);
+                                }
 
                                 flick_2 := Flickable {
                                     width: 100%;

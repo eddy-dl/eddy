@@ -2267,13 +2267,23 @@ pub fn install(ui: &DownloaderApp) {
         };
         let options = ui.global::<ListOptions>();
         let rows = items();
+        // The header's search, in lower case, a word at a time.
+        let search = options.get_search().to_lowercase();
+        let words: Vec<&str> = search.split_whitespace().collect();
+        let search_links = options.get_search_links();
         // The rows in `states`, each state's own after the one before, sorted
         // and filtered by `options` within it.
         let pick = |states: &[DownloadState], options: &TabListOptions| -> Vec<DownloadItem> {
             let mut picked = Vec::new();
             for state in states {
                 let mut group: Vec<&Row> =
-                    rows.iter().filter(|r| r.item.state == *state && matches_filter(&r.item, &options.filters)).collect();
+                    rows.iter()
+                    .filter(|r| {
+                        r.item.state == *state
+                            && matches_filter(&r.item, &options.filters)
+                            && matches_search(&r.item, &words, search_links)
+                    })
+                    .collect();
                 group.sort_by(|a, b| {
                     let order = match options.sort {
                         SortKey::Name => a.item.filename.to_lowercase().cmp(&b.item.filename.to_lowercase()),
@@ -2322,6 +2332,7 @@ pub fn install(ui: &DownloaderApp) {
         }
         refresh_now();
     });
+    list_options.on_search_changed(refresh_now);
     refresh();
     // The tab the app starts on: Stopped if anything's stopped, else
     // Completed.
@@ -2598,6 +2609,17 @@ fn matches_filter(item: &DownloadItem, f: &FileFilters) -> bool {
         || (f.other && !item.is_folder && matches!(item.file_type, FileType::Other | FileType::Program | FileType::Apk))
         // Saved books (web novels); other e-books are Documents.
         || (f.book && item.backend == LinkBackend::Book)
+}
+
+/// Whether a download's name (or with `links`, its name or link) has every
+/// one of the lower-case `words` in it; no words, every download does.
+fn matches_search(item: &DownloadItem, words: &[&str], links: bool) -> bool {
+    if words.is_empty() {
+        return true;
+    }
+    let name = item.filename.to_lowercase();
+    let url = if links { item.url.to_lowercase() } else { String::new() };
+    words.iter().all(|w| name.contains(w) || (links && url.contains(w)))
 }
 
 /// Every download as the lists show it, with live progress.

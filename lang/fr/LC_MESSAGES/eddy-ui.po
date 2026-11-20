@@ -1064,3 +1064,21 @@ msgstr "Trier · Livres"
 
 msgid "Author"
 msgstr "Auteur"
+
+msgid "Search"
+msgstr "Rechercher"
+
+msgid "Search {}"
+msgstr "Rechercher · {}"
+
+msgid "Close search"
+msgstr "Fermer la recherche"
+
+msgid "Search links too"
+msgstr "Chercher aussi dans les liens"
+
+msgid "Searching links too"
+msgstr "Recherche aussi dans les liens"
+
+msgid "No matches"
+msgstr "Aucun résultat"
