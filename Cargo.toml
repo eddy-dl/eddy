@@ -14,7 +14,7 @@ exclude = ["patches/aria2_rust", "webview"]
 # Android's build.gradle.kts and CI (iOS's project, the browser extension,
 # the release) read this line (the first `version = ` in the file).
 [workspace.package]
-version = "0.2.6"
+version = "0.2.5"
 
 # Android/IOS build target
 [lib]
@@ -102,7 +102,7 @@ slint = { version = "1.18.1", features = ["backend-android-activity-06"] }
 # iOS: Slint's winit backend, drawn with Skia on Metal (Slint's iOS guide).
 [target.'cfg(target_os = "ios")'.dependencies]
 # The window's handle: the browser for bot checks goes in it (platform/ios_webview.rs).
-slint = { version = "1.18.1", features = ["renderer-skia", "raw-window-handle-06"] }
+slint = { version = "1.18.1", features = ["renderer-skia", "raw-window-handle-06", "image-default-formats"] }
 # The desktop helper's jobs for that browser, run in-process (webview/src/lib.rs).
 eddy-webview = { path = "webview", default-features = false }
 # The window's UIView, for the back swipe's recognizer (platform/ios_back.rs).
