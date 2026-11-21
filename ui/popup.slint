@@ -15,6 +15,7 @@ import { FolderBrowserSheet } from "components/FolderBrowserSheet.slint";
 export component PreviewApp inherits Window {
     // Material's Roboto, or the phone's own font (see ThemeSettings).
     default-font-family: ThemeSettings.font_family;
+    icon: @image-url("icons/logo.svg");
     // 1 = "Download now" (ask how, then start everything), 2 = preview.
     in property <int> mode: 2;
 
